@@ -18,7 +18,7 @@ sudo ss -ltnp | grep -E '3306|5432|6379'
 
 **2. The site**
 
-Add a site for the public domain, for example `review.example.com`, with web directory `/public`, and install the repository `fruitcake/review-central` on the branch to deploy. Create the database and its user in Forge, and request a Let's Encrypt certificate for the site: the host only delivers webhooks over HTTPS.
+Add a site for the public domain, for example `review.example.com`, with web directory `/public`, and install the repository `fruitcake/review-central` on the branch `stable`, which always holds the latest release. Turn on Forge's automatic deployment for it, and every release is deployed as it comes out; `main` has what is merged since, and is not for a server you rely on. Create the database and its user in Forge, and request a Let's Encrypt certificate for the site: the host only delivers webhooks over HTTPS.
 
 **3. The environment**
 

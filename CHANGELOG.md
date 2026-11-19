@@ -1,10 +1,8 @@
 # Changelog
 
-What changed in each release of Review Central, and what to do when updating to it. Releases are tagged on GitHub; see [Updating](https://review-central.com/guide/updating) for the steps every update takes.
+What changed in each release of Review Central, and what to do when updating to it. A release is named after the day it came out, `2026.11.19`, and tagged on GitHub under that name; see [Updating](https://review-central.com/guide/updating) for the steps every update takes.
 
 ## Unreleased
-
-## 1.0.0
 
 The first public release.
 

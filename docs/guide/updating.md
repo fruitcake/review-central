@@ -1,6 +1,6 @@
 # Updating
 
-Releases are tagged on GitHub, `v1.0.0` and up, and the [changelog](https://github.com/fruitcake/review-central/blob/main/CHANGELOG.md) says what changed in each and what to do about it. Deploy a tag for an installation you rely on; `main` has what is merged since.
+Releases are named after the day they came out, `2026.11.19`, and tagged on GitHub under that name. The [changelog](https://github.com/fruitcake/review-central/blob/main/CHANGELOG.md) says what changed in each and what to do about it. The branch `stable` always holds the latest release: deploy that, with your host's automatic deployment if you like, or a tag of your choice. `main` has what is merged since, and is not for a server you rely on.
 
 After checking out a new release, on the server (and on every worker):
 

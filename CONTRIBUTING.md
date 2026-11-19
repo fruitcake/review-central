@@ -50,6 +50,26 @@ Tests run on SQLite in memory and need no services: HTTP calls to source control
 - **Stack guides** live in `resources/review/skill/references` as `stack-<name>.md`. A guide names what to look for in that stack, with the reasoning, so the reviewer can judge rather than pattern-match. Cite official documentation where you can. Detecting the stack takes two more lines of code: see [Extending](https://review-central.com/guide/extending#adding-a-stack-guide).
 - **Providers** (source control, tickets, AI) are described in [Extending](https://review-central.com/guide/extending).
 
+## Releasing
+
+For maintainers. A release is named after the day it comes out, `2026.11.19`, without leading zeros (`2027.1.5`). A second release on the same day gets a count: `2026.11.19.1`. Pushing the tag is the release; the `release` workflow does the rest.
+
+1. On `main`, turn **Unreleased** in `CHANGELOG.md` into the release's heading, `## 2026.11.19`, with what someone updating has to do, and merge it.
+2. Tag the merged commit and push the tag:
+
+   ```bash
+   git switch main && git pull
+   git tag 2026.11.19 && git push origin 2026.11.19
+   ```
+
+3. The workflow runs the checks on the tag, makes a GitHub Release from the release's section of the changelog, and fast-forwards `stable` to the tag. Servers that deploy `stable` take it from there.
+
+What someone has to do when updating, such as a setting to add or a Worker to deploy again, goes in the changelog under the release. A tag with a suffix, such as `2026.11.19-rc.1`, is released as a pre-release and leaves `stable` where it is.
+
+The workflow refuses a tag that is not on `main`, that is not named after a day, or whose release has no section in the changelog. Fix that on `main`, delete the tag (`git push origin :refs/tags/2026.11.19`), and tag again.
+
+To roll back, move `stable` back to the previous release by hand, which a server deploying it then takes: `git push --force origin 2026.11.12^{commit}:refs/heads/stable`. Then release the fix as a new release; the workflow only ever moves `stable` forward.
+
 ## License
 
 By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE).
