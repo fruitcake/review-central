@@ -35,7 +35,7 @@ review_settings_apply() {
 
     if [ -n "$_current" ]; then
       [ -n "$_value" ] && [ "$_value" != "$_current" ] \
-        && echo "$_name=$_current from a Bitbucket variable, not the review server's $_value. Remove the repository or workspace variable to use the review server's."
+        && echo "$_name=$_current from the step's environment, not the review server's $_value. Unset it there to use the review server's."
       continue
     fi
 

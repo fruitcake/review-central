@@ -11,6 +11,7 @@ use App\Tickets\TicketResolver;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\ParallelTesting;
 use Illuminate\Testing\TestResponse;
 
 abstract class TestCase extends BaseTestCase
@@ -18,6 +19,17 @@ abstract class TestCase extends BaseTestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // Each process of a parallel run gets a storage of its own for what the
+        // tests write, or one would delete the work, log or session directory
+        // another is still using.
+        $token = ParallelTesting::token();
+
+        if ($token !== false) {
+            $storage = $this->app->storagePath("framework/testing/process-{$token}");
+            File::ensureDirectoryExists("{$storage}/framework/testing");
+            $this->app->useStoragePath($storage);
+        }
 
         // A container review writes its log as it runs; not among the real ones.
         config([

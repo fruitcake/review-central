@@ -1,6 +1,8 @@
 # Updating
 
-After pulling a new release, on the server (and on every worker):
+Releases are tagged on GitHub, `v1.0.0` and up, and the [changelog](https://github.com/fruitcake/review-central/blob/main/CHANGELOG.md) says what changed in each and what to do about it. Deploy a tag for an installation you rely on; `main` has what is merged since.
+
+After checking out a new release, on the server (and on every worker):
 
 ```sh
 composer install --no-dev --optimize-autoloader

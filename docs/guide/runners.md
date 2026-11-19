@@ -6,7 +6,7 @@ How a review runs is its **runner**. There are three, from the lightest to the s
 |---|---|---|
 | `diff` | The pull request's diff, with its ticket, comments and earlier findings. Nothing is cloned and nothing runs. | Only an AI provider key. The default. |
 | `docker` | The whole checkout, in a throwaway container under gVisor on your own server. | Docker, gVisor and a worker of its own. |
-| `cloudflare` | The whole checkout, in a Cloudflare sandbox. | A Cloudflare account and the Worker deployed. |
+| `cloudflare` | The whole checkout, in a Cloudflare sandbox. **Experimental.** | A Cloudflare account and the Worker deployed. |
 
 The platform's runner is picked under **Admin → Settings**, from the ones that are set up, and a repository can pick its own under **Runs on**. **Admin → Setup** says which runners are set up and what the others still need.
 
@@ -20,14 +20,14 @@ The job clones the repository on the worker, and then runs the review's scripts 
 
 - the reviewer is the only step that sees the pull request's code. It gets the AI provider's key and nothing else: no credential for this server or for the repository's host. It cannot change the scripts the other steps run.
 - the worker itself decides whether to review and writes what the reviewer reads: the pull request, its comments, the ticket and the instructions. That reads no code, so it needs no container.
-- the worker reads the report the reviewer wrote, as data, and files it: the review on the pull request and the Code Insights report on the commit. A review is one container, and one that is turned away is none.
+- the worker reads the report the reviewer wrote, as data, and files it: the review on the pull request and the Code Insights report on the commit. Each review uses one container; a review that is turned away uses none.
 
 To turn it on, on a machine that runs `php artisan queue:work --queue=reviews`:
 
 1. Install Docker and a sandboxing runtime. The default is gVisor (`runsc`); set `REVIEW_CONTAINER_RUNTIME` for another, such as Kata. Docker's own runtime shares the host's kernel with the code under review: use it for your own repositories at most.
 2. Build the image: `docker build -t review-central/reviewer:latest docker/reviewer`.
 3. Set `REVIEW_DOCKER_ENABLED=true`. Until then a repository on Docker says in its readiness that the runner is not set up, and no review starts.
-4. Set the queue connection's `retry_after` above the job's timeout (the reviewer's limit of 30 minutes plus 10), or a long review is started a second time.
+4. Set the queue connection's `retry_after` above the job's timeout, or a long review is started a second time. The job may take the reviewer's limit plus ten minutes (`REVIEW_CONTAINER_TIMEOUT` + 600 seconds) for each review it does, and up to three when it [carries on with a new commit](#carrying-on-with-a-new-commit). With Redis the `reviews` connection is sized for that already (7,500 seconds); on the database queue set `DB_QUEUE_RETRY_AFTER=7500`.
 
 A review's page shows the most memory its container was seen to use, sampled every `REVIEW_CONTAINER_SAMPLE_SECONDS` (10), next to the limit `REVIEW_CONTAINER_MEMORY` gives it. The limit is a ceiling, not a reservation; where reviews stay well under it, lowering it lets more of them run side by side.
 
@@ -49,6 +49,10 @@ Which provider is asked follows the repository's reviewer settings: Codex means 
 
 ## A Cloudflare sandbox
 
+::: warning Experimental
+This runner has not yet run against Cloudflare itself: the Worker type-checks against Cloudflare's own types and the PHP side is tested against a faked Worker. Try it locally first, and use Docker or the diff for reviews you rely on. Reports of how it went are welcome as [GitHub issues](https://github.com/fruitcake/review-central/issues).
+:::
+
 The reviewer can also run in a [Cloudflare sandbox](https://developers.cloudflare.com/sandbox/): the job stays on this server, and the pull request's code runs on Cloudflare's side, in a container of its own for every review. It needs no Docker on the server and scales with the number of reviews. Deploying the Worker and its bucket, and running it locally with `npx wrangler dev` to try it, is described in [`cloudflare/README.md`](https://github.com/fruitcake/review-central/blob/main/cloudflare/README.md). **Admin → Setup** shows whether the Worker answers and is up to date.
 
 ## The reviewer's session, and asking it a question
@@ -65,9 +69,9 @@ The reviewer answers in a reply under that comment. A job clones the branch and 
 
 A push that arrives while a pull request is being reviewed normally waits, and then starts a review of its own from a fresh clone. With **New commit during a review** set to carry on, under the tenant's default review settings or a repository's own, the job that is reviewing carries on instead: its review is published first, then it fetches the branch into the checkout it already has and reviews again, once or up to twice in a row. Claude Code resumes the session of the review before, so it starts from what it already read and found; the other reviewers start fresh in the same checkout.
 
-A review is shown from the moment it is started, not from the moment it begins. The review's list has it as **Queued**, and its commit on the pull request shows "AI Review" in progress, with "Waiting for a worker" or, for a commit the reviewing job will carry on with, "Waiting for the review of the commit before it". When the job gets to it, the same record becomes the running review. A queued review that is told there is nothing to review, or that a newer commit overtakes, is closed as skipped and its commit says so.
+A review is listed from the moment it is queued, not only once it starts running. The review's list has it as **Queued**, and its commit on the pull request shows "AI Review" in progress, with "Waiting for a worker" or, for a commit the reviewing job will carry on with, "Waiting for the review of the commit before it". When the job gets to it, the same record becomes the running review. A queued review that is told there is nothing to review, or that a newer commit overtakes, is closed as skipped and its commit says so.
 
-While this is on, the reviewer cannot write the clone's `.git` directory, because git runs on the worker again afterwards with the host's credentials, and it keeps a home directory between its reviews that no other step sees. A job gets the time of every review it may do, at most two after its own; Horizon's timeout and the queue's `retry_after` are sized for that.
+While this is on, the reviewer cannot write the clone's `.git` directory, because git runs on the worker again afterwards with the host's credentials, and it keeps a home directory between its reviews that no other step sees. A job gets the time of every review it may do, at most two after its own: up to two hours with the default limit. Horizon's timeout and the `reviews` connection's `retry_after` are sized for that; Horizon's stop timeout, set where it runs (Forge, systemd or Supervisor), has to be too: see [Installation](./installation).
 
 ## Horizon
 

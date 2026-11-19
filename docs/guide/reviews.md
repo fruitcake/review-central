@@ -6,6 +6,20 @@
 - **Starting a review by comment**, on the same page, says who may start one by commenting `/review` on a pull request: anyone who can comment (the default), only the accounts listed there, or nobody. An account is listed by its Bitbucket nickname or account ID, never by its display name, which anyone can copy. Anyone else gets a reply saying so, and nothing starts. It holds for every repository of the tenant; a review still starts on every push, and from the panel.
 - **Instructions** are what the review is told to look for: a method, the defect lenses and a guide per stack. The administrator keeps the defaults; a tenant can copy one and change it for its own repositories. What is saved is what the next review reads.
 
+## What the reviewer reads in the repository
+
+A team writes down how its code works, and what counts as a defect there, in the repository itself. The reviewer reads these files where they exist, and they win over its general rules:
+
+| File | What it is for |
+|---|---|
+| `CLAUDE.md` or `AGENTS.md` at the root | The codebase's conventions, for any coding agent. One in a subdirectory holds the rules for the files under it, and the nearer one wins. |
+| `.ai/rules/` | Rule files per area, with an `index.md` that maps file globs to them. For OpenCodeReview, a rule file can also name its globs in a `paths:` front matter, and goes with the review of each file it matches. |
+| `REVIEW.md` at the root | Instructions for review only: what to report, at what severity, which paths to leave alone, checks to make on every pull request. Read from the destination branch, so a pull request cannot change the rules it is reviewed against. |
+| `.ai/review-conventions.md` | Patterns judged false positives before, one per line, which the reviewer does not report again. A review lists candidates for it under **Suggested convention entries** at the end of its summary, to paste in when a person agrees. |
+| `.opencodereview/rule.json` | OpenCodeReview's own rules, read from the destination branch. |
+
+None of them is needed: without them the reviewer goes by the review instructions and the stack guides alone. They can raise what the reviewer reports, never lower what it needs as evidence or change what it may run.
+
 ## Reviews and cost
 
 ![The overview of a tenant](/screenshots/overview.png)

@@ -26,12 +26,13 @@ A review that finds nothing blocking but names something only a person can settl
 
 | | Supported |
 |---|---|
-| Source control | Bitbucket Cloud, with reviews posted on the pull request. GitHub, read only: pull requests can be [tried](./reviews#trying-a-pull-request) without posting. |
+| Source control | **Bitbucket Cloud**: reviews start from its webhook and are posted on the pull request. **GitHub, read-only for now**: a pull request can be [tried](./reviews#trying-a-pull-request) without posting, and nothing starts a review from GitHub on its own. **Any git host**, for cloning only. |
 | Tickets | Jira, Asana, GitHub Issues |
-| AI providers | Anthropic, OpenAI, and gateways that speak their API |
+| AI providers | Anthropic and OpenAI, or a gateway that speaks their API, for every reviewer. Gemini, Mistral, Groq, DeepSeek, xAI and OpenRouter for the review from the diff, and for Pi in a trial. |
 | Reviewers | Claude Code, Codex CLI, OpenCodeReview, Pi, or the diff alone |
-| Sandboxes | Docker with gVisor on your own server, Cloudflare sandboxes |
-| Stacks with their own guide | Laravel, Magento, Hyvä, Drupal |
+| Sandboxes | Docker with gVisor on your own server; Cloudflare sandboxes (experimental) |
+| Stacks with their own guide | Laravel, Magento, Hyvä, Drupal; a tenant can write its own for any other |
+| Signing in | Email and password, or Google, with the domains whose people may join a tenant |
 
 New source control hosts, ticket trackers and providers are a driver class each: see [Extending](./extending).
 

@@ -16,6 +16,17 @@ A runner is a class that implements `App\Runners\ReviewRunner`, registered under
 
 ## Adding a stack guide
 
-A stack guide tells the reviewer what to look for in one stack, with the reasoning, so it can judge rather than match patterns. The guides live in `resources/review/skill/references` as `stack-<name>.md`; a repository's stack is read from its `composer.json` when it is added, and can be changed on the repository.
+A stack guide tells the reviewer what to look for in one stack, with the reasoning, so it can judge rather than match patterns.
+
+**For your own installation**, no code is needed: under **Instructions**, a tenant adds a guide with a stack name of its own, and picks that stack on the repositories it applies to. The administrator can add one for every tenant the same way, under **Default Instructions**.
+
+**To ship one with Review Central**:
+
+1. Add `resources/review/skill/references/stack-<name>.md`.
+2. Add the name to `ReviewStack::STACKS` in `app/Services/ReviewStack.php`, in the order the review should read it, and teach `ReviewStack::fromComposer()` what in a `composer.json` means that stack, so a repository gets it when it is added.
+3. Do the same in `resources/review/skill/detect-stack.sh`: the name in `STACKS`, and a `detect_<name>` function. It is the fallback the reviewer's own step uses.
+4. Add a test next to the others in `tests/Unit/ReviewStackTest.php`.
+
+A repository's stack is read from its `composer.json` when it is added, and can be changed on the repository.
 
 See [Contributing](./contributing) for how to propose one.

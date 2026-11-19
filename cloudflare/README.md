@@ -1,5 +1,8 @@
 # Reviews in a Cloudflare sandbox
 
+> [!WARNING]
+> **Experimental.** This runner has not yet run against Cloudflare itself. The Worker type-checks against Cloudflare's own type definitions and the PHP side is tested against a faked Worker. Try it on your own machine first (below), and use [Docker](https://review-central.com/guide/runners#a-container-on-this-server) or the diff for reviews you rely on.
+
 A container review can run its reviewer in a [Cloudflare sandbox](https://developers.cloudflare.com/sandbox/) instead of in Docker on this installation's worker. A sandbox is a microVM of its own, started for one review and destroyed after it. Many can run side by side, whatever the worker's own size.
 
 The worker still does the rest: it clones the repository, decides what to review, and files the report. Only the reviewer's step moves.
@@ -16,7 +19,7 @@ fetch the archive               <--  R2 bucket
 file the report                      sandbox destroyed
 ```
 
-Nothing here has run against Cloudflare yet. The Worker type-checks against Cloudflare's own type definitions and the PHP side is tested against a faked Worker; the first trial is the test of the whole. "Run it on your own machine" below is the way to try it before deploying.
+Until it has, "Run it on your own machine" below is the way to try it before deploying. Reports of how it went, good or bad, are welcome as [GitHub issues](https://github.com/fruitcake/review-central/issues).
 
 ## What you need
 

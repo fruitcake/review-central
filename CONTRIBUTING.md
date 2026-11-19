@@ -4,6 +4,8 @@ Thanks for helping to improve Review Central. Bug reports, fixes, new stack guid
 
 ## Before you start
 
+Everything happens on GitHub: [issues](https://github.com/fruitcake/review-central/issues) for bugs, questions and ideas, and pull requests against `main` for changes.
+
 - For a bug, open an issue with what you did, what you expected and what happened instead. Leave out keys, tokens and private code.
 - For a larger change, such as a new runner, a provider or a change to how reviews are posted, open an issue first so we can agree on the approach before you build it.
 - Security problems go through the private route in [SECURITY.md](SECURITY.md), not an issue.
@@ -13,7 +15,7 @@ Thanks for helping to improve Review Central. Bug reports, fixes, new stack guid
 Follow the [quick start](https://review-central.com/guide/quick-start). In short:
 
 ```bash
-composer setup               # .env, an app key, SQLite, the tables, the front end
+composer setup               # .env, an app key, SQLite and the tables
 php artisan review:install   # instructions, model prices, an admin account and a first tenant
 php artisan serve
 php artisan queue:work --queue=reviews,default   # in a second terminal
@@ -32,7 +34,7 @@ composer lint        # Pint, formats the code
 composer test        # Pint check, PHPStan and the test suite
 ```
 
-Tests run on SQLite in memory and need no services: HTTP calls to source control, ticket systems and AI providers are faked.
+Tests run on SQLite in memory and need no services: HTTP calls to source control, ticket systems and AI providers are faked. `php artisan test --parallel` runs them faster. CI runs the checks on PHP 8.4 and 8.5.
 
 ## Writing a change
 
@@ -40,11 +42,12 @@ Tests run on SQLite in memory and need no services: HTTP calls to source control
 - Follow the style of the code around it. Comments explain why something is done, not what the next line does.
 - Keep a pull request to one change, with a title and description that say what it does and why.
 - Update the docs in `docs/` when you change setup, configuration or behaviour someone relies on.
-- New environment variables go in `.env.example`, with a comment on what they do.
+- New environment variables go in the [configuration reference](docs/guide/configuration.md), and in `.env.example` with a comment when a feature needs them set.
+- Add a line under **Unreleased** in [CHANGELOG.md](CHANGELOG.md) for a change someone running Review Central would notice.
 
 ## Adding a stack guide or a provider
 
-- **Stack guides** live in `resources/review/skill/references` as `stack-<name>.md`. A guide names what to look for in that stack, with the reasoning, so the reviewer can judge rather than pattern-match. Cite official documentation where you can.
+- **Stack guides** live in `resources/review/skill/references` as `stack-<name>.md`. A guide names what to look for in that stack, with the reasoning, so the reviewer can judge rather than pattern-match. Cite official documentation where you can. Detecting the stack takes two more lines of code: see [Extending](https://review-central.com/guide/extending#adding-a-stack-guide).
 - **Providers** (source control, tickets, AI) are described in [Extending](https://review-central.com/guide/extending).
 
 ## License
