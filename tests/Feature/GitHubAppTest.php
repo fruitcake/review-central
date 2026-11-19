@@ -9,10 +9,15 @@ use App\Jobs\RunContainerReview;
 use App\Models\Connection;
 use App\Models\OpenPullRequest;
 use App\Models\Repository;
+use App\Models\ReviewRun;
+use App\Runners\Container\CheckProgress;
+use App\Runners\Container\RunLog;
+use App\Runners\Container\RunLogWriter;
 use App\SourceControl\GitHubApp;
 use App\SourceControl\GitHubAppDriver;
 use App\SourceControl\GitHubClient;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
@@ -229,4 +234,70 @@ it('shows the review\'s state as one check run, keeping its report when it ends'
         ->and($runs[0]['status'])->toBe('completed')
         ->and($runs[0]['output']['title'])->toBe('2 finding(s) to look at')
         ->and($runs[0]['output']['summary'])->toBe('Two findings.');
+});
+
+it('shows a running review\'s log in its check, only while the check runs', function () {
+    config(['review.container.log.enabled' => true, 'review.container.log.directory' => storage_path('framework/testing/check-logs')]);
+    $status = 'in_progress';
+    Http::fake(function (Request $request) use (&$status) {
+        return match (true) {
+            str_contains($request->url(), '/access_tokens') => Http::response(['token' => 'ghs_installation']),
+            str_contains($request->url(), '/users/') => Http::response(['id' => 555]),
+            str_contains($request->url(), '/check-runs?') || str_contains($request->url(), '/commits/') => Http::response(['check_runs' => [['id' => 3, 'status' => $status]]]),
+            default => Http::response([]),
+        };
+    });
+    ReviewRun::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'feature/export', 'pull_request_id' => 12, 'commit' => 'abc1234def', 'build_number' => 9,
+        'status' => ReviewRun::STATUS_RUNNING, 'started_at' => now()->subSeconds(65),
+    ]);
+    $log = app(RunLog::class);
+    File::ensureDirectoryExists(dirname($log->path($this->repository->id, 9)));
+    File::put($log->path($this->repository->id, 9), collect(range(1, 80))->map(fn (int $line): string => "12:00:00  line {$line}")->implode("\n")."\n");
+
+    app(CheckProgress::class)->show($this->repository->id, 9);
+
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'PATCH' && str_ends_with($request->url(), '/check-runs/3')
+        && $request['output']['title'] === 'Reviewing · 01:05'
+        && str_contains($request['output']['text'], 'line 80')
+        && ! str_contains($request['output']['text'], 'line 20'));
+
+    // Finished: its report stays as it is.
+    $status = 'completed';
+    $patches = fn (): int => collect(Http::recorded())->filter(fn (array $pair): bool => $pair[0]->method() === 'PATCH')->count();
+    $before = $patches();
+    app(CheckProgress::class)->show($this->repository->id, 9);
+
+    expect($patches())->toBe($before);
+
+    File::deleteDirectory(storage_path('framework/testing/check-logs'));
+});
+
+it('shows progress at most every twenty seconds, and never in the way of the review', function () {
+    $path = storage_path('framework/testing/progress.log');
+    $shown = 0;
+    $writer = new RunLogWriter($path, progress: function () use (&$shown) {
+        $shown++;
+
+        throw new RuntimeException('GitHub is down');
+    });
+
+    $this->travelTo(now());
+    $writer->note('one');
+    $writer->note('two');
+    expect($shown)->toBe(0);
+
+    // The first after ten seconds, then every twenty.
+    $this->travel(11)->seconds();
+    $writer->note('three');
+    $writer->note('four');
+    expect($shown)->toBe(1);
+
+    $this->travel(21)->seconds();
+    $writer->note('five');
+    expect($shown)->toBe(2)
+        ->and(file_get_contents($path))->toContain('five');
+
+    @unlink($path);
 });

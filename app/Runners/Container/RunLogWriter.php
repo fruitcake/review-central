@@ -21,6 +21,9 @@ class RunLogWriter
 
     protected const COPY_EVERY_SECONDS = 5.0;
 
+    /** A host's check is a request or two each time, and its readers need no more. */
+    protected const PROGRESS_EVERY_SECONDS = 20.0;
+
     protected string $pending = '';
 
     /** When the open pages were last told the log grew. */
@@ -28,6 +31,9 @@ class RunLogWriter
 
     /** When the log was last copied to the disk another server reads it from. */
     protected float $copied = 0.0;
+
+    /** When the host was last shown how far the review is. */
+    protected float $shown = 0.0;
 
     /** Whether lines were written since. */
     protected bool $untold = false;
@@ -39,9 +45,13 @@ class RunLogWriter
      * @param  array<string, string>  $environment
      * @param  Closure(): mixed|null  $grew  tells the open pages the log grew
      * @param  Closure(): mixed|null  $copy  copies the log to where another server reads it
+     * @param  Closure(): mixed|null  $progress  shows the end of the log on the pull request, where the host can
      */
-    public function __construct(protected string $path, array $environment = [], protected ?Closure $grew = null, protected ?Closure $copy = null)
+    public function __construct(protected string $path, array $environment = [], protected ?Closure $grew = null, protected ?Closure $copy = null, protected ?Closure $progress = null)
     {
+        // The first lines are worth a wait: a check that says only "Reviewing" says little.
+        $this->shown = $this->clock() - self::PROGRESS_EVERY_SECONDS / 2;
+
         // The steps are told not to print these, and a tool they call may anyway.
         $this->secrets = array_values(array_filter(
             $environment,
@@ -108,14 +118,20 @@ class RunLogWriter
     {
         if ($this->untold && $this->grew !== null) {
             $this->untold = false;
-            $this->told = microtime(true);
+            $this->told = $this->clock();
             ($this->grew)();
         }
 
         // The copy is the whole log each time, so not on every line.
-        if ($this->copy !== null && microtime(true) - $this->copied >= self::COPY_EVERY_SECONDS) {
-            $this->copied = microtime(true);
+        if ($this->copy !== null && $this->clock() - $this->copied >= self::COPY_EVERY_SECONDS) {
+            $this->copied = $this->clock();
             ($this->copy)();
+        }
+
+        // Never in the way of the review: a host that does not answer is only not shown.
+        if ($this->progress !== null && $this->clock() - $this->shown >= self::PROGRESS_EVERY_SECONDS) {
+            $this->shown = $this->clock();
+            rescue($this->progress, null, false);
         }
     }
 
@@ -147,8 +163,16 @@ class RunLogWriter
         // for the page's own poll, which is why that stays short.
         $this->untold = true;
 
-        if (microtime(true) - $this->told >= self::TELL_EVERY_SECONDS) {
+        if ($this->clock() - $this->told >= self::TELL_EVERY_SECONDS) {
             $this->tell();
         }
+    }
+
+    /**
+     * Seconds now, to the microsecond, on the application's clock.
+     */
+    protected function clock(): float
+    {
+        return (float) now()->format('U.u');
     }
 }

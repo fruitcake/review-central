@@ -47,7 +47,13 @@ class RunLog
         $path = $this->path($repositoryId, $build);
         File::ensureDirectoryExists(dirname($path));
 
-        return new RunLogWriter($path, $environment, fn () => Broadcasts::logGrew($repositoryId, $build), $this->disk() === null ? null : fn () => $this->copy($repositoryId, $build));
+        return new RunLogWriter(
+            $path,
+            $environment,
+            fn () => Broadcasts::logGrew($repositoryId, $build),
+            $this->disk() === null ? null : fn () => $this->copy($repositoryId, $build),
+            fn () => app(CheckProgress::class)->show($repositoryId, $build),
+        );
     }
 
     /**

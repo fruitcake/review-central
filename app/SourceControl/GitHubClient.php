@@ -535,6 +535,32 @@ class GitHubClient implements SourceControl
     }
 
     /**
+     * Shows a running review's progress in its check: only while the check runs,
+     * so a finished one keeps its report.
+     *
+     * @param  list<string>  $lines  the end of the review's log
+     */
+    public function showProgress(string $commit, string $title, string $summary, array $lines): void
+    {
+        if (! $this->isApp()) {
+            return;
+        }
+
+        $existing = $this->findCheckRun($commit);
+
+        if (($existing['status'] ?? null) !== 'in_progress' || ! isset($existing['id'])) {
+            return;
+        }
+
+        // A fence no line of a log is likely to close early.
+        $text = $lines === [] ? '' : "~~~~text\n".mb_substr(implode("\n", $lines), -60000)."\n~~~~";
+
+        $this->request(10)->patch($this->url("check-runs/{$existing['id']}"), [
+            'output' => ['title' => mb_substr($title, 0, 255), 'summary' => $summary, 'text' => $text],
+        ])->throw();
+    }
+
+    /**
      * Asks for someone in the team to start the review, on the pull request's own
      * page: as the app, a check that needs action, with a button that starts it.
      * Otherwise a commit status that waits, leading to where it is started.
