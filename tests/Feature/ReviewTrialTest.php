@@ -230,3 +230,23 @@ it('re-runs a review as a trial set up as it was, and posts it only when asked',
     Queue::assertPushed(fn (RunContainerReview $job): bool => $job->trial?->pullRequestId === 12
         && $job->trial->model === 'claude-sonnet-5-5' && $job->trial->effort === 'high' && $job->trial->provider === 'claude-code');
 });
+
+it('shows how long a run that is still going has taken, counting up', function () {
+    $user = User::factory()->create();
+    $user->tenants()->attach($this->tenant);
+    $this->actingAs($user);
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+    Filament::setTenant($this->tenant);
+    Filament::bootCurrentPanel();
+    fakePullRequest();
+    $repository = Repository::factory()->create(['tenant_id' => $this->tenant->id, 'connection_id' => $this->connection->id, 'slug' => 'shop']);
+    $run = ReviewRun::query()->create([
+        'tenant_id' => $this->tenant->id, 'repository_id' => $repository->id, 'workspace' => 'acme', 'slug' => 'shop', 'branch' => 'feature/export',
+        'commit' => str_repeat('a', 40), 'pull_request_id' => 12, 'status' => ReviewRun::STATUS_RUNNING, 'started_at' => now()->subSeconds(125),
+        'runner' => 'docker', 'agent' => 'claude-code',
+    ]);
+
+    livewire(ViewReviewRun::class, ['record' => $run->uuid])
+        ->assertSeeHtml('x-text="text"')
+        ->assertSee('02:05');
+});

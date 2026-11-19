@@ -61,11 +61,15 @@
                             <span class="rc-timeline-top"><strong>Run {{ $index + 1 }} · {{ \App\Filament\LocalTime::of($sibling->started_at)->format('j M H:i') }}</strong><span class="rc-mono">{{ substr($sibling->commit, 0, 7) }}</span></span>
                             <span class="rc-chip rc-chip-{{ $result['tone'] }}">{{ $result['label'] }}</span>
                             <span class="rc-muted">
+                                @if (RunPresenter::live($sibling))
+                                    @include('filament.app.partials.elapsed', ['since' => $sibling->started_at]) so far
+                                @else
                                 {{ collect([
                                     $sibling->findings === null ? null : ($sibling->openFindings() === 0 ? 'No open findings' : $sibling->openFindings().' open'),
                                     RunPresenter::duration($sibling->duration_seconds),
                                     $sibling->cost === null ? null : Currency::show($sibling->cost),
                                 ])->filter()->implode(' · ') ?: '—' }}
+                                @endif
                             </span>
                         </a>
                     @endforeach
@@ -190,7 +194,13 @@
                     <h2 id="rc-cost">Cost of this run</h2>
                     <div class="rc-pairs">
                         <div><span class="rc-muted">Cost</span><strong>{{ $run->cost === null ? 'Unknown' : Currency::show($run->cost) }}</strong></div>
-                        <div><span class="rc-muted">Duration</span><strong>{{ RunPresenter::duration($run->duration_seconds) ?? '—' }}</strong></div>
+                        <div><span class="rc-muted">Duration</span><strong>
+                            @if ($live)
+                                @include('filament.app.partials.elapsed', ['since' => $run->started_at])
+                            @else
+                                {{ RunPresenter::duration($run->duration_seconds) ?? '—' }}
+                            @endif
+                        </strong></div>
                         <div><span class="rc-muted">Tokens</span><strong>{{ number_format($tokens) }}</strong></div>
                         <div><span class="rc-muted">Read from cache</span><strong>{{ ($rate = $run->cacheHitRate()) === null ? '—' : round($rate * 100).'%' }}</strong></div>
                     </div>
