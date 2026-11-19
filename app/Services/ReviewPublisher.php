@@ -668,12 +668,18 @@ class ReviewPublisher
                 $settledNow = in_array($status, self::RESOLVED, true);
                 $wasResolved = (bool) ($existing['resolved'] ?? false);
 
+                // On its own: a thread that will not resolve must not cost the reply
+                // that says why, which is said only on the run the status settles.
                 if ($settledNow !== $wasResolved) {
-                    $repository->sourceControl()->resolvePullRequestComment($pullRequestId,
-                        (int) $commentId,
-                        $settledNow,
-                    );
-                    $counts[$settledNow ? 'resolved' : 'reopened']++;
+                    try {
+                        $repository->sourceControl()->resolvePullRequestComment($pullRequestId,
+                            (int) $commentId,
+                            $settledNow,
+                        );
+                        $counts[$settledNow ? 'resolved' : 'reopened']++;
+                    } catch (Throwable $exception) {
+                        report($exception);
+                    }
                 }
 
                 // The review's comment on someone's decision about a finding: a

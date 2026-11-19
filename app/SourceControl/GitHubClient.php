@@ -527,6 +527,9 @@ class GitHubClient implements SourceControl
      * GitHub's GraphQL API says either; without a token, or when it does not
      * answer, nothing is known to be resolved.
      *
+     * A comment is matched by fullDatabaseId, its REST id as a BigInt string:
+     * databaseId is a 32-bit Int, which GitHub's comment ids have outgrown.
+     *
      * @return array{threads: array<int, array{id: string, resolved: bool}>, minimized: array<int, bool>}
      */
     protected function threads(string $id, bool $fresh = false): array
@@ -546,8 +549,8 @@ class GitHubClient implements SourceControl
                 query($owner: String!, $name: String!, $number: Int!) {
                   repository(owner: $owner, name: $name) {
                     pullRequest(number: $number) {
-                      reviewThreads(first: 100) { nodes { id isResolved comments(first: 100) { nodes { databaseId } } } }
-                      comments(last: 100) { nodes { databaseId isMinimized minimizedReason } }
+                      reviewThreads(first: 100) { nodes { id isResolved comments(first: 100) { nodes { fullDatabaseId } } } }
+                      comments(last: 100) { nodes { fullDatabaseId isMinimized minimizedReason } }
                     }
                   }
                 }
@@ -560,15 +563,15 @@ class GitHubClient implements SourceControl
 
         foreach ((array) ($data['repository']['pullRequest']['reviewThreads']['nodes'] ?? []) as $thread) {
             foreach ((array) ($thread['comments']['nodes'] ?? []) as $comment) {
-                if (is_numeric($comment['databaseId'] ?? null) && is_string($thread['id'] ?? null)) {
-                    $known['threads'][(int) $comment['databaseId']] = ['id' => $thread['id'], 'resolved' => (bool) ($thread['isResolved'] ?? false)];
+                if (is_numeric($comment['fullDatabaseId'] ?? null) && is_string($thread['id'] ?? null)) {
+                    $known['threads'][(int) $comment['fullDatabaseId']] = ['id' => $thread['id'], 'resolved' => (bool) ($thread['isResolved'] ?? false)];
                 }
             }
         }
 
         foreach ((array) ($data['repository']['pullRequest']['comments']['nodes'] ?? []) as $comment) {
-            if (is_numeric($comment['databaseId'] ?? null)) {
-                $known['minimized'][(int) $comment['databaseId']] = ($comment['isMinimized'] ?? false) === true
+            if (is_numeric($comment['fullDatabaseId'] ?? null)) {
+                $known['minimized'][(int) $comment['fullDatabaseId']] = ($comment['isMinimized'] ?? false) === true
                     && strtolower((string) ($comment['minimizedReason'] ?? '')) === 'resolved';
             }
         }

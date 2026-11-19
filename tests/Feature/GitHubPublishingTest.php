@@ -28,7 +28,7 @@ beforeEach(function () {
     $this->sha = str_repeat('a', 40);
 
     // What GitHub holds: comments of both kinds, reviews, threads and statuses.
-    $this->github = (object) ['issueComments' => [], 'reviewComments' => [], 'reviews' => [], 'threads' => [], 'minimized' => [], 'statuses' => [], 'hooks' => [], 'orgHooks' => null, 'pull' => [], 'next' => 100];
+    $this->github = (object) ['issueComments' => [], 'reviewComments' => [], 'reviews' => [], 'threads' => [], 'minimized' => [], 'statuses' => [], 'hooks' => [], 'orgHooks' => null, 'pull' => [], 'next' => 3_000_000_000, 'graphqlFails' => false];
 
     $this->pull = fn (array $more = []): array => array_replace_recursive([
         'number' => 12, 'title' => 'Add the export', 'body' => 'Adds the export.', 'state' => 'open', 'draft' => false, 'merged_at' => null,
@@ -51,6 +51,10 @@ beforeEach(function () {
         if ($path === '/graphql') {
             $query = (string) $request['query'];
 
+            if ($g->graphqlFails) {
+                return Http::response(['errors' => [['message' => 'Resource not accessible by personal access token']]]);
+            }
+
             if (str_contains($query, 'resolveReviewThread') || str_contains($query, 'unresolveReviewThread')) {
                 $g->threads[$request['variables']['id']]['resolved'] = ! str_contains($query, 'unresolve');
 
@@ -65,10 +69,10 @@ beforeEach(function () {
 
             return Http::response(['data' => ['repository' => ['pullRequest' => [
                 'reviewThreads' => ['nodes' => collect($g->threads)->map(fn (array $thread, string $id): array => [
-                    'id' => $id, 'isResolved' => $thread['resolved'], 'comments' => ['nodes' => array_map(fn (int $comment): array => ['databaseId' => $comment], $thread['comments'])],
+                    'id' => $id, 'isResolved' => $thread['resolved'], 'comments' => ['nodes' => array_map(fn (int $comment): array => ['fullDatabaseId' => (string) $comment], $thread['comments'])],
                 ])->values()->all()],
                 'comments' => ['nodes' => collect($g->issueComments)->map(fn (array $comment): array => [
-                    'databaseId' => $comment['id'], 'isMinimized' => $g->minimized["IC_{$comment['id']}"] ?? false, 'minimizedReason' => 'resolved',
+                    'fullDatabaseId' => (string) $comment['id'], 'isMinimized' => $g->minimized["IC_{$comment['id']}"] ?? false, 'minimizedReason' => 'resolved',
                 ])->values()->all()],
             ]]]]);
         }
@@ -313,6 +317,30 @@ it('posts a whole review on GitHub: the description, its findings, and changes r
     expect(collect($this->github->threads)->first()['resolved'])->toBeTrue()
         ->and(collect($this->github->reviewComments)->last()['body'])->toStartWith('Fixed in')
         ->and(collect($this->github->reviews)->pluck('state')->all())->toBe(['DISMISSED', 'APPROVED']);
+});
+
+it('still says a finding was fixed when GitHub will not resolve its thread', function () {
+    $report = fn (int $build, string $status, string $result): array => [
+        'branch' => 'feature/export', 'commit' => $this->sha, 'build' => $build, 'pull_request_id' => 12, 'result' => $result, 'summary' => 'Reviewed.',
+        'findings' => [[
+            'id' => 'F1', 'status' => $status, 'severity' => 'HIGH', 'category' => 'correctness', 'confidence' => 9,
+            'title' => 'The export skips the last row', 'details' => 'The loop ends one early.', 'path' => 'app/Export.php', 'line' => 12,
+        ]],
+    ];
+
+    $this->fileReview($report(7, 'new', 'FAILED'))->assertOk();
+
+    $this->github->graphqlFails = true;
+    $this->fileReview($report(8, 'fixed', 'PASSED'))->assertOk();
+
+    expect(collect($this->github->threads)->first()['resolved'])->toBeFalse()
+        ->and(collect($this->github->reviewComments)->last()['body'])->toStartWith('Fixed in');
+
+    // Once GitHub answers again, the next run resolves the thread it could not.
+    $this->github->graphqlFails = false;
+    $this->fileReview($report(9, 'fixed', 'PASSED'))->assertOk();
+
+    expect(collect($this->github->threads)->first()['resolved'])->toBeTrue();
 });
 
 it('takes only a delivery signed with the connection\'s secret, and starts a review for a new commit', function () {
