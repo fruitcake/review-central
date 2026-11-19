@@ -2,7 +2,7 @@
     "$schema": "https://getcomposer.org/schema.json",
     "name": "fruitcake/review-central",
     "type": "project",
-    "description": "Self-hosted AI code review for pull requests on GitHub and Bitbucket, with the ticket as context.",
+    "description": "Self-hosted AI code review for private Bitbucket repositories, and GitHub: faster and cheaper than a pipeline step, with the ticket as context.",
     "keywords": ["code-review", "ai", "pull-requests", "laravel", "filament"],
     "license": "MIT",
     "homepage": "https://review-central.com",

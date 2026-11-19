@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: Review Central
-  text: AI code review you run yourself
-  tagline: Every pull request reviewed against its ticket, by the reviewer and model you choose, on your own server and with your own AI keys. Open source, for one team or many.
+  text: AI code review for private Bitbucket repositories
+  tagline: Faster and cheaper than an AI step in Bitbucket Pipelines. Every pull request reviewed against its ticket, by the reviewer and model you choose, on your own server and with your own AI keys, and the result acted on. Open source; GitHub works too.
   image:
     src: /logo.svg
     alt: Review Central
@@ -20,12 +20,15 @@ hero:
       link: https://github.com/fruitcake/review-central
 
 features:
+  - icon: ⚡
+    title: Out of the pipeline
+    details: No fresh clone and install on build minutes for every push. The installed packages are reused, commits it already reviewed are skipped, and Claude Code resumes its last session on the branch.
   - icon: 🎫
     title: Reviewed against the ticket
     details: The reviewer reads the pull request with its ticket from Jira, Asana or GitHub Issues, so it checks what was asked for, not only what was written.
   - icon: 💬
-    title: Posted where you work
-    details: A summary in the description, a comment per finding, and an approval or a request for changes. The next push marks what was fixed and resolves its threads. On GitHub and Bitbucket Cloud.
+    title: Acts on the pull request
+    details: A summary in the description, a comment per finding, tasks for what blocks the merge, and an approval or a request for changes. The next push marks what was fixed and resolves its threads. Ask it a question with @review.
   - icon: 🧰
     title: Your reviewer, your model
     details: Claude Code, Codex, OpenCodeReview or Pi, with the model and effort you set, and a budget per reviewer. Or only the diff, sent to your AI provider.
@@ -34,10 +37,7 @@ features:
     details: The reviewer reads the code in a throwaway container under gVisor, or in a Cloudflare sandbox (experimental), holding nothing but the AI key. The diff runner runs nothing at all.
   - icon: 🏢
     title: Many teams, one installation
-    details: Each tenant brings its own source control, tickets, AI providers, colours, currency and time zone. One admin panel shows them all, with cost against budget.
-  - icon: 📈
-    title: Measured
-    details: Every finding can be marked valid, not a problem or wrong. The overview shows how often the team agrees with the reviewer, per category, and what each review cost.
+    details: Each tenant brings its own source control, tickets, AI providers, colours, currency and time zone. One admin panel shows them all, with cost against budget and how often the team agrees with the reviewer.
 ---
 
 <div class="shots">

@@ -3,8 +3,8 @@
 <h1 align="center">Review Central</h1>
 
 <p align="center">
-AI code review you run yourself: every pull request reviewed against its ticket,<br>
-by the reviewer and model you choose, on your own server and with your own AI keys.
+AI code review for <strong>private Bitbucket repositories</strong>, on your own server:<br>
+faster and cheaper than an AI step in Bitbucket Pipelines, with the ticket as context, and it acts on the pull request.
 </p>
 
 <p align="center">
@@ -15,12 +15,33 @@ by the reviewer and model you choose, on your own server and with your own AI ke
 
 ![A review: the summary, the findings and what the run cost](docs/public/screenshots/review.png)
 
+## Why it exists
+
+On GitHub, AI review is a few clicks away: Copilot and a marketplace of review apps. Bitbucket Cloud has far less to choose from, and the usual answer is an AI CLI in a pipeline step. We ran it that way, and it showed:
+
+- **Every push starts from nothing.** A fresh clone, a fresh `composer install`, and a reviewer that has forgotten the last review, all on build minutes.
+- **It only knows the diff.** Not the ticket it was for, not what people replied to the last review, not what was already decided.
+- **It can only comment.** No tasks, no approval, no request for changes, and nobody resolves the threads of what was fixed.
+
+Review Central takes the review out of the pipeline. It runs next to Bitbucket, takes its webhook, and reviews each pull request in a sandbox of its own:
+
+| | An AI step in Bitbucket Pipelines | Review Central |
+|---|---|---|
+| **Each push** | Clones and installs from scratch, on build minutes | Reuses the installed `vendor/` and the Composer cache; skips drafts, commits it reviewed and pushes with nothing new |
+| **The reviewer** | Starts over every time | Claude Code resumes its last session on the branch; a commit pushed during a review can be reviewed in the same job |
+| **Context** | The diff | The ticket from Jira, Asana or GitHub Issues, the conversation and earlier findings, the repository's own rules, a guide for its stack |
+| **On the pull request** | A comment | A summary in the description, a comment per finding with a fix to apply, tasks for what blocks the merge, an approval or a request for changes, threads resolved when fixed, a Code Insights report |
+| **Talking back** | — | `/review` to review again, `@review` to ask a question, replies the next review reads |
+| **Cost** | Build minutes plus tokens, per repository | What each run cost, per team and per reviewer, against a budget |
+
+It started as exactly such a pipeline step at [Fruitcake](https://fruitcake.nl), on the private Bitbucket repositories we work in. GitHub works too: reviews are posted on its pull requests as well.
+
 ## What it does
 
 - **Reviews against the ticket.** The reviewer reads the pull request with its ticket from Jira, Asana or GitHub Issues, so it checks what was asked for, not only what was written.
-- **Posts on the pull request.** A summary in the description, a comment per finding, and an approval or a request for changes. The next push marks what was fixed and resolves its threads. On **GitHub** and **Bitbucket Cloud**; on Bitbucket also tasks for what blocks the merge.
+- **Acts on the pull request.** A summary in the description, a comment per finding, tasks for what blocks the merge, and an approval or a request for changes. The next push marks what was fixed and resolves its threads. On **Bitbucket Cloud** and **GitHub**, which has no tasks.
 - **Your reviewer, your model.** Claude Code, Codex, OpenCodeReview or Pi, with the model and effort you set, or only the diff sent to your AI provider: Anthropic, OpenAI, Gemini, Mistral, Groq, DeepSeek, xAI or OpenRouter.
-- **Sandboxed.** The reviewer reads the code in a throwaway container under gVisor, or in a Cloudflare sandbox (experimental), holding nothing but the AI key.
+- **Sandboxed.** The reviewer reads the code in a throwaway container under gVisor, or in a Cloudflare sandbox (experimental), holding nothing but the AI key. Your code stays on your server and your sandbox, and goes to the AI provider you chose.
 - **Many teams, one installation.** Each tenant brings its own connections, colours, currency and time zone; the admin panel shows every tenant's cost against its budget.
 - **Measured.** Findings are marked valid, not a problem or wrong, and the overview shows how often the team agrees with the reviewer.
 
