@@ -81,7 +81,7 @@
     .rc-brand { display: flex; align-items: center; gap: 10px; color: #fff; }
     .rc-brand-mark { width: 32px; height: 32px; border-radius: 0; background: var(--rc-accent); color: var(--rc-on-accent); display: flex; align-items: center; justify-content: center; flex: 0 0 32px; }
     /* The arrows turn slowly around the check, which stands still; not for whoever asked for less motion. */
-    @keyframes rc-spin { to { transform: rotate(-360deg); } }
+    @keyframes rc-spin { to { transform: rotate(360deg); } }
     .rc-spin { transform-origin: 12px 12px; transform-box: view-box; animation: rc-spin 6s linear infinite; }
     @media (prefers-reduced-motion: reduce) { .rc-spin { animation: none; } }
     .rc-brand-logo { height: 32px; width: auto; max-width: 96px; object-fit: contain; flex: 0 0 auto; }
