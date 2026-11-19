@@ -82,7 +82,7 @@ class ListReviewRuns extends ListRecords
                         ->label('Repository')
                         ->options(fn (): array => CurrentTenant::get()->repositories()->pluck('slug', 'id')->all())
                         ->required(),
-                    TextInput::make('branch')->required()->maxLength(255)->helperText('The branch the pull request comes from.'),
+                    TextInput::make('branch')->required()->maxLength(255)->helperText('The branch the pull request comes from. For one from a fork on GitHub: pull/<number>/head.'),
                 ])
                 ->action(function (array $data, ReviewRequest $reviews): void {
                     $repository = CurrentTenant::get()->repositories()->whereKey($data['repository_id'])->firstOrFail();

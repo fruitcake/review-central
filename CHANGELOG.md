@@ -12,4 +12,5 @@ The first public release.
 - Reviewers: Claude Code, Codex, OpenCodeReview, Pi in trials, or the diff alone sent to the AI provider.
 - Runners: the diff, Docker with gVisor on your own server, and Cloudflare sandboxes (experimental).
 - Tickets from Jira, Asana and GitHub Issues as context.
+- Pull requests from forks: reviewed through GitHub's pull ref when a tenant turns that on, never by themselves on Bitbucket.
 - Many tenants on one installation, each with its own connections, budget, currency, time zone and colours.

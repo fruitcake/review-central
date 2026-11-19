@@ -5,10 +5,13 @@ use App\Exceptions\ConnectionFailed;
 use App\Jobs\RunContainerReview;
 use App\Models\Connection;
 use App\Models\Repository;
+use App\Runners\Container\Checkout;
 use App\Services\Connections;
 use App\SourceControl\GitHubClient;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
 
 /*
@@ -378,4 +381,78 @@ it('says what is missing when there is nowhere to add the webhook', function () 
 
     expect(fn () => app(Connections::class)->installWebhook($this->connection))
         ->toThrow(ConnectionFailed::class, 'Add a repository first');
+});
+
+describe('a pull request from a fork', function () {
+    beforeEach(function () {
+        // Someone's fork, whose branch is called what this repository's main is.
+        $this->github->pull = ['head' => ['ref' => 'main', 'label' => 'someone:main', 'repo' => ['full_name' => 'someone/shop']]];
+        $this->event = fn (string $action = 'synchronize'): array => ['action' => $action, 'pull_request' => ($this->pull)($this->github->pull), 'repository' => ['name' => 'shop', 'owner' => ['login' => 'acme']]];
+    });
+
+    it('goes by its pull ref, not by what the fork calls its branch', function () {
+        $pullRequest = $this->client->getPullRequest('12');
+
+        expect($pullRequest['source']['branch']['name'])->toBe('pull/12/head')
+            ->and($pullRequest)->toMatchArray(['from_fork' => true, 'fork_branch' => 'someone:main'])
+            ->and($this->client->findOpenPullRequestByBranch('pull/12/head')['id'])->toBe(12);
+    });
+
+    it('is not reviewed by itself until the tenant turns that on, and then as itself', function () {
+        Queue::fake();
+
+        ($this->deliver)('pull_request', ($this->event)())->assertOk();
+
+        Queue::assertNothingPushed();
+        // Nobody asked, so nothing is said on it.
+        expect($this->github->issueComments)->toBe([]);
+
+        $this->repository->tenant->update(['review_forks' => true]);
+        ($this->deliver)('pull_request', ($this->event)())->assertOk();
+
+        // Never this repository's main, which the fork's branch is also called.
+        Queue::assertPushed(RunContainerReview::class, fn (RunContainerReview $job): bool => $job->branch === 'pull/12/head');
+    });
+
+    it('says once why a /review comment or a question on it starts nothing', function () {
+        Queue::fake();
+        $comment = fn (int $id, string $body): array => [
+            'action' => 'created',
+            'issue' => ['number' => 12, 'pull_request' => ['url' => 'https://api.github.com/repos/acme/shop/pulls/12']],
+            'comment' => ['id' => $id, 'body' => $body, 'user' => ['login' => 'someone', 'id' => 9]],
+            'repository' => ['name' => 'shop', 'owner' => ['login' => 'acme']],
+        ];
+
+        ($this->deliver)('issue_comment', $comment(601, '/review'))->assertOk();
+        ($this->deliver)('issue_comment', $comment(601, '/review'))->assertOk();
+        ($this->deliver)('issue_comment', $comment(602, '@review why is this slow?'))->assertOk();
+
+        Queue::assertNothingPushed();
+        expect($this->github->issueComments)->toHaveCount(2)
+            ->and($this->github->issueComments[0]['body'])->toContain('Pull requests from forks are not reviewed here by themselves')
+            ->and($this->github->issueComments[1]['body'])->toContain('Pull requests from forks are not reviewed here by themselves');
+    });
+
+    it('is cloned and brought up to date through its pull ref', function () {
+        Process::fake(function ($process) {
+            $command = (array) $process->command;
+
+            if ($command[1] === 'clone') {
+                File::ensureDirectoryExists(end($command));
+            }
+
+            return Process::result(in_array('rev-parse', $command, true) ? str_repeat('f', 40)."\n" : '');
+        });
+        $directory = storage_path('framework/testing/review-work/fork');
+
+        expect(app(Checkout::class)->clone($this->repository, 'pull/12/head', null, $directory))->toBe(str_repeat('f', 40));
+        app(Checkout::class)->update($this->repository, $directory, 'pull/12/head', null);
+
+        // The repository's main branch, not one called after the fork's branch.
+        Process::assertRan(fn ($process): bool => ((array) $process->command)[1] === 'clone' && ! in_array('--branch', (array) $process->command, true));
+        Process::assertRan(fn ($process): bool => in_array('+refs/pull/12/head:refs/remotes/origin/pull/12/head', (array) $process->command, true));
+        Process::assertRan(fn ($process): bool => in_array('origin/pull/12/head', (array) $process->command, true));
+
+        File::deleteDirectory(storage_path('framework/testing/review-work'));
+    });
 });

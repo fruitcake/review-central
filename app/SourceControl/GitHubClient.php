@@ -146,6 +146,15 @@ class GitHubClient implements SourceControl
 
     public function findOpenPullRequestByBranch(string $branch): ?array
     {
+        // A pull request from a fork goes by its pull ref here, which names it.
+        $id = PullRef::id($branch);
+
+        if ($id !== null) {
+            $pullRequest = $this->getPullRequest((string) $id);
+
+            return ($pullRequest['state'] ?? null) === 'OPEN' && ($pullRequest['from_fork'] ?? false) === true ? $pullRequest : null;
+        }
+
         $found = $this->request(10)
             ->get($this->url('pulls'), ['state' => 'open', 'head' => "{$this->owner}:{$branch}", 'sort' => 'updated', 'direction' => 'desc', 'per_page' => 1])
             ->throw()
@@ -479,11 +488,18 @@ class GitHubClient implements SourceControl
     }
 
     /**
+     * A pull request from a fork has its pull ref as its source branch: the fork's
+     * own branch name means another branch in this repository, if any. What the
+     * fork calls it is kept as `fork_branch`, owner:branch, for people to read.
+     *
      * @param  array<string, mixed>  $pull  as GitHub describes it, from its API or a webhook
      * @return array<string, mixed> as the review reads a pull request
      */
     public static function pullRequest(array $pull): array
     {
+        $fork = ($pull['head']['repo']['full_name'] ?? null) !== ($pull['base']['repo']['full_name'] ?? null);
+        $branch = $fork ? PullRef::name((int) ($pull['number'] ?? 0)) : (string) ($pull['head']['ref'] ?? '');
+
         return [
             'id' => (int) ($pull['number'] ?? 0),
             'title' => (string) ($pull['title'] ?? ''),
@@ -494,13 +510,14 @@ class GitHubClient implements SourceControl
                 default => 'DECLINED',
             },
             'draft' => (bool) ($pull['draft'] ?? false),
-            'source' => ['branch' => ['name' => (string) ($pull['head']['ref'] ?? '')], 'commit' => ['hash' => (string) ($pull['head']['sha'] ?? '')]],
+            'source' => ['branch' => ['name' => $branch], 'commit' => ['hash' => (string) ($pull['head']['sha'] ?? '')]],
             'destination' => ['branch' => ['name' => (string) ($pull['base']['ref'] ?? '')], 'commit' => ['hash' => (string) ($pull['base']['sha'] ?? '')]],
             'merge_commit' => isset($pull['merge_commit_sha']) && isset($pull['merged_at']) ? ['hash' => (string) $pull['merge_commit_sha']] : null,
             'author' => ['display_name' => (string) ($pull['user']['login'] ?? '')],
             'updated_on' => $pull['updated_at'] ?? null,
             // Whether its branch is in this repository: one from a fork is not.
-            'from_fork' => ($pull['head']['repo']['full_name'] ?? null) !== ($pull['base']['repo']['full_name'] ?? null),
+            'from_fork' => $fork,
+            'fork_branch' => $fork ? (string) ($pull['head']['label'] ?? $pull['head']['ref'] ?? '') : null,
         ];
     }
 

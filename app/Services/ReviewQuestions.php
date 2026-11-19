@@ -215,7 +215,10 @@ class ReviewQuestions
         }
 
         // A reply that may be for someone else counts once it turns out to be for the reviewer.
-        $refusal = $this->refusal($repository, (int) $pullRequest['id'], count: $addressing === self::ADDRESSED);
+        // A fork's pull request that may not be reviewed by itself is not answered
+        // either: the answer reads its code in the same sandbox.
+        $refusal = ReviewRequest::forkRefusal($repository, $pullRequest)
+            ?? $this->refusal($repository, (int) $pullRequest['id'], count: $addressing === self::ADDRESSED);
 
         if ($refusal !== null) {
             // Said only to someone who asked the reviewer: a reply that may be for a

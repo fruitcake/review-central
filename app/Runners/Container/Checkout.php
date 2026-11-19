@@ -6,6 +6,7 @@ namespace App\Runners\Container;
 
 use App\Exceptions\CheckoutFailed;
 use App\Models\Repository;
+use App\SourceControl\PullRef;
 use Illuminate\Support\Facades\Process;
 
 /**
@@ -26,7 +27,10 @@ class Checkout
     protected const TIMEOUT = 600;
 
     /**
-     * Clones the branch into an empty directory.
+     * Clones the branch into an empty directory. A pull request from a fork, which
+     * goes by its pull ref ({@see PullRef}), is fetched through that ref on top of
+     * the repository's main branch: the destination is fetched later, when the
+     * range is prepared.
      *
      * @return string the commit that is checked out
      *
@@ -37,11 +41,17 @@ class Checkout
         $this->guard($branch);
 
         $access = $repository->sourceControl()->cloneAccess();
+        $pullRef = PullRef::id($branch) !== null;
 
         $this->git($repository, null, [
             'clone', '--filter=blob:none', '--no-tags', '--single-branch', '--no-recurse-submodules',
-            '--branch', $branch, '--', $access['url'], $directory,
+            ...($pullRef ? [] : ['--branch', $branch]), '--', $access['url'], $directory,
         ], 'clone');
+
+        if ($pullRef) {
+            $this->git($repository, $directory, ['fetch', '--filter=blob:none', '--no-tags', 'origin', "+refs/{$branch}:refs/remotes/origin/{$branch}"], 'fetch');
+            $this->git($repository, $directory, ['checkout', '--detach', "refs/remotes/origin/{$branch}"], 'checkout');
+        }
 
         if ($commit !== null) {
             $this->guard($commit);
@@ -172,9 +182,12 @@ class Checkout
     {
         $this->guard($branch);
 
+        // A pull ref is a ref of its own, not under heads/.
+        $source = PullRef::id($branch) !== null ? "refs/{$branch}" : "refs/heads/{$branch}";
+
         $this->git($repository, $directory, [
             'fetch', '--filter=blob:none', '--no-tags', 'origin',
-            "+refs/heads/{$branch}:refs/remotes/origin/{$branch}",
+            "+{$source}:refs/remotes/origin/{$branch}",
         ], 'fetch');
 
         if ($commit !== null) {

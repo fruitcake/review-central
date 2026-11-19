@@ -145,6 +145,22 @@ class BitbucketDriver implements SourceControlDriver
         );
     }
 
+    /**
+     * Whether a pull request in a delivery comes from a fork, as getPullRequest()
+     * says it: Bitbucket keeps no copy of a fork's branch in the repository, so
+     * such a pull request is not reviewed by itself.
+     *
+     * @param  array<string, mixed>  $pullRequest
+     * @return array<string, mixed>
+     */
+    protected static function withFork(array $pullRequest): array
+    {
+        $source = $pullRequest['source']['repository']['full_name'] ?? null;
+        $destination = $pullRequest['destination']['repository']['full_name'] ?? null;
+
+        return $pullRequest + ['from_fork' => is_string($source) && is_string($destination) && strcasecmp($source, $destination) !== 0];
+    }
+
     public function webhookHelp(): string
     {
         return 'Starts a review on a /review comment, when a draft is marked ready, and on every new commit of a pull request. "Add it for me" adds it for every repository of the workspace. By hand it goes on each repository, under Repository settings, Webhooks, with the pull request events Created, Updated, Merged, Declined and Comment created.';
@@ -175,7 +191,7 @@ class BitbucketDriver implements SourceControlDriver
             },
             (string) $workspace,
             (string) $slug,
-            is_array($payload['pullrequest'] ?? null) ? $payload['pullrequest'] : [],
+            is_array($payload['pullrequest'] ?? null) ? self::withFork($payload['pullrequest']) : [],
             is_string($comment) ? $comment : null,
             is_numeric($payload['comment']['id'] ?? null) ? (int) $payload['comment']['id'] : null,
             is_string($payload['comment']['user']['display_name'] ?? null) ? $payload['comment']['user']['display_name'] : null,

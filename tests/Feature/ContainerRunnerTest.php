@@ -78,6 +78,19 @@ function pullRequestPayload(array $attributes = []): array
     ]];
 }
 
+it('never reviews a pull request from a fork on Bitbucket by itself, which keeps no copy of its branch here', function () {
+    Queue::fake();
+    $this->repository->tenant->update(['review_forks' => true]);
+
+    deliver('pullrequest:updated', pullRequestPayload([
+        'source' => ['branch' => ['name' => 'main'], 'commit' => ['hash' => str_repeat('a', 12)], 'repository' => ['full_name' => 'someone/shop']],
+        'destination' => ['branch' => ['name' => 'main'], 'repository' => ['full_name' => 'acme/shop']],
+    ]))->assertOk();
+
+    // Its branch is the fork's main: reviewing "main" here would review this repository's.
+    Queue::assertNothingPushed();
+});
+
 it('starts a review from the webhook when a pull request gets a new commit', function () {
     Queue::fake();
     $other = Repository::factory()->create(['tenant_id' => $this->repository->tenant_id, 'connection_id' => $this->repository->connection_id, 'slug' => 'another']);

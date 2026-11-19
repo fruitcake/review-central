@@ -19,6 +19,7 @@ No runner starts a server from the checkout or runs Composer scripts or plugins.
 - **Use gVisor or another sandboxing runtime.** Docker's own runtime shares the host's kernel with the code under review: use it for your own repositories at most.
 - **Give tokens the narrowest scopes** the connection asks for.
 - **Decide who may comment `/review`.** Every review spends the tenant's AI budget, and by default anyone who can comment on a pull request can start one. On a repository that outside contributors can comment on, list the accounts that may under **Review settings → Starting a review by comment**, or turn the command off.
+- **Leave pull requests from forks off** on a public repository unless you mean it. Turned on, anyone who opens a pull request from a fork has their code run in the sandbox with the tenant's AI key, on every push. Off (the default), a member starts such a review on purpose.
 - **Everyone in a tenant can manage it.** Its members can add and change connections and their credentials, see the webhook secret and change the review settings. Invite only people you would trust with those.
 - **Back up `APP_KEY`** apart from the database: it encrypts every stored token and key, and without it they cannot be read again.
 - **Serve over HTTPS** with `APP_DEBUG=false`. **Admin → Setup** checks both.
