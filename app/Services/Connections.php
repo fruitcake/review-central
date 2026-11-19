@@ -24,7 +24,8 @@ class Connections
      */
     public function prepare(Connection $connection): void
     {
-        if ($connection->kind === ConnectionKind::SourceControl && $connection->webhook_key === null) {
+        // The GitHub App's one webhook delivers for every installation of it.
+        if ($connection->kind === ConnectionKind::SourceControl && $connection->webhook_key === null && $connection->driver !== 'github-app') {
             $connection->webhook_key = Str::lower(Str::random(32));
             $connection->webhook_secret = Str::random(40);
         }

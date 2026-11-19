@@ -54,4 +54,18 @@ return [
         'client_secret' => env('ATLASSIAN_CLIENT_SECRET'),
     ],
 
+    // Reviewing on GitHub as an app of its own instead of with a token: this
+    // installation registered as a GitHub App, which a tenant installs on its
+    // organisation. Its callback address is <APP_URL>/connections/oauth/callback,
+    // its webhook <APP_URL>/api/webhooks/github-app with this secret. The private
+    // key as PEM text, or the path of the file it is in.
+    'github_app' => [
+        'id' => env('GITHUB_APP_ID'),
+        'slug' => env('GITHUB_APP_SLUG'),
+        'client_id' => env('GITHUB_APP_CLIENT_ID'),
+        'client_secret' => env('GITHUB_APP_CLIENT_SECRET'),
+        'private_key' => env('GITHUB_APP_PRIVATE_KEY'),
+        'webhook_secret' => env('GITHUB_APP_WEBHOOK_SECRET'),
+    ],
+
 ];

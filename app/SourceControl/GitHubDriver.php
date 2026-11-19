@@ -100,7 +100,7 @@ class GitHubDriver implements SourceControlDriver
     {
         $owner = (string) $connection->setting('workspace');
 
-        if ($owner === '' || $connection->credential('access_token') === null) {
+        if ($owner === '' || $this->token($connection) === null) {
             throw new ConnectionFailed('A webhook needs an owner and a token.');
         }
 
@@ -158,7 +158,16 @@ class GitHubDriver implements SourceControlDriver
 
     public function client(Repository $repository): GitHubClient
     {
-        return new GitHubClient($repository->workspace, $repository->slug, $repository->integration->credential('access_token'));
+        return new GitHubClient($repository->workspace, $repository->slug, $this->token($repository->integration));
+    }
+
+    /**
+     * What the connection reaches GitHub with: its token, or none for public
+     * repositories.
+     */
+    protected function token(Connection $connection): ?string
+    {
+        return $connection->credential('access_token');
     }
 
     /**
@@ -177,6 +186,14 @@ class GitHubDriver implements SourceControlDriver
             return null;
         }
 
+        return $this->eventFrom($connection, $request);
+    }
+
+    /**
+     * A delivery whose signature is already checked, as the review reads it.
+     */
+    public function eventFrom(Connection $connection, Request $request): WebhookEvent
+    {
         $payload = $request->json()->all();
         $event = (string) $request->header('X-GitHub-Event');
         $owner = (string) ($payload['repository']['owner']['login'] ?? '');
@@ -226,7 +243,7 @@ class GitHubDriver implements SourceControlDriver
      */
     protected function readPullRequest(Connection $connection, string $owner, string $name, int $number): array
     {
-        $client = new GitHubClient($owner, $name, $connection->credential('access_token'));
+        $client = new GitHubClient($owner, $name, $this->token($connection));
 
         return rescue(fn (): ?array => $client->getPullRequest((string) $number), null) ?? ['id' => $number];
     }
@@ -241,7 +258,7 @@ class GitHubDriver implements SourceControlDriver
         $request = Http::timeout(15)->connectTimeout(4)
             ->withHeaders(['Accept' => 'application/vnd.github+json', 'X-GitHub-Api-Version' => '2022-11-28'])
             ->withUserAgent('review-central');
-        $token = $connection->credential('access_token');
+        $token = $this->token($connection);
 
         return $token === null ? $request : $request->withToken($token);
     }

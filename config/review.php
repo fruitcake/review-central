@@ -14,6 +14,7 @@ use App\Runners\ContainerRunner;
 use App\Runners\DiffRunner;
 use App\SourceControl\BitbucketDriver;
 use App\SourceControl\GitDriver;
+use App\SourceControl\GitHubAppDriver;
 use App\SourceControl\GitHubDriver;
 use App\Tickets\AsanaDriver;
 use App\Tickets\GitHubIssuesDriver;
@@ -30,6 +31,8 @@ return [
             'bitbucket' => BitbucketDriver::class,
             // Read and cloned from, never posted to: a review of theirs is kept here.
             'github' => GitHubDriver::class,
+            // As this installation's GitHub App, where one is set up (services.github_app).
+            'github-app' => GitHubAppDriver::class,
             'git' => GitDriver::class,
         ],
         ConnectionKind::Tickets->value => [

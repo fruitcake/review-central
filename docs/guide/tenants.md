@@ -8,6 +8,7 @@ In the tenant's panel, at `/app/<tenant>`:
 
 2. **Source control**: add the host.
    - **GitHub**: a fine-grained personal access token for the repositories, with read access to Contents and Metadata, read and write access to Pull requests, Issues and Commit statuses, and Webhooks to have the webhook added for you. The review comments, approves and requests changes as the account that owns the token, so give it an account of its own, a machine user: GitHub does not let an account approve its own pull request. The owner is the user or organisation from the address. Without a token, a public repository is only read, and its pull requests can be tried.
+   - **GitHub App**, where the installation has [one set up](#github-as-an-app): install the app on the organisation, add the connection with the organisation as its owner, and use **Connect** in the list. No token, and no webhook to add.
    - **Bitbucket Cloud**: a workspace access token that may write pull requests.
    - **Git**: clones any other host over HTTPS, and posts nothing.
 
@@ -34,11 +35,29 @@ On GitHub the review acts as the account that owns the token. That has a few con
 - **It cannot approve or request changes on its own pull requests.** GitHub refuses that for any account, so on a pull request opened by the token's owner the review posts its comments and description, and its verdict is refused; the run's details say so. Another reason for an account of its own.
 - **The commit status always lands.** "AI Review" is red when a finding holds the merge, also where the verdict was refused. To have it hold the merge, make it a required status check in the branch's protection rules.
 - **`@review` is someone's GitHub user name.** A question that starts with `@review` mentions that account, which on a public repository notifies a stranger. On a public repository, ask in a reply under one of the review's own comments instead: a reply there that names nobody is taken as a question for the reviewer when it reads as one.
-- **No tasks and no check run.** GitHub has no tasks on a pull request, and only a GitHub App may create a check run with annotations. The findings are comments on their lines, and the request for changes is what holds the merge.
+- **No tasks and no check run.** GitHub has no tasks on a pull request, and only a GitHub App may create a check run with annotations: see [GitHub as an app](#github-as-an-app). The findings are comments on their lines, and the request for changes is what holds the merge.
 
 A token expires: note the date, and replace it on the connection before then. **Test** on the connection says whether it still works.
 
 A tenant's own colours are set on the tenant: see [Appearance](./appearance).
+
+## GitHub as an app
+
+Instead of a token per connection, the installation can be registered as a GitHub App, which tenants install on their organisation. The review then comments and approves as the app, `<name>[bot]`, which needs no machine user and no token that expires. Its state on a pull request is a check, *AI Review*, with the report as its summary and the findings as annotations on their lines under **Files changed**. A pull request that waits for approval (see [Pull requests](./reviews#pull-requests)) gets a check that needs action, with an **Approve and review** button: pressed by one of the tenant's trusted accounts, it starts the review; anyone else's press does nothing.
+
+An app cannot be added as a reviewer, and `@<app name>` notifies nobody. `/review` and `@review` work as with a token: the webhook brings every comment.
+
+To register it, as the installation's administrator: on GitHub, under the organisation's (or your own) **Settings → Developer settings → GitHub Apps → New GitHub App**:
+
+- **Callback URL**: `<APP_URL>/connections/oauth/callback`. Leave *Request user authorization (OAuth) during installation* off.
+- **Webhook URL**: `<APP_URL>/api/webhooks/github-app`, with a secret of your own.
+- **Repository permissions**: Contents and Metadata read; Pull requests, Issues, Commit statuses and Checks read and write.
+- **Events**: Pull request, Issue comment, Pull request review comment, Check run.
+- **Where can this GitHub App be installed**: *Any account*, for tenants outside your own organisation.
+
+Then generate a private key, and set `GITHUB_APP_ID`, `GITHUB_APP_SLUG` (the name in the app's address), `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY` (the PEM file's path, or its contents) and `GITHUB_APP_WEBHOOK_SECRET`. Until all but the secret are set, *GitHub App* is not offered as a connection.
+
+**Connect** signs the person in at GitHub once, to check that they can manage the app's installation on the connection's owner; their own token is revoked straight after. An installation belongs to one connection.
 
 ## Signing in with Google
 
