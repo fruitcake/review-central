@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "9e7d8e7263a72c44b9e2454972865b23",
+    "content-hash": "b79a1c1ba834435557720d1f83beef2a",
     "packages": [
         {
             "name": "anourvalar/eloquent-serialize",
@@ -7764,16 +7764,16 @@
         },
         {
             "name": "symfony/mercure",
-            "version": "v0.8.0",
+            "version": "v0.10.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/mercure.git",
-                "reference": "920f08c73793f37e94981e5d9fc1a84351ec8c6c"
+                "reference": "b6d218603ddd14fa80fe3cad1361e40879514ca0"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/symfony/mercure/zipball/920f08c73793f37e94981e5d9fc1a84351ec8c6c",
-                "reference": "920f08c73793f37e94981e5d9fc1a84351ec8c6c",
+                "url": "https://api.github.com/repos/symfony/mercure/zipball/b6d218603ddd14fa80fe3cad1361e40879514ca0",
+                "reference": "b6d218603ddd14fa80fe3cad1361e40879514ca0",
                 "shasum": ""
             },
             "require": {
@@ -7803,7 +7803,7 @@
                     "name": "dunglas/mercure"
                 },
                 "branch-alias": {
-                    "dev-main": "0.8.x-dev"
+                    "dev-main": "0.10.x-dev"
                 }
             },
             "autoload": {
@@ -7835,7 +7835,7 @@
             ],
             "support": {
                 "issues": "https://github.com/symfony/mercure/issues",
-                "source": "https://github.com/symfony/mercure/tree/v0.8.0"
+                "source": "https://github.com/symfony/mercure/tree/v0.10.0"
             },
             "funding": [
                 {
@@ -7847,7 +7847,7 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-08-11T07:23:36+00:00"
+            "time": "2026-11-03T07:27:54+00:00"
         },
         {
             "name": "symfony/mime",
