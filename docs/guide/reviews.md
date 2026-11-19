@@ -3,8 +3,9 @@
 ## Settings and instructions
 
 - **Review settings**, in the sidebar, choose the reviewers and their share, the model and the effort for every repository of the tenant. A reviewer can have a monthly budget, in the tenant's currency: once its reviews have cost that much across the tenant it is passed over for the rest of the month. Give the first reviewer a share and a budget and the second a share of 0 to use one until its budget is spent and the other after. A repository can set its own under **Review settings**.
-- **Starting a review by comment**, on the same page, says who may start one by commenting `/review` on a pull request: anyone who can comment (the default), only the accounts listed there, or nobody. An account is listed by its GitHub user name or Bitbucket nickname, or its account ID, never by its display name, which anyone can copy. Anyone else gets a reply saying so, and nothing starts. It holds for every repository of the tenant; a review still starts on every push, and from the panel.
-- **Pull requests from forks**, on the same page, are not reviewed by themselves unless that is turned on: a fork's code is anyone's, and a review runs it in the sandbox with the tenant's AI key and on its budget. Turned on, a pull request from a fork on GitHub is reviewed on every push and on a comment, as any other; off, a `/review` comment or a question on one gets a reply saying so. A tenant member can still start one under **Reviews → Review a pull request**, with `pull/<number>/head` as the branch. On Bitbucket, which keeps no copy of a fork's branch in the repository, a pull request from a fork is never reviewed by itself; it can be [tried](#trying-a-pull-request) from the diff alone.
+- **Trusted accounts**, on the same page, are the tenant's own people on its hosts: listed by GitHub user name or Bitbucket nickname, or account ID, never by display name, which anyone can copy. A repository can review only their pull requests by itself (see [Pull requests](#pull-requests)), and the `/review` command can be limited to them.
+- **Starting a review by comment**, on the same page, says who may start one by commenting `/review` on a pull request: anyone who can comment (the default), only the trusted accounts, or nobody. Anyone else gets a reply saying so, and nothing starts. It holds for every repository of the tenant; on one that reviews only the trusted accounts' pull requests, only they can, whatever this says. A review still starts on every push, and from the panel.
+- **Pull requests from forks**, on the same page, are not reviewed by themselves unless that is turned on: a fork's code is anyone's, and a review runs it in the sandbox with the tenant's AI key and on its budget. Turned on, a pull request from a fork on GitHub is reviewed on every push and on a comment, as any other; off, it waits under **Pull requests**, and a `/review` comment or a question on one gets a reply saying so. On Bitbucket, which keeps no copy of a fork's branch in the repository, a pull request from a fork is never reviewed by itself; it can be [tried](#trying-a-pull-request) from the diff alone.
 - **Instructions** are what the review is told to look for: a method, the defect lenses and a guide per stack. The administrator keeps the defaults; a tenant can copy one and change it for its own repositories. What is saved is what the next review reads.
 
 ## What the reviewer reads in the repository
@@ -20,6 +21,17 @@ A team writes down how its code works, and what counts as a defect there, in the
 | `.opencodereview/rule.json` | OpenCodeReview's own rules, read from the destination branch. |
 
 None of them is needed: without them the reviewer goes by the review instructions and the stack guides alone. They can raise what the reviewer reports, never lower what it needs as evidence or change what it may run.
+
+## Pull requests
+
+**Pull requests** lists the open pull requests of the tenant's repositories, as their webhooks told of them: its title, its author, and where its review stands. It fills as webhooks arrive, so a pull request opened before this shows once it changes.
+
+A repository reviews every pull request by itself on a push, unless its settings say otherwise:
+
+- **Review its pull requests** off: nothing starts by itself. Its pull requests are listed, and a tenant member starts a review with **Review**.
+- **Whose pull requests are reviewed by themselves** set to the trusted accounts: theirs are reviewed on every push, as before. Anyone else's waits, and so does a pull request from a fork while those are not reviewed by themselves. A waiting pull request shows on its host as an *AI Review* build status in progress, *Waiting for someone in the team to start the review*, which leads here. **Approve and review** starts it; the review's own status then replaces the waiting one. A new push waits again.
+
+For a public repository this keeps outside contributors from spending the tenant's AI budget, while the team's own pull requests are reviewed as they are pushed.
 
 ## Reviews and cost
 

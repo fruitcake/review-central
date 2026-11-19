@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\BuildState;
 use App\Enums\ReviewCommandAccess;
-use App\Models\PullRequestDraft;
+use App\Enums\ReviewsFrom;
+use App\Filament\App\Resources\PullRequests\PullRequestResource;
+use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Models\Tenant;
@@ -17,6 +20,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
+use Throwable;
 
 /**
  * Starts the AI review from the connection's webhook: for every new head of a pull
@@ -81,15 +85,17 @@ class ReviewRequest
      */
     public function handle(Repository $repository, WebhookEvent $event): void
     {
-        if (! $this->runsTheReview($repository)) {
+        // Every pull request is kept, reviewed by itself or not: the overview lists
+        // them, for a person to start the ones that wait.
+        if ($event->type === WebhookEvent::PULL_REQUEST_CHANGED) {
+            $this->handlePullRequest($repository, $event->pullRequest);
+
             return;
         }
 
-        match ($event->type) {
-            WebhookEvent::COMMENT_CREATED => $this->handleComment($repository, $event),
-            WebhookEvent::PULL_REQUEST_CHANGED => $this->handlePullRequest($repository, $event->pullRequest),
-            default => null,
-        };
+        if ($event->type === WebhookEvent::COMMENT_CREATED && $this->runsTheReview($repository)) {
+            $this->handleComment($repository, $event);
+        }
     }
 
     protected function handleComment(Repository $repository, WebhookEvent $event): void
@@ -116,6 +122,15 @@ class ReviewRequest
                 ReviewCommandAccess::Nobody => 'A review is not started by comment here.',
                 default => 'Only the accounts this team has listed in Review Central can start a review by comment.',
             }.' A review still starts on every push to the pull request.');
+
+            return;
+        }
+
+        // Where only the trusted accounts' pull requests are reviewed by themselves,
+        // only they start one by comment too, whoever else may comment /review.
+        if ($repository->reviews_from === ReviewsFrom::Trusted
+            && ! $repository->tenant->trusts($event->commentAuthorId, $event->commentAuthorNickname)) {
+            $this->refuse($repository, $event, 'On this repository only the accounts this team trusts start a review. Someone in the team can start it from Review Central.');
 
             return;
         }
@@ -169,9 +184,10 @@ class ReviewRequest
     }
 
     /**
-     * Keeps whether the pull request is a draft, and starts the review when it was
-     * one and is not any more, unless its head is reviewed or being reviewed. Marked
-     * ready again without new commits, it has nothing new to review.
+     * Keeps the open pull request for the overview, and starts the review of a new
+     * head, or of a draft marked ready, unless its head is reviewed or being
+     * reviewed. Marked ready again without new commits, it has nothing new to
+     * review. One the repository does not review by itself waits for a person.
      *
      * @param  array<string, mixed>  $data
      */
@@ -184,7 +200,7 @@ class ReviewRequest
         $key = ['repository_id' => $repository->getKey(), 'pull_request_id' => (int) $data['id']];
 
         if (($data['state'] ?? null) !== 'OPEN') {
-            PullRequestDraft::query()->where($key)->delete();
+            OpenPullRequest::query()->where($key)->delete();
 
             // Merged or declined: what the reviewer kept of it has no further use.
             if (is_string($data['source']['branch']['name'] ?? null)) {
@@ -198,10 +214,12 @@ class ReviewRequest
 
         // Created outside the transaction, so a second delivery racing to create the
         // same row finds it instead of failing on the unique key.
-        PullRequestDraft::query()->createOrFirst($key, ['draft' => $data['draft'], 'source_updated_on' => $updatedOn]);
+        OpenPullRequest::query()->createOrFirst($key, ['draft' => $data['draft'], 'source_updated_on' => $updatedOn]);
 
-        $markedReady = DB::transaction(function () use ($key, $data, $updatedOn): bool {
-            $record = PullRequestDraft::query()->where($key)->lockForUpdate()->firstOrFail();
+        $commit = $data['source']['commit']['hash'] ?? null;
+
+        $markedReady = DB::transaction(function () use ($key, $data, $updatedOn, $commit): bool {
+            $record = OpenPullRequest::query()->where($key)->lockForUpdate()->firstOrFail();
 
             // Deliveries arrive out of order, so an older snapshot says nothing.
             if ($updatedOn !== null && $record->source_updated_on !== null && $updatedOn < $record->source_updated_on) {
@@ -209,20 +227,27 @@ class ReviewRequest
             }
 
             $wasDraft = $record->draft;
-            $record->draft = $data['draft'];
-            $record->source_updated_on = $updatedOn ?? $record->source_updated_on;
+            $record->forceFill([
+                'draft' => $data['draft'],
+                'source_updated_on' => $updatedOn ?? $record->source_updated_on,
+                'title' => self::text($data['title'] ?? null),
+                'author' => self::text($data['author']['display_name'] ?? null),
+                'author_id' => self::text($data['author']['account_id'] ?? null),
+                'author_nickname' => self::text($data['author']['nickname'] ?? null),
+                'branch' => self::text($data['source']['branch']['name'] ?? null),
+                'from_fork' => ($data['from_fork'] ?? false) === true,
+            ]);
+
+            // A new head waits afresh, if it waits at all: decided below.
+            if (is_string($commit) && $commit !== '' && $record->commit !== $commit) {
+                $record->commit = $commit;
+                $record->awaiting_approval = false;
+            }
+
             $record->save();
 
             return $wasDraft && ! $record->draft;
         });
-
-        $commit = $data['source']['commit']['hash'] ?? null;
-
-        // A fork's pull request that may not be reviewed by itself is left alone:
-        // nothing is said on it, since nobody asked.
-        if (self::forkRefusal($repository, $data) !== null) {
-            return;
-        }
 
         // Nothing else starts a review: every new head of a pull request that is
         // not a draft is started here. The review's own edit of the description
@@ -233,11 +258,69 @@ class ReviewRequest
             return;
         }
 
+        // Turned off, or added to try a review on: listed, and left to a person.
+        if (! $this->runsTheReview($repository)) {
+            return;
+        }
+
+        // A fork's pull request that may not be reviewed by itself, or one by an
+        // account the team does not trust where only theirs are: it waits for
+        // someone in the team, and says so on the pull request, once per head.
+        if (self::forkRefusal($repository, $data) !== null || ! $this->reviewsAuthorOf($repository, $data)) {
+            if (Cache::add("review-await:{$repository->getKey()}:{$data['id']}:{$commit}", true, self::SAME_PUSH_SECONDS)) {
+                $this->await($repository, $key, $commit);
+            }
+
+            return;
+        }
+
         // A host sends more than one event for one push, and the first has no run
         // on record yet when the second arrives.
-        if (Cache::add("review-start:{$repository->getKey()}:{$data['id']}:{$commit}", true, self::SAME_PUSH_SECONDS)) {
-            $this->start($repository, $data['source']['branch']['name'] ?? null);
+        if (! Cache::add("review-start:{$repository->getKey()}:{$data['id']}:{$commit}", true, self::SAME_PUSH_SECONDS)) {
+            return;
         }
+
+        $this->start($repository, $data['source']['branch']['name'] ?? null);
+    }
+
+    /**
+     * Whether the repository reviews this pull request's author's work by itself.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function reviewsAuthorOf(Repository $repository, array $data): bool
+    {
+        return $repository->reviews_from === ReviewsFrom::Everyone
+            || $repository->tenant->trusts(self::text($data['author']['account_id'] ?? null), self::text($data['author']['nickname'] ?? null));
+    }
+
+    /**
+     * Marks the pull request as waiting for someone to start its review, and shows
+     * that on its head as the review's build status, which leads to the overview.
+     * The review's own status replaces it once it starts.
+     *
+     * @param  array{repository_id: mixed, pull_request_id: int}  $key
+     */
+    protected function await(Repository $repository, array $key, string $commit): void
+    {
+        OpenPullRequest::query()->where($key)->where('commit', $commit)->update(['awaiting_approval' => true]);
+
+        try {
+            $repository->sourceControl()->setBuildStatus(
+                $commit,
+                BuildState::InProgress,
+                PullRequestResource::getUrl('index', panel: 'app', tenant: $repository->tenant),
+                'Waiting for someone in the team to start the review in Review Central',
+            );
+        } catch (Throwable $exception) {
+            // Best effort: the pull request is listed either way.
+            report($exception);
+        }
+    }
+
+    protected static function text(mixed $value): ?string
+    {
+        return is_string($value) && $value !== '' ? $value : null;
     }
 
     /**
@@ -247,7 +330,7 @@ class ReviewRequest
      * @param  bool  $strict  throw when the repository's runner is not set up, for a person who asked in the panel
      *
      * @throws RuntimeException when $strict and the runner is not set up
-     * @throws \Throwable when the runner could not start it
+     * @throws Throwable when the runner could not start it
      */
     public function start(Repository $repository, mixed $branch, bool $strict = false): void
     {
@@ -266,6 +349,9 @@ class ReviewRequest
         // Not pinned to a commit: the delivery only carries an abbreviated hash, and
         // the branch as it is now is what the person asked to have reviewed.
         $repository->runner()->start($repository, $branch);
+
+        // Started, by a person or by itself: none of its pull requests waits any more.
+        OpenPullRequest::query()->where('repository_id', $repository->getKey())->where('branch', $branch)->update(['awaiting_approval' => false]);
     }
 
     /**

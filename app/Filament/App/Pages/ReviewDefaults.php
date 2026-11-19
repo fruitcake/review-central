@@ -66,20 +66,23 @@ class ReviewDefaults extends Page
             // Claude's and Codex's model and effort are set with the AI provider they run on.
             ->components([
                 Section::make()->schema(ReviewSettingsForm::fields(withProviders: false)),
+                Section::make('Trusted accounts')
+                    ->description('For every repository of this team. The accounts whose pull requests a repository that reviews only theirs reviews by itself, and who may comment /review when only they may. The others\' pull requests wait under Pull requests for someone here to start them.')
+                    ->schema([
+                        TagsInput::make('review_command_accounts')
+                            ->label('Accounts')
+                            ->helperText('Bitbucket nicknames or GitHub user names, as in the address of their profile, or account IDs. A display name is not enough: anyone can take any.')
+                            ->placeholder('Add an account')
+                            ->required(fn (Get $get): bool => $get('review_command') === ReviewCommandAccess::Listed->value),
+                    ]),
                 Section::make('Starting a review by comment')
-                    ->description('For every repository of this team. Commenting /review on a pull request starts a review of it. On a repository outside contributors can comment on, that is anyone spending this team\'s budget. A review still starts on every push, and from this panel, whatever this says.')
+                    ->description('For every repository of this team. Commenting /review on a pull request starts a review of it. On a repository outside contributors can comment on, that is anyone spending this team\'s budget. On a repository that reviews only the trusted accounts\' pull requests, only they can. A review still starts on every push, and from this panel, whatever this says.')
                     ->schema([
                         Select::make('review_command')
                             ->label('Who may comment /review')
                             ->options(ReviewCommandAccess::options())
                             ->required()
                             ->live(),
-                        TagsInput::make('review_command_accounts')
-                            ->label('Accounts')
-                            ->helperText('Bitbucket nicknames or GitHub user names, as in the address of their profile, or account IDs. A display name is not enough: anyone can take any.')
-                            ->placeholder('Add an account')
-                            ->visible(fn (Get $get): bool => $get('review_command') === ReviewCommandAccess::Listed->value)
-                            ->required(fn (Get $get): bool => $get('review_command') === ReviewCommandAccess::Listed->value),
                     ]),
                 Section::make('Pull requests from forks')
                     ->description('For every repository of this team. A pull request from a fork is anyone\'s code: reviewed, it runs in the sandbox with this team\'s AI key and on its budget. Off, such a pull request is reviewed only when someone here starts it from this panel. Only GitHub keeps a fork\'s head in the repository itself; on Bitbucket a fork\'s pull request can be reviewed from the diff alone, as a trial.')

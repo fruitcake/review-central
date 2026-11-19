@@ -23,7 +23,7 @@ enum ReviewCommandAccess: string
     {
         return match ($this) {
             self::Anyone => 'Anyone who can comment on the pull request',
-            self::Listed => 'Only the accounts listed below',
+            self::Listed => 'Only the trusted accounts',
             self::Nobody => 'Nobody: reviews start on a push, or from here',
         };
     }

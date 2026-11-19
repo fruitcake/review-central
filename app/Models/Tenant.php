@@ -21,7 +21,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property array<int, string>|null $sign_in_domains The organisations' domains whose people may join by signing in
  * @property array<string, mixed>|null $theme_colors Its own ink, accent and button colour, each a hex colour or left out
  * @property ReviewCommandAccess $review_command Who may start a review by commenting /review
- * @property array<int, string>|null $review_command_accounts The source control accounts that may, by nickname or account ID
+ * @property array<int, string>|null $review_command_accounts The trusted source control accounts, by nickname or account ID: who may comment /review when only they may, and whose pull requests are reviewed where only theirs are
  * @property bool $review_forks Whether a pull request from a fork is reviewed on a push and on a comment
  */
 class Tenant extends Model
@@ -64,15 +64,25 @@ class Tenant extends Model
         return match ($this->review_command) {
             ReviewCommandAccess::Anyone => true,
             ReviewCommandAccess::Nobody => false,
-            ReviewCommandAccess::Listed => collect($this->review_command_accounts ?? [])
-                ->map(fn (mixed $account): string => mb_strtolower(trim((string) $account)))
-                ->filter()
-                ->intersect(array_filter([
-                    $accountId === null ? null : mb_strtolower($accountId),
-                    $nickname === null ? null : mb_strtolower($nickname),
-                ]))
-                ->isNotEmpty(),
+            ReviewCommandAccess::Listed => $this->trusts($accountId, $nickname),
         };
+    }
+
+    /**
+     * Whether an account is one of the team's trusted accounts: those that may
+     * comment /review when only they may, and whose pull requests a repository
+     * that reviews only theirs reviews by itself. Matched as above.
+     */
+    public function trusts(?string $accountId, ?string $nickname): bool
+    {
+        return collect($this->review_command_accounts ?? [])
+            ->map(fn (mixed $account): string => mb_strtolower(trim((string) $account)))
+            ->filter()
+            ->intersect(array_filter([
+                $accountId === null || $accountId === '' ? null : mb_strtolower($accountId),
+                $nickname === null || $nickname === '' ? null : mb_strtolower($nickname),
+            ]))
+            ->isNotEmpty();
     }
 
     /**

@@ -5,6 +5,7 @@ namespace App\Filament\App\Resources\Repositories;
 use App\Connections\SourceControlDriver;
 use App\Enums\ConnectionKind;
 use App\Enums\ReviewProvider;
+use App\Enums\ReviewsFrom;
 use App\Filament\App\Resources\Repositories\Pages\ManageRepositories;
 use App\Filament\Components\ReviewSettingsForm;
 use App\Filament\CurrentTenant;
@@ -91,8 +92,16 @@ class RepositoryResource extends Resource
                 Toggle::make('reviews_enabled')
                     ->label('Review its pull requests')
                     ->default(true)
+                    ->live()
                     ->visibleOn('edit')
-                    ->helperText('Off, nothing starts a review of this repository but a person: a repository added by trying a pull request starts that way.'),
+                    ->helperText('Off, nothing starts a review of this repository but a person, from Pull requests: a repository added by trying a pull request starts that way.'),
+                Select::make('reviews_from')
+                    ->label('Whose pull requests are reviewed by themselves')
+                    ->options(ReviewsFrom::options())
+                    ->default(ReviewsFrom::Everyone->value)
+                    ->selectablePlaceholder(false)
+                    ->visible(fn (Get $get, string $operation): bool => $operation === 'edit' && (bool) $get('reviews_enabled'))
+                    ->helperText('The trusted accounts are set under Review settings. The others\' pull requests wait under Pull requests, and show on the pull request as waiting, until someone here starts the review. For a public repository.'),
                 CheckboxList::make('review_stack')
                     ->label('Stack')
                     ->options(fn (): array => array_combine($stacks = ReviewStack::known(CurrentTenant::get()), array_map('ucfirst', $stacks)))
@@ -122,7 +131,7 @@ class RepositoryResource extends Resource
                 TextColumn::make('slug')
                     ->label('Repository')
                     ->formatStateUsing(fn (Repository $record): string => $record->fullName())
-                    ->description(fn (Repository $record): ?string => $record->reviews_enabled ? $record->name : 'Trials only: its pull requests are not reviewed')
+                    ->description(fn (Repository $record): ?string => $record->reviews_enabled ? ($record->reviews_from === ReviewsFrom::Trusted ? trim($record->name.' · trusted accounts only', ' ·') : $record->name) : 'Not reviewed by itself: started from Pull requests')
                     ->searchable(['slug', 'workspace', 'name']),
                 TextColumn::make('integration.name')->label('Connection'),
                 // Also for a repository that follows the platform, which stores nothing.
