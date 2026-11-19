@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "review-central-sandbox",
+  "main": "src/index.ts",
+  // The day this was written; a later one may change what a Worker gets by default.
+  "compatibility_date": "2026-11-19",
+  "observability": { "enabled": true },
+  "containers": [
+    {
+      "class_name": "ReviewSandbox",
+      // A sandbox per Durable Object, started by it: one per review.
+      "scheduling_policy": "durable_object"
+      // No image of our own: a sandbox starts from Cloudflare's Debian image, the
+      // first review installs the tools, and the Worker keeps a snapshot of that
+      // for the rest. For the reviewer's own image instead, with every PHP
+      // version, see "An image of your own" in ../README.md:
+      //
+      //   "images": { "reviewer": { "dockerfile": "./Dockerfile" } }
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "REVIEW_SANDBOX", "class_name": "ReviewSandbox" }]
+  },
+  "exports": {
+    "ReviewSandbox": { "type": "durable-object", "storage": "sqlite" }
+  },
+  "r2_buckets": [
+    // The bucket review-central's `r2` disk points at. Change the name to yours.
+    { "binding": "BUCKET", "bucket_name": "review-central" }
+  ]
+}

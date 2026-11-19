@@ -1,0 +1,11 @@
+{
+  "title": "verdict",
+  "description": "The answer of the second check on one finding (verify-findings.sh). In the strict form OpenAI's API requires as it stands: every field required, nothing else allowed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "reason"],
+  "properties": {
+    "verdict": {"type": "string", "enum": ["holds", "refuted", "already_there", "excluded", "unclear"]},
+    "reason": {"type": "string"}
+  }
+}

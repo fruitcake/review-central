@@ -1,0 +1,245 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Runners\Container;
+
+use App\Exceptions\CheckoutFailed;
+use App\Models\Repository;
+use Illuminate\Support\Facades\Process;
+
+/**
+ * A fresh clone of a repository for one review, made on the worker itself, so the
+ * credentials it takes never reach the container that reads the code.
+ *
+ * Blobless rather than shallow: every commit and tree is there, so the merge base
+ * with the destination and the commit the last review ended on are always found,
+ * while file contents are only fetched for what is checked out and compared. The
+ * reviewer cannot fetch what is missing, so the diffs it will read are made here
+ * once, which brings in their contents.
+ */
+class Checkout
+{
+    /**
+     * Seconds one git command may take.
+     */
+    protected const TIMEOUT = 600;
+
+    /**
+     * Clones the branch into an empty directory.
+     *
+     * @return string the commit that is checked out
+     *
+     * @throws CheckoutFailed
+     */
+    public function clone(Repository $repository, string $branch, ?string $commit, string $directory): string
+    {
+        $this->guard($branch);
+
+        $access = $repository->sourceControl()->cloneAccess();
+
+        $this->git($repository, null, [
+            'clone', '--filter=blob:none', '--no-tags', '--single-branch', '--no-recurse-submodules',
+            '--branch', $branch, '--', $access['url'], $directory,
+        ], 'clone');
+
+        if ($commit !== null) {
+            $this->guard($commit);
+            $this->git($repository, $directory, ['checkout', '--detach', $commit], 'checkout');
+        }
+
+        return trim($this->git($repository, $directory, ['rev-parse', 'HEAD'], 'rev-parse'));
+    }
+
+    /**
+     * Clones an open pull request whose branch is in a fork, through the ref the
+     * host keeps it under in this repository (GitHub's pull/<number>/head): the
+     * destination branch, and the pull request's head checked out on top of it.
+     *
+     * @throws CheckoutFailed
+     */
+    public function clonePullRef(Repository $repository, string $destination, string $ref, string $directory): string
+    {
+        $this->guard($destination);
+
+        if (preg_match('#^pull/[0-9]+/head$#', $ref) !== 1) {
+            throw CheckoutFailed::unsafeName($ref);
+        }
+
+        $access = $repository->sourceControl()->cloneAccess();
+
+        $this->git($repository, null, [
+            'clone', '--filter=blob:none', '--no-tags', '--single-branch', '--no-recurse-submodules',
+            '--branch', $destination, '--', $access['url'], $directory,
+        ], 'clone');
+
+        $this->git($repository, $directory, ['fetch', '--filter=blob:none', '--no-tags', 'origin', "+refs/{$ref}:refs/remotes/origin/pull-head"], 'fetch');
+        $this->git($repository, $directory, ['checkout', '--detach', 'refs/remotes/origin/pull-head'], 'checkout');
+
+        return trim($this->git($repository, $directory, ['rev-parse', 'HEAD'], 'rev-parse'));
+    }
+
+    /**
+     * Clones a pull request that was merged, as it was: the commits that went in
+     * checked out, and the destination branch put back to where it was before them,
+     * so everything that compares with it sees the pull request's own change.
+     *
+     * A merge commit has the branch as its second parent. A squash is the change
+     * itself, on top of the destination as it was.
+     *
+     * @return array{head: string, base: string}
+     *
+     * @throws CheckoutFailed
+     */
+    public function cloneMerged(Repository $repository, string $destination, string $mergeCommit, string $directory): array
+    {
+        $this->guard($destination);
+
+        if (preg_match('/^[0-9a-f]{7,40}$/', $mergeCommit) !== 1) {
+            throw CheckoutFailed::unsafeName($mergeCommit);
+        }
+
+        $access = $repository->sourceControl()->cloneAccess();
+
+        $this->git($repository, null, [
+            'clone', '--filter=blob:none', '--no-tags', '--single-branch', '--no-recurse-submodules',
+            '--branch', $destination, '--', $access['url'], $directory,
+        ], 'clone');
+
+        $commits = preg_split('/\s+/', trim($this->git($repository, $directory, ['rev-list', '--parents', '-n', '1', $mergeCommit], 'rev-list'))) ?: [];
+
+        if (count($commits) < 2) {
+            throw CheckoutFailed::during('rev-list', "{$mergeCommit} has no commit before it on {$destination}.");
+        }
+
+        [$head, $base] = count($commits) > 2 ? [$commits[2], $commits[1]] : [$commits[0], $commits[1]];
+
+        $this->git($repository, $directory, ['checkout', '--detach', $head], 'checkout');
+        $this->git($repository, $directory, ['update-ref', "refs/remotes/origin/{$destination}", $base], 'update-ref');
+        $this->compare($repository, $directory, [$base]);
+
+        return ['head' => trim($this->git($repository, $directory, ['rev-parse', 'HEAD'], 'rev-parse')), 'base' => $base];
+    }
+
+    /**
+     * Fetches the destination branch and the contents of what the review compares:
+     * the pull request against its merge base, and against the commit the last
+     * review ended on.
+     *
+     * @throws CheckoutFailed when the destination cannot be fetched
+     */
+    public function prepareRange(Repository $repository, string $directory, string $destination, ?string $since): void
+    {
+        $this->guard($destination);
+
+        $this->git($repository, $directory, [
+            'fetch', '--filter=blob:none', '--no-tags', 'origin',
+            "+refs/heads/{$destination}:refs/remotes/origin/{$destination}",
+        ], 'fetch');
+
+        $base = trim($this->git($repository, $directory, ['merge-base', "origin/{$destination}", 'HEAD'], 'merge-base', tolerant: true));
+
+        $this->compare($repository, $directory, [$base, $since]);
+    }
+
+    /**
+     * Makes the diffs the reviewer will read, which brings in their contents.
+     *
+     * @param  array<int, string|null>  $from
+     */
+    protected function compare(Repository $repository, string $directory, array $from): void
+    {
+        foreach (array_filter($from) as $commit) {
+            // A commit that is gone after a force push has nothing to compare with.
+            if (preg_match('/^[0-9a-f]{7,40}$/', $commit)) {
+                $this->git($repository, $directory, ['diff', '--no-ext-diff', '--no-textconv', '--stat', $commit, 'HEAD'], 'diff', tolerant: true);
+            }
+        }
+    }
+
+    /**
+     * Moves a clone that already reviewed one commit to the branch as it is now,
+     * and throws away whatever the review left in the tree.
+     *
+     * Only for a clone whose git directory the reviewer could not write: git reads
+     * its configuration from there, and runs here with the host's credentials.
+     *
+     * @return string the commit that is checked out
+     *
+     * @throws CheckoutFailed
+     */
+    public function update(Repository $repository, string $directory, string $branch, ?string $commit): string
+    {
+        $this->guard($branch);
+
+        $this->git($repository, $directory, [
+            'fetch', '--filter=blob:none', '--no-tags', 'origin',
+            "+refs/heads/{$branch}:refs/remotes/origin/{$branch}",
+        ], 'fetch');
+
+        if ($commit !== null) {
+            $this->guard($commit);
+        }
+
+        $this->git($repository, $directory, ['checkout', '--force', '--detach', $commit ?? "origin/{$branch}"], 'checkout');
+        // Twice forced: also what is ignored, and directories with a repository of their own.
+        $this->git($repository, $directory, ['clean', '-ffdx'], 'clean');
+
+        return trim($this->git($repository, $directory, ['rev-parse', 'HEAD'], 'rev-parse'));
+    }
+
+    /**
+     * A name handed to git as an argument must not read as an option.
+     *
+     * @throws CheckoutFailed
+     */
+    protected function guard(string $name): void
+    {
+        if ($name === '' || str_starts_with($name, '-') || preg_match('/[\s\x00-\x1f:^~?*\[\\\\]|\.\./', $name)) {
+            throw CheckoutFailed::unsafeName($name);
+        }
+    }
+
+    /**
+     * @param  array<int, string>  $arguments
+     *
+     * @throws CheckoutFailed
+     */
+    protected function git(Repository $repository, ?string $directory, array $arguments, string $step, bool $tolerant = false): string
+    {
+        $access = $repository->sourceControl()->cloneAccess();
+
+        // A repository anyone can clone is cloned as anyone: a header with no
+        // password in it is a failed sign-in to some hosts, not no sign-in.
+        $anonymous = blank($access['password'] ?? null);
+
+        $process = Process::timeout(self::TIMEOUT)->env([
+            // The credentials as configuration from the environment: not in the
+            // arguments, and not written to the clone's own config.
+            'GIT_CONFIG_COUNT' => '4',
+            'GIT_CONFIG_KEY_0' => $anonymous ? 'credential.helper' : 'http.extraHeader',
+            'GIT_CONFIG_VALUE_0' => $anonymous ? '' : 'Authorization: Basic '.base64_encode("{$access['username']}:{$access['password']}"),
+            // Nothing the repository brings may run on the worker.
+            'GIT_CONFIG_KEY_1' => 'core.hooksPath',
+            'GIT_CONFIG_VALUE_1' => '/dev/null',
+            'GIT_CONFIG_KEY_2' => 'core.fsmonitor',
+            'GIT_CONFIG_VALUE_2' => 'false',
+            'GIT_CONFIG_KEY_3' => 'protocol.file.allow',
+            'GIT_CONFIG_VALUE_3' => 'never',
+            'GIT_TERMINAL_PROMPT' => '0',
+            'GIT_LFS_SKIP_SMUDGE' => '1',
+        ]);
+
+        if ($directory !== null) {
+            $process = $process->path($directory);
+        }
+
+        $result = $process->run(['git', ...$arguments]);
+
+        if ($result->failed() && ! $tolerant) {
+            throw CheckoutFailed::during($step, $result->errorOutput());
+        }
+
+        return $result->successful() ? $result->output() : '';
+    }
+}

@@ -1,0 +1,41 @@
+{
+  "title": "ai-review.json",
+  "description": "The review as SKILL.md describes it under Report file. run-claude.sh passes it to `claude -p --json-schema`, and run-codex.sh to `codex exec --output-schema` in the strict form strict-schema.jq derives from it; each writes what comes back to ai-review.json.",
+  "type": "object",
+  "required": ["result", "summary", "findings"],
+  "properties": {
+    "result": {"type": "string", "enum": ["PASSED", "FAILED"]},
+    "summary": {"type": "string"},
+    "changes": {"type": "array", "items": {"type": "string"}},
+    "before_release": {"type": "array", "items": {"type": "string"}},
+    "manual_review": {"type": "array", "items": {"type": "string"}, "description": "What only a person can settle about this change; see SKILL.md. Empty on nearly every pull request. With any, a passing review does not approve."},
+    "reviewed": {"type": "string"},
+    "skipped": {"type": "boolean", "description": "True when SKILL.md says to stop before reviewing. Nothing is published for it, and the summary is the reason."},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "severity", "status", "title"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^F[0-9]+$"},
+          "severity": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
+          "status": {"type": "string", "enum": ["new", "open", "fixed", "acknowledged", "false_positive", "outdated", "unreported"]},
+          "category": {"type": "string", "enum": ["correctness", "security", "performance", "maintainability", "tests"]},
+          "confidence": {"type": "integer", "minimum": 0, "maximum": 10},
+          "introduced": {"const": false},
+          "path": {"type": "string"},
+          "line": {"type": "integer", "minimum": 1},
+          "end_line": {"type": "integer", "minimum": 1},
+          "title": {"type": "string"},
+          "anchor": {"type": "string"},
+          "existing_code": {"type": "string"},
+          "details": {"type": "string"},
+          "evidence": {"type": "string"},
+          "suggestion": {"type": "string"},
+          "prompt": {"type": "string"},
+          "reply": {"type": "string"}
+        }
+      }
+    }
+  }
+}
