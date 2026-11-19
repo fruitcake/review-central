@@ -11,6 +11,7 @@ use App\Models\Connection;
 use App\Models\Repository;
 use Filament\Forms\Components\TextInput;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\HtmlString;
 
 /**
  * GitHub, as this installation's GitHub App, installed on an organisation or a
@@ -40,11 +41,27 @@ class GitHubAppDriver extends GitHubDriver implements ConnectsWithOAuth, NeedsSe
     {
         $app = app(GitHubApp::class);
 
+        if (! $app->configured()) {
+            return [
+                TextInput::make('workspace')->label('Owner')->required()->rule('regex:/^[\w.-]+$/')
+                    ->helperText('This installation has no GitHub App set up: see GITHUB_APP_* in the configuration.'),
+            ];
+        }
+
+        $link = fn (string $url, string $text): string => '<a href="'.e($url).'" target="_blank" rel="noopener" style="text-decoration: underline; font-weight: 600; color: var(--primary-600)">'.e($text).'</a>';
+
         return [
             TextInput::make('workspace')->label('Owner')->required()->rule('regex:/^[\w.-]+$/')
-                ->helperText($app->configured()
-                    ? 'The organisation or user the app is installed on, as in github.com/<owner>. Install it there first, at '.$app->installUrl().', then save and use "Connect" in the list.'
-                    : 'This installation has no GitHub App set up: see GITHUB_APP_* in the configuration.'),
+                ->placeholder('your-organisation')
+                ->helperText(new HtmlString(
+                    'The organisation or user the app is installed on, as in github.com/&lt;owner&gt;.'
+                    .'<ol style="list-style: decimal; margin: .5rem 0 0 1.25rem; display: grid; gap: .25rem">'
+                    .'<li>'.$link($app->installUrl(), 'Install the app on GitHub').' on that owner, for all repositories or the ones to review. An organisation owner may have to approve it.</li>'
+                    .'<li>Fill in the owner here and save.</li>'
+                    .'<li>Use <strong>Connect</strong> in the list and sign in at GitHub: that checks you can manage the app\'s installation there. Your own token is not kept.</li>'
+                    .'<li>Add the repositories under <strong>Repositories</strong>. No webhook to add: the app brings its own.</li>'
+                    .'</ol>'
+                )),
         ];
     }
 
