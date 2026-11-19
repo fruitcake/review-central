@@ -6,11 +6,51 @@ In the admin panel, at `/admin`:
 
 In the tenant's panel, at `/app/<tenant>`:
 
-2. **Source control**: add the host (Bitbucket Cloud, with a workspace access token that may write pull requests). **AI providers**: add a key (Anthropic, OpenAI, or another provider), with the model and effort Claude Code or Codex reviews at on it. "Test" checks the credentials.
-3. **Tickets**, for ticket context: the tracker (Jira, Asana or GitHub issues) with its credentials, and which references in a pull request title name a ticket there: `PREFIX-123` with a list of prefixes, or `#1234`.
-4. **Repositories**: choose the connection and search for the repository by name. The workspace is the connection's, and the stack is read from the repository's `composer.json` when it is added; editing the repository changes the stack, its name here and the instructions it reads.
-5. On the source control connection, **Webhook** shows the address and secret. The webhook is what starts a review: for a push to a pull request, a `/review` comment and a draft marked ready. **Add it for me** adds it for every repository of the workspace, which needs the webhook scope on the token: Bitbucket has no screen for a workspace's webhooks, only an API. Without that scope, add it to each repository under Repository settings, Webhooks.
+2. **Source control**: add the host.
+   - **GitHub**: a fine-grained personal access token for the repositories, with read access to Contents and Metadata, read and write access to Pull requests, Issues and Commit statuses, and Webhooks to have the webhook added for you. The review comments, approves and requests changes as the account that owns the token, so give it an account of its own, a machine user: GitHub does not let an account approve its own pull request. The owner is the user or organisation from the address. Without a token, a public repository is only read, and its pull requests can be tried.
+   - **Bitbucket Cloud**: a workspace access token that may write pull requests.
+   - **Git**: clones any other host over HTTPS, and posts nothing.
 
-Added by hand, the webhook takes the pull request events Created, Updated, Merged, Declined and Comment created. Nothing is needed in the repository itself.
+   **AI providers**: add a key, with the model and effort Claude Code or Codex reviews at on it. "Test" checks the credentials.
+
+   | Provider | Used by |
+   |---|---|
+   | Anthropic | Claude Code, OpenCodeReview, the review from the diff, questions on a pull request |
+   | OpenAI | Codex, OpenCodeReview, the review from the diff |
+   | Gemini, Mistral, Groq, DeepSeek, xAI, OpenRouter | The review from the diff, with that provider's own model; Pi in a trial |
+
+   Anthropic and OpenAI take a base URL too, for a gateway that speaks their API.
+3. **Tickets**, for ticket context: the tracker (Jira, Asana or GitHub issues) with its credentials, and which references in a pull request title name a ticket there: `PREFIX-123` with a list of prefixes, or `#1234`. Jira and Asana take a token, or a sign-in there when the installation has an OAuth app for them (see [below](#signing-in-to-asana-and-jira)).
+4. **Repositories**: choose the connection and search for the repository by name. The workspace is the connection's, and the stack is read from the repository's `composer.json` when it is added; editing the repository changes the stack, its name here and the instructions it reads.
+5. On the source control connection, **Webhook** shows the address and secret. The webhook is what starts a review: for a push to a pull request, a `/review` comment and a draft marked ready. **Add it for me** adds it for you; the screen says how to add it by hand. Nothing is needed in the repository itself.
+   - **GitHub**: on the organisation, which covers every repository it has and gets, when the token may manage the organisation's webhooks; otherwise on each repository of the connection, so add the webhook again after adding a repository. By hand: the repository's or organisation's **Settings → Webhooks**, with this URL as the payload URL, content type `application/json`, the secret, and the events **Pull requests**, **Issue comments** and **Pull request review comments**.
+   - **Bitbucket**: on every repository of the workspace, which needs the webhook scope on the token: Bitbucket has no screen for a workspace's webhooks, only an API. Without that scope, add it to each repository under **Repository settings → Webhooks**, with the pull request events Created, Updated, Merged, Declined and Comment created.
+
+## GitHub: the account behind the token
+
+On GitHub the review acts as the account that owns the token. That has a few consequences:
+
+- **The review shows under that account's name.** With your own token, its comments and reviews are yours. Give it an account of its own, a *machine user*: an ordinary GitHub account for the bot, such as `acme-review`, with a mailbox of its own and two-factor authentication. Invite it to the organisation with **Write** access to the repositories, and make the token on that account, with the organisation as its resource owner. If the organisation requires approval of fine-grained tokens, an owner approves it under the organisation's **Settings → Personal access tokens**. GitHub allows one machine user per person.
+- **It cannot approve or request changes on its own pull requests.** GitHub refuses that for any account, so on a pull request opened by the token's owner the review posts its comments and description, and its verdict is refused; the run's details say so. Another reason for an account of its own.
+- **The commit status always lands.** "AI Review" is red when a finding holds the merge, also where the verdict was refused. To have it hold the merge, make it a required status check in the branch's protection rules.
+- **`@review` is someone's GitHub user name.** A question that starts with `@review` mentions that account, which on a public repository notifies a stranger. On a public repository, ask in a reply under one of the review's own comments instead: a reply there that names nobody is taken as a question for the reviewer when it reads as one.
+- **No tasks and no check run.** GitHub has no tasks on a pull request, and only a GitHub App may create a check run with annotations. The findings are comments on their lines, and the request for changes is what holds the merge.
+
+A token expires: note the date, and replace it on the connection before then. **Test** on the connection says whether it still works.
 
 A tenant's own colours are set on the tenant: see [Appearance](./appearance).
+
+## Signing in with Google
+
+With `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` set, the sign-in page has a **Sign in with Google** button. Make an OAuth client in the Google Cloud console, of the type "Web application", with `<APP_URL>/sign-in/google/callback` as its redirect address.
+
+A user whose address is already known signs in as that user, when Google holds that address: a Gmail address, or one of a Google Workspace organisation at its own domain. Someone new joins a tenant only when the tenant lists their organisation's domain under **Sign-in domains** in the admin panel, and Google says the account is that organisation's; a personal account under the same domain does not count, and a Gmail address never joins one.
+
+## Signing in to Asana and Jira
+
+A ticket connection can sign in at Asana or Jira instead of taking a pasted token, when the installation is registered as an OAuth app there, with `<APP_URL>/connections/oauth/callback` as its redirect address:
+
+- **Asana**: a new app in the [developer console](https://app.asana.com/0/my-apps), with `ASANA_CLIENT_ID` and `ASANA_CLIENT_SECRET` from it. The app needs the read scopes in `ASANA_OAUTH_SCOPE`; leave that empty for an app with full permissions.
+- **Jira**: an OAuth 2.0 (3LO) app in the [Atlassian developer console](https://developer.atlassian.com/console/myapps/), with read access to Jira issues, and `ATLASSIAN_CLIENT_ID` and `ATLASSIAN_CLIENT_SECRET` from it.
+
+Without them, a connection takes a token only.

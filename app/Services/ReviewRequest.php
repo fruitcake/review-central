@@ -10,6 +10,7 @@ use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Models\Tenant;
 use App\Runners\Container\ReviewSessions;
+use App\SourceControl\PullRef;
 use App\SourceControl\WebhookEvent;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Carbon;
@@ -32,6 +33,10 @@ use RuntimeException;
  * on is left to a person. And only from someone the tenant lets start one by
  * comment ({@see Tenant::allowsReviewCommandFrom()}); anyone else is told so once,
  * in a reply under their comment.
+ *
+ * A pull request from a fork is reviewed only when the tenant turned that on, and
+ * only where the host keeps its head in the repository itself ({@see PullRef}):
+ * its code is anyone's, and it runs with the tenant's AI key and on its budget.
  *
  * A review that is already running is left alone: the run started here is turned
  * away by the review lock and waits for it like any other.
@@ -107,7 +112,18 @@ class ReviewRequest
         }
 
         if (! $repository->tenant->allowsReviewCommandFrom($event->commentAuthorId, $event->commentAuthorNickname)) {
-            $this->refuse($repository, $event);
+            $this->refuse($repository, $event, match ($repository->tenant->review_command) {
+                ReviewCommandAccess::Nobody => 'A review is not started by comment here.',
+                default => 'Only the accounts this team has listed in Review Central can start a review by comment.',
+            }.' A review still starts on every push to the pull request.');
+
+            return;
+        }
+
+        $fork = self::forkRefusal($repository, $pullRequest);
+
+        if ($fork !== null) {
+            $this->refuse($repository, $event, $fork);
 
             return;
         }
@@ -116,10 +132,31 @@ class ReviewRequest
     }
 
     /**
-     * Says under a `/review` comment why it started nothing: once, however often
-     * the host delivers it.
+     * Why a pull request from a fork is not reviewed by itself, or null when it is
+     * not from one, or may be.
+     *
+     * @param  array<string, mixed>  $pullRequest
      */
-    protected function refuse(Repository $repository, WebhookEvent $event): void
+    public static function forkRefusal(Repository $repository, array $pullRequest): ?string
+    {
+        if (($pullRequest['from_fork'] ?? false) !== true) {
+            return null;
+        }
+
+        if (PullRef::id((string) ($pullRequest['source']['branch']['name'] ?? '')) === null) {
+            return 'This pull request comes from a fork, and its host keeps no copy of its branch in this repository, so it cannot be reviewed here.';
+        }
+
+        return $repository->tenant->review_forks
+            ? null
+            : 'Pull requests from forks are not reviewed here by themselves: their code would run with this team\'s AI key and on its budget. Someone in the team can start one from Review Central, or turn it on under Review settings.';
+    }
+
+    /**
+     * Says under a comment why it started nothing: once, however often the host
+     * delivers it.
+     */
+    protected function refuse(Repository $repository, WebhookEvent $event, string $reason): void
     {
         $pullRequestId = $event->pullRequest['id'] ?? null;
 
@@ -128,12 +165,7 @@ class ReviewRequest
             return;
         }
 
-        $reason = match ($repository->tenant->review_command) {
-            ReviewCommandAccess::Nobody => 'A review is not started by comment here.',
-            default => 'Only the accounts this team has listed in Review Central can start a review by comment.',
-        };
-
-        app(ReviewQuestions::class)->reply($repository, (int) $pullRequestId, $event->commentId, $reason.' A review still starts on every push to the pull request.');
+        app(ReviewQuestions::class)->reply($repository, (int) $pullRequestId, $event->commentId, $reason);
     }
 
     /**
@@ -185,6 +217,12 @@ class ReviewRequest
         });
 
         $commit = $data['source']['commit']['hash'] ?? null;
+
+        // A fork's pull request that may not be reviewed by itself is left alone:
+        // nothing is said on it, since nobody asked.
+        if (self::forkRefusal($repository, $data) !== null) {
+            return;
+        }
 
         // Nothing else starts a review: every new head of a pull request that is
         // not a draft is started here. The review's own edit of the description

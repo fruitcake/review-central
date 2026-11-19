@@ -6,6 +6,7 @@ use App\Connections\ConnectionDriver;
 use App\Connections\ConnectsWithOAuth;
 use App\Connections\Drivers;
 use App\Connections\OAuthTokens;
+use App\Connections\SourceControlDriver;
 use App\Enums\ConnectionKind;
 use App\Exceptions\ConnectionFailed;
 use App\Filament\App\Resources\Connections\Pages\ManageConnections;
@@ -213,7 +214,7 @@ class ConnectionResource extends Resource
                     ->icon(Heroicon::OutlinedBolt)
                     ->visible(fn (Connection $record): bool => $record->webhook_key !== null)
                     ->modalHeading('Webhook')
-                    ->modalDescription('Starts a review on a /review comment, when a draft is marked ready, and on every new commit of a pull request. "Add it for me" adds it for every repository of the connection. By hand it goes on each repository, under Repository settings, Webhooks, with the pull request events Created, Updated, Merged, Declined and Comment created.')
+                    ->modalDescription(fn (Connection $record): string => ($driver = $record->driver()) instanceof SourceControlDriver ? $driver->webhookHelp() : '')
                     ->schema(fn (Connection $record, Connections $connections): array => [
                         TextEntry::make('url')->label('URL')->state($connections->webhookUrl($record))->copyable(),
                         TextEntry::make('secret')->state($record->webhook_secret)->copyable()->fontFamily('mono'),

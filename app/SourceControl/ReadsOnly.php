@@ -23,6 +23,11 @@ trait ReadsOnly
         return false;
     }
 
+    public function supportsTasks(): bool
+    {
+        return false;
+    }
+
     public function accountId(): ?string
     {
         return null;

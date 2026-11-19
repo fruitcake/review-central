@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property array<string, mixed>|null $theme_colors Its own ink, accent and button colour, each a hex colour or left out
  * @property ReviewCommandAccess $review_command Who may start a review by commenting /review
  * @property array<int, string>|null $review_command_accounts The source control accounts that may, by nickname or account ID
+ * @property bool $review_forks Whether a pull request from a fork is reviewed on a push and on a comment
  */
 class Tenant extends Model
 {
@@ -35,6 +36,7 @@ class Tenant extends Model
         'currency' => 'USD',
         'timezone' => 'UTC',
         'review_command' => 'anyone',
+        'review_forks' => false,
     ];
 
     /**
@@ -48,6 +50,7 @@ class Tenant extends Model
             'sign_in_domains' => 'array',
             'review_command' => ReviewCommandAccess::class,
             'review_command_accounts' => 'array',
+            'review_forks' => 'boolean',
         ];
     }
 

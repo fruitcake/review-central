@@ -18,15 +18,13 @@ use Tests\TestCase;
 /**
  * Review Central puts the review on the pull request when the report arrives.
  *
- * Everything here goes through the report endpoint rather than the publisher
- * directly: that is the only way a review reaches Bitbucket, so it is the contract
+ * Everything here goes through ReviewFiling rather than the publisher directly:
+ * that is the only way a review reaches the pull request, so it is the contract
  * worth holding.
  */
 class ReviewPublisherTest extends TestCase
 {
     use RefreshDatabase;
-
-    protected string $key;
 
     protected Repository $repository;
 

@@ -492,6 +492,10 @@ class ReviewPublisher
             return $counts + ['skipped' => 'this run asked for no tasks'];
         }
 
+        if (! $repository->sourceControl()->supportsTasks()) {
+            return $counts + ['skipped' => 'the host has no tasks; the request for changes holds the merge'];
+        }
+
         try {
             $existing = $this->tasksByFinding(
                 $repository->sourceControl()->getPullRequestTasks($pullRequestId),
@@ -664,12 +668,18 @@ class ReviewPublisher
                 $settledNow = in_array($status, self::RESOLVED, true);
                 $wasResolved = (bool) ($existing['resolved'] ?? false);
 
+                // On its own: a thread that will not resolve must not cost the reply
+                // that says why, which is said only on the run the status settles.
                 if ($settledNow !== $wasResolved) {
-                    $repository->sourceControl()->resolvePullRequestComment($pullRequestId,
-                        (int) $commentId,
-                        $settledNow,
-                    );
-                    $counts[$settledNow ? 'resolved' : 'reopened']++;
+                    try {
+                        $repository->sourceControl()->resolvePullRequestComment($pullRequestId,
+                            (int) $commentId,
+                            $settledNow,
+                        );
+                        $counts[$settledNow ? 'resolved' : 'reopened']++;
+                    } catch (Throwable $exception) {
+                        report($exception);
+                    }
                 }
 
                 // The review's comment on someone's decision about a finding: a
@@ -723,6 +733,29 @@ class ReviewPublisher
                 // One finding that will not post must not cost the other findings or
                 // the summary. The summary lists every finding either way, so nothing
                 // is lost from the review itself.
+                report($exception);
+            }
+        }
+
+        // A finding this run no longer reports because it was settled before, whose
+        // thread was left open: the run that settled it could not resolve it.
+        // Resolved now, as that run would have. Only where nobody but the review
+        // wrote under it since: a thread a person answered is theirs to close.
+        $reported = array_flip(array_map(fn (array $finding): string => (string) ($finding['id'] ?? ''), $findings));
+
+        foreach ($previous as $id => $existing) {
+            $commentId = $existing['comment_id'] ?? null;
+
+            if (isset($reported[$id]) || $commentId === null || ($existing['resolved'] ?? false)
+                || (($existing['replied'] ?? true) && ! ($existing['review_spoke_last'] ?? false))
+                || ! in_array(strtolower((string) ($existing['status'] ?? '')), self::RESOLVED, true)) {
+                continue;
+            }
+
+            try {
+                $repository->sourceControl()->resolvePullRequestComment($pullRequestId, (int) $commentId);
+                $counts['resolved']++;
+            } catch (Throwable $exception) {
                 report($exception);
             }
         }
@@ -1455,6 +1488,7 @@ class ReviewPublisher
         foreach ($state as $id => $finding) {
             $last = $lastReplies[(int) ($finding['comment_id'] ?? 0)] ?? null;
             $state[$id]['review_spoke_last'] = $last !== null && str_contains($last, self::REPLY_MARKER);
+            $state[$id]['replied'] = $last !== null;
         }
 
         return $state;

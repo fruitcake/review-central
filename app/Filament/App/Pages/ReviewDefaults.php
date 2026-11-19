@@ -12,6 +12,7 @@ use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Actions;
@@ -50,6 +51,7 @@ class ReviewDefaults extends Page
         $this->form->fill(ReviewSettingsForm::state(ReviewSettings::defaults($tenant)) + [
             'review_command' => $tenant->review_command->value,
             'review_command_accounts' => $tenant->review_command_accounts ?? [],
+            'review_forks' => $tenant->review_forks,
         ]);
     }
 
@@ -74,10 +76,16 @@ class ReviewDefaults extends Page
                             ->live(),
                         TagsInput::make('review_command_accounts')
                             ->label('Accounts')
-                            ->helperText('Bitbucket nicknames or account IDs, as in the address of their profile. A display name is not enough: anyone can take any.')
+                            ->helperText('Bitbucket nicknames or GitHub user names, as in the address of their profile, or account IDs. A display name is not enough: anyone can take any.')
                             ->placeholder('Add an account')
                             ->visible(fn (Get $get): bool => $get('review_command') === ReviewCommandAccess::Listed->value)
                             ->required(fn (Get $get): bool => $get('review_command') === ReviewCommandAccess::Listed->value),
+                    ]),
+                Section::make('Pull requests from forks')
+                    ->description('For every repository of this team. A pull request from a fork is anyone\'s code: reviewed, it runs in the sandbox with this team\'s AI key and on its budget. Off, such a pull request is reviewed only when someone here starts it from this panel. Only GitHub keeps a fork\'s head in the repository itself; on Bitbucket a fork\'s pull request can be reviewed from the diff alone, as a trial.')
+                    ->schema([
+                        Toggle::make('review_forks')
+                            ->label('Review pull requests from forks by themselves, on a push and on a comment'),
                     ]),
             ])
             ->statePath('data');
@@ -105,6 +113,7 @@ class ReviewDefaults extends Page
         $tenant->update([
             'review_command' => $state['review_command'],
             'review_command_accounts' => array_values(array_filter(array_map(trim(...), $state['review_command_accounts'] ?? []))) ?: null,
+            'review_forks' => (bool) ($state['review_forks'] ?? false),
         ]);
 
         Notification::make()->title('Saved')->success()->send();

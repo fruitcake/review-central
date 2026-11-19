@@ -25,13 +25,13 @@ features:
     details: The reviewer reads the pull request with its ticket from Jira, Asana or GitHub Issues, so it checks what was asked for, not only what was written.
   - icon: 💬
     title: Posted where you work
-    details: A summary in the description, a comment per finding, tasks for what blocks the merge, and an approval or a request for changes. The next push marks what was fixed. Posts on Bitbucket today; GitHub pull requests can be tried, not yet posted on.
+    details: A summary in the description, a comment per finding, and an approval or a request for changes. The next push marks what was fixed and resolves its threads. On GitHub and Bitbucket Cloud.
   - icon: 🧰
     title: Your reviewer, your model
     details: Claude Code, Codex, OpenCodeReview or Pi, with the model and effort you set, and a budget per reviewer. Or only the diff, sent to your AI provider.
   - icon: 🔒
     title: Sandboxed
-    details: The reviewer reads the code in a throwaway container under gVisor, or in a Cloudflare sandbox, holding nothing but the AI key. The diff runner runs nothing at all.
+    details: The reviewer reads the code in a throwaway container under gVisor, or in a Cloudflare sandbox (experimental), holding nothing but the AI key. The diff runner runs nothing at all.
   - icon: 🏢
     title: Many teams, one installation
     details: Each tenant brings its own source control, tickets, AI providers, colours, currency and time zone. One admin panel shows them all, with cost against budget.

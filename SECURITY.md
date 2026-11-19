@@ -10,7 +10,7 @@ Include what you found, how to reproduce it, and what an attacker could do with 
 
 ## Supported versions
 
-Only the latest release on `main` receives security fixes. Keep your installation up to date as described in [Updating](https://review-central.com/guide/updating).
+Only the latest release receives security fixes; they are released as soon as they are ready, and named in the [changelog](CHANGELOG.md). Keep your installation up to date as described in [Updating](https://review-central.com/guide/updating).
 
 ## What is in scope
 
@@ -19,7 +19,7 @@ Of particular interest:
 - a tenant reading or changing another tenant's repositories, reviews, connections or settings;
 - credentials (API keys, OAuth tokens, webhook secrets) leaking into logs, pages, review comments or the sandbox beyond what the review needs;
 - code in a reviewed pull request escaping its sandbox, or reaching the server's network or secrets;
-- forged webhooks or review reports being accepted;
+- forged webhooks being accepted, or a reviewed pull request changing what its review reports or where it is posted;
 - cross-site scripting through review output, pull request content or uploaded logos.
 
 A review that is wrong or misses an issue is not a security problem; please open a normal issue for that.

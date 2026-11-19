@@ -3,7 +3,7 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: 'Review Central',
   description: 'Self-hosted AI code review for pull requests. Open source, multi-tenant, with your own AI keys.',
-  lang: 'en-US',
+  lang: 'en-GB',
   cleanUrls: true,
   lastUpdated: true,
   appearance: false,
@@ -36,6 +36,7 @@ export default defineConfig({
             { text: 'Installation', link: '/guide/installation' },
             { text: 'Where a review runs', link: '/guide/runners' },
             { text: 'Updating', link: '/guide/updating' },
+            { text: 'Configuration', link: '/guide/configuration' },
             { text: 'Live updates', link: '/guide/live-updates' },
           ],
         },

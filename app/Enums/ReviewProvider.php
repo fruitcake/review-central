@@ -12,13 +12,13 @@ enum ReviewProvider: string
     /** A current Claude Code CLI, run headless in the step. */
     case ClaudeCode = 'claude-code';
 
-    /** Claude through Agentic Pipelines. */
+    /** An older name for Claude Code, kept so runs that went by it still show a name. */
     case ClaudeAcp = 'claude-acp';
 
     /** A current Codex CLI, run headless in the step. */
     case CodexCli = 'codex-cli';
 
-    /** Codex through Agentic Pipelines. */
+    /** An older name for the Codex CLI, kept so runs that went by it still show a name. */
     case CodexAcp = 'codex-acp';
 
     /** OpenCodeReview with its own LLM call. */

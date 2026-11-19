@@ -3,8 +3,23 @@
 ## Settings and instructions
 
 - **Review settings**, in the sidebar, choose the reviewers and their share, the model and the effort for every repository of the tenant. A reviewer can have a monthly budget, in the tenant's currency: once its reviews have cost that much across the tenant it is passed over for the rest of the month. Give the first reviewer a share and a budget and the second a share of 0 to use one until its budget is spent and the other after. A repository can set its own under **Review settings**.
-- **Starting a review by comment**, on the same page, says who may start one by commenting `/review` on a pull request: anyone who can comment (the default), only the accounts listed there, or nobody. An account is listed by its Bitbucket nickname or account ID, never by its display name, which anyone can copy. Anyone else gets a reply saying so, and nothing starts. It holds for every repository of the tenant; a review still starts on every push, and from the panel.
+- **Starting a review by comment**, on the same page, says who may start one by commenting `/review` on a pull request: anyone who can comment (the default), only the accounts listed there, or nobody. An account is listed by its GitHub user name or Bitbucket nickname, or its account ID, never by its display name, which anyone can copy. Anyone else gets a reply saying so, and nothing starts. It holds for every repository of the tenant; a review still starts on every push, and from the panel.
+- **Pull requests from forks**, on the same page, are not reviewed by themselves unless that is turned on: a fork's code is anyone's, and a review runs it in the sandbox with the tenant's AI key and on its budget. Turned on, a pull request from a fork on GitHub is reviewed on every push and on a comment, as any other; off, a `/review` comment or a question on one gets a reply saying so. A tenant member can still start one under **Reviews → Review a pull request**, with `pull/<number>/head` as the branch. On Bitbucket, which keeps no copy of a fork's branch in the repository, a pull request from a fork is never reviewed by itself; it can be [tried](#trying-a-pull-request) from the diff alone.
 - **Instructions** are what the review is told to look for: a method, the defect lenses and a guide per stack. The administrator keeps the defaults; a tenant can copy one and change it for its own repositories. What is saved is what the next review reads.
+
+## What the reviewer reads in the repository
+
+A team writes down how its code works, and what counts as a defect there, in the repository itself. The reviewer reads these files where they exist, and they win over its general rules:
+
+| File | What it is for |
+|---|---|
+| `CLAUDE.md` or `AGENTS.md` at the root | The codebase's conventions, for any coding agent. One in a subdirectory holds the rules for the files under it, and the nearer one wins. |
+| `.ai/rules/` | Rule files per area, with an `index.md` that maps file globs to them. For OpenCodeReview, a rule file can also name its globs in a `paths:` front matter, and goes with the review of each file it matches. |
+| `REVIEW.md` at the root | Instructions for review only: what to report, at what severity, which paths to leave alone, checks to make on every pull request. Read from the destination branch, so a pull request cannot change the rules it is reviewed against. |
+| `.ai/review-conventions.md` | Patterns judged false positives before, one per line, which the reviewer does not report again. A review lists candidates for it under **Suggested convention entries** at the end of its summary, to paste in when a person agrees. |
+| `.opencodereview/rule.json` | OpenCodeReview's own rules, read from the destination branch. |
+
+None of them is needed: without them the reviewer goes by the review instructions and the stack guides alone. They can raise what the reviewer reports, never lower what it needs as evidence or change what it may run.
 
 ## Reviews and cost
 

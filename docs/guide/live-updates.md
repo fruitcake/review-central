@@ -8,6 +8,6 @@ Without anything set, an open page asks again by itself: the review's page every
 
 Run `php artisan config:clear` (or `config:cache`) after changing it. Nothing has to be built: the browser's side is in `public/js/laravel-echo.js`, and is made with what `.env` says.
 
-A broadcast only says that something changed, never what. The page then reads it from this server, so no code and no review text reaches the broadcaster, and a page that missed one is only late: it still asks every ten seconds while a review runs.
+A broadcast only says that something changed, never what. The page then reads it from this server, so no code and no review text reaches the broadcaster, and a page that missed one is only late: with a broadcaster it still asks every ten seconds while a review runs, instead of every three.
 
 Broadcasts are sent as they happen, not from the queue: the worker that would send them may be the one running the review. A broadcaster that does not answer within a few seconds is skipped.

@@ -12,13 +12,13 @@ use Illuminate\Http\Client\RequestException;
  *
  * Pull requests, comments and tasks are passed around in the shape Bitbucket gives
  * them, which is what the review's context is built from. A driver for another
- * host maps its own payloads to that shape:
+ * host, such as GitHub's, maps its own payloads to that shape:
  *
  *  - pull request: id, title, description, state (OPEN, MERGED, DECLINED), draft,
  *    updated_on, source.branch.name, source.commit.hash, destination.branch.name,
  *    author.display_name, links.html.href
  *  - comment: id, content.raw, created_on, updated_on, deleted, user.display_name,
- *    user.uuid, inline.path, inline.to, parent.id, resolution
+ *    user.account_id, user.nickname, inline.path, inline.to, parent.id, resolution
  *  - task: id, state (UNRESOLVED, RESOLVED), content.raw, comment.id
  *
  * Calls that read throw on a failed request rather than return a partial answer:
@@ -32,6 +32,13 @@ interface SourceControl
      * review is kept on its own page.
      */
     public function publishes(): bool;
+
+    /**
+     * Whether the host has tasks on a pull request, which the review opens for
+     * what blocks the merge. One without, such as GitHub, is held by the request
+     * for changes alone.
+     */
+    public function supportsTasks(): bool;
 
     /**
      * The account the connection acts as, in the form a comment mentions it by, or

@@ -27,6 +27,20 @@ class ConnectionFactory extends Factory
         ];
     }
 
+    /**
+     * A GitHub connection with a personal access token, which posts reviews.
+     */
+    public function gitHubSource(): static
+    {
+        return $this->state([
+            'kind' => ConnectionKind::SourceControl,
+            'driver' => 'github',
+            'name' => 'GitHub',
+            'credentials' => ['access_token' => 'github-token'],
+            'settings' => ['workspace' => 'acme'],
+        ]);
+    }
+
     public function anthropic(string $key = 'sk-ant-test'): static
     {
         return $this->state([
