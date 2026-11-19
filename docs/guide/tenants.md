@@ -26,6 +26,18 @@ In the tenant's panel, at `/app/<tenant>`:
    - **GitHub**: on the organisation, which covers every repository it has and gets, when the token may manage the organisation's webhooks; otherwise on each repository of the connection, so add the webhook again after adding a repository. By hand: the repository's or organisation's **Settings → Webhooks**, with this URL as the payload URL, content type `application/json`, the secret, and the events **Pull requests**, **Issue comments** and **Pull request review comments**.
    - **Bitbucket**: on every repository of the workspace, which needs the webhook scope on the token: Bitbucket has no screen for a workspace's webhooks, only an API. Without that scope, add it to each repository under **Repository settings → Webhooks**, with the pull request events Created, Updated, Merged, Declined and Comment created.
 
+## GitHub: the account behind the token
+
+On GitHub the review acts as the account that owns the token. That has a few consequences:
+
+- **The review shows under that account's name.** With your own token, its comments and reviews are yours. Give it an account of its own, a *machine user*: an ordinary GitHub account for the bot, such as `acme-review`, with a mailbox of its own and two-factor authentication. Invite it to the organisation with **Write** access to the repositories, and make the token on that account, with the organisation as its resource owner. If the organisation requires approval of fine-grained tokens, an owner approves it under the organisation's **Settings → Personal access tokens**. GitHub allows one machine user per person.
+- **It cannot approve or request changes on its own pull requests.** GitHub refuses that for any account, so on a pull request opened by the token's owner the review posts its comments and description, and its verdict is refused; the run's details say so. Another reason for an account of its own.
+- **The commit status always lands.** "AI Review" is red when a finding holds the merge, also where the verdict was refused. To have it hold the merge, make it a required status check in the branch's protection rules.
+- **`@review` is someone's GitHub user name.** A question that starts with `@review` mentions that account, which on a public repository notifies a stranger. On a public repository, ask in a reply under one of the review's own comments instead: a reply there that names nobody is taken as a question for the reviewer when it reads as one.
+- **No tasks and no check run.** GitHub has no tasks on a pull request, and only a GitHub App may create a check run with annotations. The findings are comments on their lines, and the request for changes is what holds the merge.
+
+A token expires: note the date, and replace it on the connection before then. **Test** on the connection says whether it still works.
+
 A tenant's own colours are set on the tenant: see [Appearance](./appearance).
 
 ## Signing in with Google
