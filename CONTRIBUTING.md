@@ -52,14 +52,22 @@ Tests run on SQLite in memory and need no services: HTTP calls to source control
 
 ## Releasing
 
-For maintainers. A release is named after the day it comes out, `2026.11.19`, without leading zeros (`2027.1.5`). A second release on the same day gets a count: `2026.11.19.1`. Pushing the tag is the release; the `release` workflow does the rest:
+For maintainers. Once, before the first release: make a deploy key that may move `stable`. GitHub does not let the workflow's own token push a branch forward over a change to a workflow, which most releases bring (Dependabot updates the actions weekly).
+
+```bash
+ssh-keygen -t ed25519 -N '' -C 'review-central release' -f stable-deploy-key
+```
+
+Add `stable-deploy-key.pub` under the repository's **Settings → Deploy keys**, with **Allow write access**, and the contents of `stable-deploy-key` as the Actions secret `STABLE_DEPLOY_KEY` under **Settings → Secrets and variables → Actions**. Then delete both files. If `stable` gets a branch rule, add **Deploy keys** to its bypass list.
+
+A release is named after the day it comes out, `2026.11.19`, without leading zeros (`2027.1.5`). A second release on the same day gets a count: `2026.11.19.1`. Pushing the tag is the release; the `release` workflow does the rest:
 
 ```bash
 git switch main && git pull
 git tag 2026.11.19 && git push origin 2026.11.19
 ```
 
-The workflow runs the checks on the tag and makes a GitHub Release whose notes GitHub writes from the pull requests merged since the last release, grouped by label as `.github/release.yml` says: those labelled `upgrade` first, under **Needs action when updating**. Then it fast-forwards `stable` to the tag, and servers that deploy `stable` take it from there. Edit a release's notes on GitHub afterwards to add anything the titles do not say.
+The workflow runs the checks on the tag and fast-forwards `stable` to it, which servers that deploy `stable` take from there. Then it makes a GitHub Release whose notes GitHub writes from the pull requests merged since the last release, grouped by label as `.github/release.yml` says: those labelled `upgrade` first, under **Needs action when updating**. A release that stopped halfway is finished with **Re-run failed jobs**: a step that was done is done again without changing anything. Edit a release's notes on GitHub afterwards to add anything the titles do not say.
 
 A tag with a suffix, such as `2026.11.19-rc.1`, is released as a pre-release and leaves `stable` where it is.
 
