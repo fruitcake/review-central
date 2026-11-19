@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: 'Review Central',
-  description: 'Self-hosted AI code review for pull requests. Open source, multi-tenant, with your own AI keys.',
+  description: 'Self-hosted AI code review for private and public repositories on Bitbucket and GitHub: faster and cheaper than an AI step in a pipeline, with the ticket as context. Open source.',
   lang: 'en-GB',
   cleanUrls: true,
   lastUpdated: true,
@@ -11,7 +11,7 @@ export default defineConfig({
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
     ['meta', { name: 'theme-color', content: '#0f766e' }],
     ['meta', { property: 'og:title', content: 'Review Central' }],
-    ['meta', { property: 'og:description', content: 'Self-hosted AI code review for pull requests. Open source.' }],
+    ['meta', { property: 'og:description', content: 'Self-hosted AI code review for Bitbucket and GitHub. Open source.' }],
     ['meta', { property: 'og:image', content: 'https://review-central.com/screenshots/review.png' }],
   ],
   themeConfig: {

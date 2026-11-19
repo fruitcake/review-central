@@ -1,8 +1,17 @@
 # What is Review Central?
 
-Review Central is an AI review for pull requests that you host yourself, for one team or for several at once. Each team, a **tenant**, connects its own source control, ticket trackers and AI providers. Review Central decides when to review, hands the reviewer its context, posts the result on the pull request and keeps what every run found and cost.
+Review Central is an AI review for pull requests that you host yourself, for private and public repositories on **Bitbucket Cloud** and **GitHub**, and for one team or several at once. Each team, a **tenant**, connects its own source control, ticket trackers and AI providers. Review Central decides when to review, hands the reviewer its context, acts on the pull request and keeps what every run found and cost.
 
 ![A review in Review Central](/screenshots/review.png)
+
+## Why not a step in the pipeline?
+
+It was made for Bitbucket Cloud. On GitHub, AI review is a few clicks away: Copilot and a marketplace of review apps. Bitbucket has far less to choose from, and the usual answer is an AI CLI in a Bitbucket Pipelines step. Review Central started as one, and grew out of what that cannot do well; the same goes for such a step in GitHub Actions:
+
+- **Cost and time.** A pipeline step clones the repository and installs its packages from scratch on every push, on build minutes, and its reviewer has forgotten the last review. Review Central keeps the installed `vendor/` per lock file and the Composer cache per repository, clones without file contents it does not need, resumes Claude Code's last session on the branch, and skips a draft, a commit it already reviewed and a push with nothing new for it. A commit pushed while a review runs can be reviewed in the same job, from where that review got to.
+- **Context.** A step sees the diff. Review Central hands the reviewer the ticket the pull request is for, the conversation on it, its own earlier findings with what people replied, the repository's own rules (`CLAUDE.md`, `REVIEW.md` and the like) and a guide for its stack. See [what the reviewer reads](./reviews#what-the-reviewer-reads-in-the-repository).
+- **Acting on it.** A step can comment. Review Central writes a summary into the description, comments per finding with a fix to apply, opens a task for what blocks the merge, approves or requests changes, resolves the threads of what was fixed, answers questions, and puts a report on the commit.
+- **Oversight.** What each review cost, per team and per reviewer against a budget, how often the team agrees with the findings, and a way to try another model on the same pull request before switching to it.
 
 ## How a review runs
 
