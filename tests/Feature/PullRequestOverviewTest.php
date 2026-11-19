@@ -29,9 +29,9 @@ beforeEach(function () {
  *
  * @param  array<string, mixed>  $attributes
  */
-function deliverPullRequest(array $attributes = [], string $nickname = 'outsider'): TestResponse
+function deliverPullRequest(array $attributes = [], string $nickname = 'outsider', string $event = 'pullrequest:updated', array $extra = []): TestResponse
 {
-    $body = json_encode(['pullrequest' => $attributes + [
+    $body = json_encode($extra + ['pullrequest' => $attributes + [
         'id' => 7,
         'title' => 'Export to CSV',
         'state' => 'OPEN',
@@ -43,7 +43,7 @@ function deliverPullRequest(array $attributes = [], string $nickname = 'outsider
 
     return test()->call('POST', '/api/webhooks/hook-overview', [], [], [], [
         'CONTENT_TYPE' => 'application/json',
-        'HTTP_X_EVENT_KEY' => 'pullrequest:updated',
+        'HTTP_X_EVENT_KEY' => $event,
         'HTTP_X_HUB_SIGNATURE' => 'sha256='.hash_hmac('sha256', $body, 'secret'),
     ], $body);
 }
@@ -124,4 +124,44 @@ it('lists only the open tenant\'s pull requests', function () {
     livewire(ListPullRequests::class)
         ->assertCanSeeTableRecords(OpenPullRequest::query()->where('repository_id', $this->repository->id)->get())
         ->assertCanNotSeeTableRecords(OpenPullRequest::query()->where('repository_id', $other->id)->get());
+});
+
+it('never lets a Bitbucket fork\'s pull request wait, which cannot be reviewed from its branch', function () {
+    $this->repository->update(['reviews_from' => ReviewsFrom::Trusted]);
+
+    deliverPullRequest([
+        'source' => ['branch' => ['name' => 'main'], 'commit' => ['hash' => str_repeat('d', 12)], 'repository' => ['full_name' => 'someone/shop']],
+        'destination' => ['branch' => ['name' => 'main'], 'repository' => ['full_name' => 'acme/shop']],
+    ])->assertOk();
+
+    Queue::assertNothingPushed();
+    expect(OpenPullRequest::query()->sole())->from_fork->toBeTrue()->awaiting_approval->toBeFalse();
+    Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/statuses/build'));
+
+    $user = User::factory()->create();
+    $user->tenants()->attach($this->repository->tenant);
+    $this->actingAs($user);
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+    Filament::setTenant($this->repository->tenant);
+    Filament::bootCurrentPanel();
+
+    // Its branch is the fork's main: reviewing "main" here would review this repository's.
+    livewire(ListPullRequests::class)->assertTableActionHidden('start', OpenPullRequest::query()->sole());
+});
+
+it('starts a review by comment only for a trusted account where only theirs are reviewed', function () {
+    $this->repository->update(['reviews_from' => ReviewsFrom::Trusted]);
+    $comment = fn (int $id, string $nickname): TestResponse => deliverPullRequest([], 'outsider', 'pullrequest:comment_created', [
+        'comment' => ['id' => $id, 'content' => ['raw' => '/review'], 'user' => ['display_name' => ucfirst($nickname), 'account_id' => "id-{$nickname}", 'nickname' => $nickname]],
+    ]);
+
+    // Anyone may comment /review on this team, but not here.
+    $comment(1, 'outsider')->assertOk();
+
+    Queue::assertNothingPushed();
+    Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/comments') && str_contains((string) json_encode($request->data()), 'only the accounts this team trusts'));
+
+    $comment(2, 'trusted-dev')->assertOk();
+
+    Queue::assertPushed(RunContainerReview::class, fn (RunContainerReview $job): bool => $job->branch === 'feature/export');
 });
