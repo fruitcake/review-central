@@ -3,8 +3,9 @@
 <h1 align="center">Review Central</h1>
 
 <p align="center">
-AI code review for <strong>private Bitbucket repositories</strong>, on your own server:<br>
-faster and cheaper than an AI step in Bitbucket Pipelines, with the ticket as context, and it acts on the pull request.
+AI code review for your repositories, private or public, on <strong>Bitbucket</strong> and <strong>GitHub</strong>:<br>
+on your own server and with your own AI keys, faster and cheaper than an AI step in a pipeline,<br>
+with the ticket as context, and it acts on the pull request.
 </p>
 
 <p align="center">
@@ -17,7 +18,7 @@ faster and cheaper than an AI step in Bitbucket Pipelines, with the ticket as co
 
 ## Why it exists
 
-On GitHub, AI review is a few clicks away: Copilot and a marketplace of review apps. Bitbucket Cloud has far less to choose from, and the usual answer is an AI CLI in a pipeline step. We ran it that way, and it showed:
+It was made for Bitbucket Cloud. On GitHub, AI review is a few clicks away: Copilot and a marketplace of review apps. Bitbucket has far less to choose from, and the usual answer is an AI CLI in a Bitbucket Pipelines step. We ran it that way, and it showed:
 
 - **Every push starts from nothing.** A fresh clone, a fresh `composer install`, and a reviewer that has forgotten the last review, all on build minutes.
 - **It only knows the diff.** Not the ticket it was for, not what people replied to the last review, not what was already decided.
@@ -34,7 +35,7 @@ Review Central takes the review out of the pipeline. It runs next to Bitbucket, 
 | **Talking back** | — | `/review` to review again, `@review` to ask a question, replies the next review reads |
 | **Cost** | Build minutes plus tokens, per repository | What each run cost, per team and per reviewer, against a budget |
 
-It started as exactly such a pipeline step at [Fruitcake](https://fruitcake.nl), on the private Bitbucket repositories we work in. GitHub works too: reviews are posted on its pull requests as well.
+It started as exactly such a pipeline step at [Fruitcake](https://fruitcake.nl), on the Bitbucket repositories we work in. The same holds for a review step in GitHub Actions, and GitHub is supported as well: reviews are posted on its pull requests just the same.
 
 ## What it does
 

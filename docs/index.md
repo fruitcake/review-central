@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: Review Central
-  text: AI code review for private Bitbucket repositories
-  tagline: Faster and cheaper than an AI step in Bitbucket Pipelines. Every pull request reviewed against its ticket, by the reviewer and model you choose, on your own server and with your own AI keys, and the result acted on. Open source; GitHub works too.
+  text: AI code review for your repositories, on Bitbucket and GitHub
+  tagline: Private or public, faster and cheaper than an AI step in a pipeline. Every pull request reviewed against its ticket, by the reviewer and model you choose, on your own server and with your own AI keys, and the result acted on. Open source, for one team or many.
   image:
     src: /logo.svg
     alt: Review Central
