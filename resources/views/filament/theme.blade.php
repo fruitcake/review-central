@@ -115,7 +115,7 @@
     .rc-tone-primary { color: var(--rc-ink); }
     .rc-tone-danger { color: var(--rc-danger-text); }
     .rc-tone-neutral { color: var(--rc-ink-soft); }
-    .rc-fill-primary { background: var(--rc-ink); }
+    .rc-fill-primary { background: var(--rc-accent); }
     .rc-fill-danger { background: var(--rc-danger); }
     .rc-fill-grey { background: var(--rc-grey); }
     .rc-fill-accent { background: var(--rc-accent); }

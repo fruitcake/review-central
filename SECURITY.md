@@ -10,7 +10,7 @@ Include what you found, how to reproduce it, and what an attacker could do with 
 
 ## Supported versions
 
-Only the latest release on `main` receives security fixes. Keep your installation up to date as described under **Updating** in the README.
+Only the latest release on `main` receives security fixes. Keep your installation up to date as described in [Updating](https://review-central.com/guide/updating).
 
 ## What is in scope
 
@@ -26,6 +26,6 @@ A review that is wrong or misses an issue is not a security problem; please open
 
 ## Running it safely
 
-- Pick the runner that fits the code. The diff runner runs nothing and clones nothing: it sends the pull request's diff, title and description, its ticket, its comments and earlier findings to the AI provider. The Docker (preferably with gVisor) and Cloudflare runners give the reviewer the whole checkout, inside a sandbox. See **Where a review runs** in the README.
+- Pick the runner that fits the code. The diff runner runs nothing and clones nothing: it sends the pull request's diff, title and description, its ticket, its comments and earlier findings to the AI provider. The Docker (preferably with gVisor) and Cloudflare runners give the reviewer the whole checkout, inside a sandbox. See [Where a review runs](https://review-central.com/guide/runners) and [Security](https://review-central.com/guide/security) in the docs.
 - Give source control and ticket credentials the narrowest scopes the setup page asks for.
 - Serve the panel over HTTPS only, and keep `APP_DEBUG=false` in production.

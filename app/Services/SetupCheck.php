@@ -119,7 +119,11 @@ class SetupCheck
             $this->check(
                 ! config('app.debug') || ! app()->isProduction(),
                 'Debug mode is off',
-                config('app.debug') ? 'APP_DEBUG is on in production: an error page shows settings and code to whoever causes one.' : 'APP_DEBUG is off.',
+                match (true) {
+                    ! config('app.debug') => 'APP_DEBUG is off.',
+                    app()->isProduction() => 'APP_DEBUG is on in production: an error page shows settings and code to whoever causes one.',
+                    default => 'APP_DEBUG is on, which is fine outside production.',
+                },
                 'Set APP_DEBUG=false in .env, then `php artisan config:cache`.',
             ),
             $this->check(

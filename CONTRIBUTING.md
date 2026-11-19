@@ -10,7 +10,7 @@ Thanks for helping to improve Review Central. Bug reports, fixes, new stack guid
 
 ## Setting up
 
-Follow **Try it in ten minutes** in the README. In short:
+Follow the [quick start](https://review-central.com/guide/quick-start). In short:
 
 ```bash
 composer setup               # .env, an app key, SQLite, the tables, the front end
@@ -18,6 +18,8 @@ php artisan review:install   # instructions, model prices, an admin account and 
 php artisan serve
 php artisan queue:work --queue=reviews,default   # in a second terminal
 ```
+
+To look around with data, `php artisan migrate:fresh --seed --seeder=DemoSeeder` makes a team with a month of reviews; sign in as `demo@example.com` with the password `password`.
 
 The diff runner works without Docker or Cloudflare, so most of the app can be run and tested locally with only an AI provider key.
 
@@ -37,13 +39,13 @@ Tests run on SQLite in memory and need no services: HTTP calls to source control
 - Add or update tests for what you change. A bug fix comes with a test that fails without it.
 - Follow the style of the code around it. Comments explain why something is done, not what the next line does.
 - Keep a pull request to one change, with a title and description that say what it does and why.
-- Update the README when you change setup, configuration or behaviour someone relies on.
+- Update the docs in `docs/` when you change setup, configuration or behaviour someone relies on.
 - New environment variables go in `.env.example`, with a comment on what they do.
 
 ## Adding a stack guide or a provider
 
 - **Stack guides** live in `resources/review/skill/references` as `stack-<name>.md`. A guide names what to look for in that stack, with the reasoning, so the reviewer can judge rather than pattern-match. Cite official documentation where you can.
-- **Providers** (source control, tickets, AI) are described under **Adding a provider** in the README.
+- **Providers** (source control, tickets, AI) are described in [Extending](https://review-central.com/guide/extending).
 
 ## License
 
