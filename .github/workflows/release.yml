@@ -1,0 +1,99 @@
+name: release
+
+# A tag named after the day, 2026.11.19 (2026.11.19.1 for a second that day),
+# on main releases that version: the checks run on it, the `stable` branch is
+# moved to it, and a GitHub Release is made with notes GitHub writes from the
+# pull requests merged since the last release (grouped as .github/release.yml
+# says). Forge deploys `stable`, so pushing the tag is the whole release. Every
+# step can be run again: "Re-run failed jobs" finishes a release that stopped.
+
+on:
+  push:
+    tags:
+      - '20[0-9][0-9].[0-9]*.[0-9]*'
+
+permissions:
+  contents: read
+
+# One release at a time, never two moving `stable` at once.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/tests.yml
+
+  release:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout the tag, with history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Check the tag is on main
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME is not on main. Tag a commit that is merged."
+            exit 1
+          fi
+
+      - name: Check the release's name
+        run: |
+          # Year, month and day without leading zeros, and a count for a second release that day.
+          if ! printf '%s' "$GITHUB_REF_NAME" | grep -Eq '^20[0-9]{2}\.([1-9]|1[0-2])\.([1-9]|[12][0-9]|3[01])(\.[1-9][0-9]*)?(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::$GITHUB_REF_NAME is not a release name such as 2026.11.19 or 2026.11.19.1, without leading zeros."
+            exit 1
+          fi
+
+      # Before the release is published, so a release is never out while the
+      # servers deploying `stable` do not get it. With a deploy key: GitHub refuses
+      # the job's own token a push that brings in a change to a workflow, which a
+      # release with a Dependabot bump of the actions does.
+      - name: Move stable to the release
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          DEPLOY_KEY: ${{ secrets.STABLE_DEPLOY_KEY }}
+        run: |
+          if [ -z "$DEPLOY_KEY" ]; then
+            echo "::error::The secret STABLE_DEPLOY_KEY is not set: a deploy key with write access, which may move stable. See Releasing in CONTRIBUTING.md."
+            exit 1
+          fi
+
+          key="$RUNNER_TEMP/stable-deploy-key"
+          known_hosts="$RUNNER_TEMP/known_hosts"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$DEPLOY_KEY" > "$key"
+          chmod 600 "$key"
+          # GitHub's SSH host keys as its API publishes them over HTTPS, rather
+          # than whatever answers on port 22.
+          curl -fsSL https://api.github.com/meta | jq -r '.ssh_keys[] | "github.com " + .' > "$known_hosts"
+
+          # Fast-forward only: a release older than what stable has is refused
+          # rather than rolled back. Roll back by hand: see CONTRIBUTING.md. Pushed
+          # again on a re-run, which changes nothing when stable is there already.
+          GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts" \
+            git push "git@github.com:${GITHUB_REPOSITORY}.git" "${GITHUB_SHA}:refs/heads/stable"
+
+      - name: Make the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Made once: a re-run of a release that got this far leaves it as it is.
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            echo "The release $GITHUB_REF_NAME exists already."
+            exit 0
+          fi
+
+          # A version with a suffix, such as 2026.11.19-rc.1, is a pre-release.
+          case "$GITHUB_REF_NAME" in
+            *-*) prerelease=--prerelease ;;
+            *) prerelease= ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes $prerelease

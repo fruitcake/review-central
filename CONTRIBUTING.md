@@ -43,12 +43,37 @@ Tests run on SQLite in memory and need no services: HTTP calls to source control
 - Keep a pull request to one change, with a title and description that say what it does and why.
 - Update the docs in `docs/` when you change setup, configuration or behaviour someone relies on.
 - New environment variables go in the [configuration reference](docs/guide/configuration.md), and in `.env.example` with a comment when a feature needs them set.
-- Add a line under **Unreleased** in [CHANGELOG.md](CHANGELOG.md) for a change someone running Review Central would notice.
+- Write the pull request's title for someone running Review Central: it goes into the release notes as it is. If they have to do something when updating, such as add a setting or deploy the Worker again, say what in the description and add the label `upgrade`.
 
 ## Adding a stack guide or a provider
 
 - **Stack guides** live in `resources/review/skill/references` as `stack-<name>.md`. A guide names what to look for in that stack, with the reasoning, so the reviewer can judge rather than pattern-match. Cite official documentation where you can. Detecting the stack takes two more lines of code: see [Extending](https://review-central.com/guide/extending#adding-a-stack-guide).
 - **Providers** (source control, tickets, AI) are described in [Extending](https://review-central.com/guide/extending).
+
+## Releasing
+
+For maintainers. Once, before the first release: make a deploy key that may move `stable`. GitHub does not let the workflow's own token push a branch forward over a change to a workflow, which most releases bring (Dependabot updates the actions weekly).
+
+```bash
+ssh-keygen -t ed25519 -N '' -C 'review-central release' -f stable-deploy-key
+```
+
+Add `stable-deploy-key.pub` under the repository's **Settings → Deploy keys**, with **Allow write access**, and the contents of `stable-deploy-key` as the Actions secret `STABLE_DEPLOY_KEY` under **Settings → Secrets and variables → Actions**. Then delete both files. If `stable` gets a branch rule, add **Deploy keys** to its bypass list.
+
+A release is named after the day it comes out, `2026.11.19`, without leading zeros (`2027.1.5`). A second release on the same day gets a count: `2026.11.19.1`. Pushing the tag is the release; the `release` workflow does the rest:
+
+```bash
+git switch main && git pull
+git tag 2026.11.19 && git push origin 2026.11.19
+```
+
+The workflow runs the checks on the tag and fast-forwards `stable` to it, which servers that deploy `stable` take from there. Then it makes a GitHub Release whose notes GitHub writes from the pull requests merged since the last release, grouped by label as `.github/release.yml` says: those labelled `upgrade` first, under **Needs action when updating**. A release that stopped halfway is finished with **Re-run failed jobs**: a step that was done is done again without changing anything. Edit a release's notes on GitHub afterwards to add anything the titles do not say.
+
+A tag with a suffix, such as `2026.11.19-rc.1`, is released as a pre-release and leaves `stable` where it is.
+
+The workflow refuses a tag that is not on `main` or not named after a day. Delete it (`git push origin :refs/tags/2026.11.19`) and tag again.
+
+To roll back, move `stable` back to the previous release by hand, which a server deploying it then takes: `git push --force origin 2026.11.12^{commit}:refs/heads/stable`. Then release the fix as a new release; the workflow only ever moves `stable` forward.
 
 ## License
 
