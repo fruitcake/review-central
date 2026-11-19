@@ -51,13 +51,13 @@ To register it, as the installation's administrator: on GitHub, under the organi
 
 - **Callback URL**: `<APP_URL>/connections/oauth/callback`. Leave *Request user authorization (OAuth) during installation* off.
 - **Webhook URL**: `<APP_URL>/api/webhooks/github-app`, with a secret of your own.
-- **Repository permissions**: Contents and Metadata read; Pull requests, Issues, Commit statuses and Checks read and write.
+- **Repository permissions**: Contents and Metadata read; Pull requests, Issues, Commit statuses and Checks read and write. **Organization permissions**: Members read, to check who owns an organisation.
 - **Events**: Pull request, Issue comment, Pull request review comment, Check run.
 - **Where can this GitHub App be installed**: *Any account*, for tenants outside your own organisation.
 
 Then generate a private key, and set `GITHUB_APP_ID`, `GITHUB_APP_SLUG` (the name in the app's address), `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY` (the PEM file's path, or its contents) and `GITHUB_APP_WEBHOOK_SECRET`. Until all but the secret are set, *GitHub App* is not offered as a connection.
 
-**Connect** signs the person in at GitHub once, to check that they can manage the app's installation on the connection's owner; their own token is revoked straight after. An installation belongs to one connection.
+**Connect** signs the person in at GitHub once, to check that they own the connection's owner: an owner of the organisation, or the user account itself. A member who only has access to some of its repositories cannot connect it. Their own token is revoked straight after. An installation belongs to one connection.
 
 ## Signing in with Google
 

@@ -90,26 +90,49 @@ it('is offered for a new connection only where the app is set up', function () {
     expect(app(Drivers::class)->options(ConnectionKind::SourceControl))->not->toHaveKey('github-app');
 });
 
-it('takes the installation on its owner only from someone who can manage it, and revokes their token', function () {
+it('takes the installation only from an owner of its organisation, or the account itself, and revokes their token', function () {
     $connection = Connection::factory()->create(['driver' => 'github-app', 'credentials' => null, 'settings' => ['workspace' => 'Fruitcake']]);
-    Http::fake([
-        'api.github.com/user/installations*' => Http::response(['installations' => [
-            ['id' => 5, 'account' => ['login' => 'someone-else']],
-            ['id' => 88, 'account' => ['login' => 'fruitcake']],
-            ['id' => 77, 'account' => ['login' => 'acme']],
-        ]]),
-        'api.github.com/applications/*' => Http::response(null, 204),
-    ]);
+    $role = 'admin';
+    Http::fake(function (Request $request) use (&$role) {
+        return match (true) {
+            str_contains($request->url(), '/user/installations') => Http::response(['installations' => [
+                ['id' => 5, 'account' => ['login' => 'someone-else', 'type' => 'Organization']],
+                ['id' => 88, 'account' => ['login' => 'fruitcake', 'type' => 'Organization']],
+                ['id' => 77, 'account' => ['login' => 'acme', 'type' => 'Organization']],
+                ['id' => 99, 'account' => ['login' => 'barry', 'type' => 'User']],
+            ]]),
+            str_ends_with($request->url(), '/user') => Http::response(['login' => 'barry']),
+            str_contains($request->url(), '/access_tokens') => Http::response(['token' => 'ghs_installation']),
+            str_contains($request->url(), '/orgs/fruitcake/memberships/barry') => Http::response(['state' => 'active', 'role' => $role]),
+            default => Http::response(null, 204),
+        };
+    });
 
     expect(app(GitHubAppDriver::class)->oauthConnected($connection, 'user-token'))->toBe(['installation_id' => '88']);
     Http::assertSent(fn (Request $request): bool => $request->method() === 'DELETE' && $request['access_token'] === 'user-token');
 
+    // A member who only reaches it, through a repository they may read.
+    $role = 'member';
+    expect(fn () => app(GitHubAppDriver::class)->oauthConnected($connection, 'user-token'))->toThrow(ConnectionFailed::class, 'Only an owner of fruitcake');
+
+    // Their own account's.
+    $connection->settings = ['workspace' => 'barry'];
+    expect(app(GitHubAppDriver::class)->oauthConnected($connection, 'user-token'))->toBe(['installation_id' => '99']);
+
     // Not installed where the connection says: nothing to take.
     $connection->settings = ['workspace' => 'nobody'];
     expect(fn () => app(GitHubAppDriver::class)->oauthConnected($connection, 'user-token'))->toThrow(ConnectionFailed::class, 'not installed on nobody');
+});
 
-    // Another team's already.
-    $connection->settings = ['workspace' => 'acme'];
+it('lets one connection have an installation', function () {
+    $connection = Connection::factory()->create(['driver' => 'github-app', 'credentials' => null, 'settings' => ['workspace' => 'acme']]);
+    Http::fake([
+        'api.github.com/user/installations*' => Http::response(['installations' => [['id' => 77, 'account' => ['login' => 'acme', 'type' => 'User']]]]),
+        'api.github.com/user' => Http::response(['login' => 'acme']),
+        '*' => Http::response(null, 204),
+    ]);
+
+    // The connection of the beforeEach has it already.
     expect(fn () => app(GitHubAppDriver::class)->oauthConnected($connection, 'user-token'))->toThrow(ConnectionFailed::class, 'Another connection');
 });
 
