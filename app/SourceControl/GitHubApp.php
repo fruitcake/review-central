@@ -85,11 +85,12 @@ class GitHubApp
     }
 
     /**
-     * The installations of the app the person whose token this is can manage, each
-     * by its id and the login of the account it is on. That is what proves an
-     * organisation's installation is theirs to connect.
+     * The installations of the app the person whose token this is can reach, each
+     * by its id, the login of the account it is on and whether that is an
+     * organisation. Reaching one is not managing it: a member who may read one
+     * of its repositories reaches it too. See manages().
      *
-     * @return list<array{id: string, login: string}>
+     * @return list<array{id: string, login: string, organisation: bool}>
      *
      * @throws ConnectionFailed
      */
@@ -105,11 +106,46 @@ class GitHubApp
 
         foreach ((array) $response->json('installations') as $installation) {
             if (is_array($installation) && is_numeric($installation['id'] ?? null) && is_string($installation['account']['login'] ?? null)) {
-                $installations[] = ['id' => (string) $installation['id'], 'login' => $installation['account']['login']];
+                $installations[] = [
+                    'id' => (string) $installation['id'],
+                    'login' => $installation['account']['login'],
+                    'organisation' => ($installation['account']['type'] ?? null) === 'Organization',
+                ];
             }
         }
 
         return $installations;
+    }
+
+    /**
+     * Whether the person whose token this is may connect the installation: it is
+     * on their own account, or they are an owner of its organisation. Asked of
+     * GitHub as the installation, which needs the app's Members permission.
+     *
+     * @param  array{id: string, login: string, organisation: bool}  $installation
+     *
+     * @throws ConnectionFailed
+     */
+    public function manages(string $userToken, array $installation): bool
+    {
+        $login = $this->request()->withToken($userToken)->get(self::API.'/user')->json('login');
+
+        if (! is_string($login) || $login === '') {
+            throw new ConnectionFailed('GitHub did not say who signed in.');
+        }
+
+        if (! $installation['organisation']) {
+            return strcasecmp($login, $installation['login']) === 0;
+        }
+
+        $membership = $this->request()->withToken($this->installationToken($installation['id']))
+            ->get(self::API.'/orgs/'.rawurlencode($installation['login']).'/memberships/'.rawurlencode($login));
+
+        if ($membership->status() === 403) {
+            throw new ConnectionFailed('The app may not see who owns '.$installation['login'].': give it the organisation permission Members (read) in its settings, and have the organisation accept that.');
+        }
+
+        return $membership->successful() && $membership->json('state') === 'active' && $membership->json('role') === 'admin';
     }
 
     /**

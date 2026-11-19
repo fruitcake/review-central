@@ -155,17 +155,25 @@ class ReviewRequest
      */
     public static function forkRefusal(Repository $repository, array $pullRequest): ?string
     {
-        if (($pullRequest['from_fork'] ?? false) !== true) {
-            return null;
-        }
-
-        if (PullRef::id((string) ($pullRequest['source']['branch']['name'] ?? '')) === null) {
+        if (! self::reviewable($pullRequest)) {
             return 'This pull request comes from a fork, and its host keeps no copy of its branch in this repository, so it cannot be reviewed here.';
         }
 
-        return $repository->tenant->review_forks
-            ? null
-            : 'Pull requests from forks are not reviewed here by themselves: their code would run with this team\'s AI key and on its budget. Someone in the team can start one from Review Central, or turn it on under Review settings.';
+        return ($pullRequest['from_fork'] ?? false) === true && ! $repository->tenant->review_forks
+            ? 'Pull requests from forks are not reviewed here by themselves: their code would run with this team\'s AI key and on its budget. Someone in the team can start one from Review Central, or turn it on under Review settings.'
+            : null;
+    }
+
+    /**
+     * Whether the pull request's code can be reviewed from its branch in this
+     * repository: any but a fork's whose host keeps no copy of it here.
+     *
+     * @param  array<string, mixed>  $pullRequest
+     */
+    public static function reviewable(array $pullRequest): bool
+    {
+        return ($pullRequest['from_fork'] ?? false) !== true
+            || PullRef::id((string) ($pullRequest['source']['branch']['name'] ?? '')) !== null;
     }
 
     /**
@@ -261,6 +269,12 @@ class ReviewRequest
 
         // Turned off, or added to try a review on: listed, and left to a person.
         if (! $this->runsTheReview($repository)) {
+            return;
+        }
+
+        // A fork whose branch its host keeps nowhere in this repository, as on
+        // Bitbucket, cannot be reviewed from it at all: there is nothing to wait for.
+        if (! self::reviewable($data)) {
             return;
         }
 

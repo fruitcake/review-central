@@ -148,7 +148,7 @@ class GitHubAppDriver extends GitHubDriver implements ConnectsWithOAuth, NeedsSe
 
     /**
      * Takes the app's installation on the connection's owner, when the person who
-     * signed in can manage it and no other team has it. Their token is revoked
+     * signed in owns that account or organisation and no other team has it. Their token is revoked
      * either way.
      */
     public function oauthConnected(Connection $connection, string $accessToken): array
@@ -158,14 +158,24 @@ class GitHubAppDriver extends GitHubDriver implements ConnectsWithOAuth, NeedsSe
         try {
             $owner = mb_strtolower((string) $connection->setting('workspace'));
             $installation = collect($app->installationsOf($accessToken))
-                ->first(fn (array $installation): bool => mb_strtolower($installation['login']) === $owner)['id'] ?? null;
+                ->first(fn (array $installation): bool => mb_strtolower($installation['login']) === $owner);
+
+            // Reaching an installation is not enough: any member who may read one of
+            // its repositories does. Only its account, or an owner of its organisation.
+            $manages = $installation !== null && $app->manages($accessToken, $installation);
         } finally {
             $app->revoke($accessToken);
         }
 
         if ($installation === null) {
-            throw new ConnectionFailed("The app is not installed on {$connection->setting('workspace')}, or you may not manage its installation there. Install it at {$app->installUrl()} and connect again.");
+            throw new ConnectionFailed("The app is not installed on {$connection->setting('workspace')}, or you cannot reach its installation there. Install it at {$app->installUrl()} and connect again.");
         }
+
+        if (! $manages) {
+            throw new ConnectionFailed("Only an owner of {$installation['login']} can connect its installation of the app.");
+        }
+
+        $installation = $installation['id'];
 
         $taken = Connection::query()
             ->where('driver', 'github-app')
