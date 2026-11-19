@@ -74,7 +74,7 @@ class ReviewDefaults extends Page
                             ->live(),
                         TagsInput::make('review_command_accounts')
                             ->label('Accounts')
-                            ->helperText('Bitbucket nicknames or account IDs, as in the address of their profile. A display name is not enough: anyone can take any.')
+                            ->helperText('Bitbucket nicknames or GitHub user names, as in the address of their profile, or account IDs. A display name is not enough: anyone can take any.')
                             ->placeholder('Add an account')
                             ->visible(fn (Get $get): bool => $get('review_command') === ReviewCommandAccess::Listed->value)
                             ->required(fn (Get $get): bool => $get('review_command') === ReviewCommandAccess::Listed->value),

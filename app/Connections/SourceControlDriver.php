@@ -40,6 +40,12 @@ interface SourceControlDriver extends ConnectionDriver
     public function installWebhook(Connection $connection, string $url): void;
 
     /**
+     * What the connection's webhook does, and how to add it by hand, for the
+     * screen that shows its address and secret.
+     */
+    public function webhookHelp(): string;
+
+    /**
      * Reads a webhook delivery, or null when its signature does not match.
      */
     public function webhookEvent(Connection $connection, Request $request): ?WebhookEvent;

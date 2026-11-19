@@ -1,0 +1,381 @@
+<?php
+
+use App\Enums\BuildState;
+use App\Exceptions\ConnectionFailed;
+use App\Jobs\RunContainerReview;
+use App\Models\Connection;
+use App\Models\Repository;
+use App\Services\Connections;
+use App\SourceControl\GitHubClient;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+
+/*
+ * GitHub with a personal access token: the review is posted there, and its
+ * webhook starts one. GitHub is faked by one callback that keeps what was posted,
+ * so a test reads back what it wrote, as a second run would.
+ */
+
+beforeEach(function () {
+    config(['review.docker.enabled' => true]);
+
+    $this->connection = Connection::factory()->gitHubSource()->create(['webhook_key' => 'hook-gh', 'webhook_secret' => 'secret']);
+    $this->repository = $this->reviewing(Repository::factory()->create(['connection_id' => $this->connection->id, 'workspace' => 'acme', 'slug' => 'shop']));
+    $this->sha = str_repeat('a', 40);
+
+    // What GitHub holds: comments of both kinds, reviews, threads and statuses.
+    $this->github = (object) ['issueComments' => [], 'reviewComments' => [], 'reviews' => [], 'threads' => [], 'minimized' => [], 'statuses' => [], 'hooks' => [], 'orgHooks' => null, 'pull' => [], 'next' => 100];
+
+    $this->pull = fn (array $more = []): array => array_replace_recursive([
+        'number' => 12, 'title' => 'Add the export', 'body' => 'Adds the export.', 'state' => 'open', 'draft' => false, 'merged_at' => null,
+        'updated_at' => '2026-11-19T10:00:00Z', 'user' => ['login' => 'nora', 'id' => 5],
+        'head' => ['ref' => 'feature/export', 'sha' => $this->sha, 'repo' => ['full_name' => 'acme/shop']],
+        'base' => ['ref' => 'main', 'sha' => str_repeat('b', 40), 'repo' => ['full_name' => 'acme/shop']],
+    ], $more);
+
+    Http::fake(function (Request $request) {
+        $g = $this->github;
+        $path = (string) parse_url($request->url(), PHP_URL_PATH);
+        $method = $request->method();
+        $repo = '/repos/acme/shop';
+
+        // The token belongs to the reviewer's own account.
+        if ($path === '/user') {
+            return Http::response(['id' => 42, 'login' => 'review-bot']);
+        }
+
+        if ($path === '/graphql') {
+            $query = (string) $request['query'];
+
+            if (str_contains($query, 'resolveReviewThread') || str_contains($query, 'unresolveReviewThread')) {
+                $g->threads[$request['variables']['id']]['resolved'] = ! str_contains($query, 'unresolve');
+
+                return Http::response(['data' => []]);
+            }
+
+            if (str_contains($query, 'minimizeComment')) {
+                $g->minimized[$request['variables']['id']] = ! str_contains($query, 'unminimize');
+
+                return Http::response(['data' => []]);
+            }
+
+            return Http::response(['data' => ['repository' => ['pullRequest' => [
+                'reviewThreads' => ['nodes' => collect($g->threads)->map(fn (array $thread, string $id): array => [
+                    'id' => $id, 'isResolved' => $thread['resolved'], 'comments' => ['nodes' => array_map(fn (int $comment): array => ['databaseId' => $comment], $thread['comments'])],
+                ])->values()->all()],
+                'comments' => ['nodes' => collect($g->issueComments)->map(fn (array $comment): array => [
+                    'databaseId' => $comment['id'], 'isMinimized' => $g->minimized["IC_{$comment['id']}"] ?? false, 'minimizedReason' => 'resolved',
+                ])->values()->all()],
+            ]]]]);
+        }
+
+        if ($path === '/users/acme') {
+            return Http::response(['login' => 'acme', 'type' => $g->orgHooks === null ? 'User' : 'Organization']);
+        }
+
+        if (preg_match('~^/orgs/acme/hooks/(\d+)$~', $path) === 1 && $method === 'PATCH') {
+            return Http::response(['id' => 1]);
+        }
+
+        if ($path === '/orgs/acme/hooks') {
+            if ($g->orgHooks === false) {
+                return Http::response(['message' => 'Not Found'], 404);
+            }
+
+            if ($method === 'POST') {
+                $g->orgHooks[] = $request->data();
+            }
+
+            return Http::response($method === 'GET' ? $g->orgHooks : ['id' => 1]);
+        }
+
+        if (preg_match('~^/repos/acme/(\w+)/hooks$~', $path, $m) === 1) {
+            if ($method === 'POST') {
+                $g->hooks[$m[1]][] = $request->data();
+            }
+
+            return Http::response($method === 'GET' ? ($g->hooks[$m[1]] ?? []) : ['id' => 1]);
+        }
+
+        if ($path === "{$repo}/pulls/12" && $method === 'GET') {
+            return Http::response(($this->pull)($g->pull));
+        }
+
+        if ($path === "{$repo}/pulls/12" && $method === 'PATCH') {
+            $g->pull['body'] = $request['body'];
+
+            return Http::response(($this->pull)($g->pull));
+        }
+
+        if ($path === "{$repo}/issues/12/comments") {
+            if ($method === 'POST') {
+                $g->issueComments[] = $comment = ['id' => $g->next++, 'body' => $request['body'], 'user' => ['login' => 'review-bot', 'id' => 42], 'created_at' => now()->toIso8601String()];
+
+                return Http::response($comment, 201);
+            }
+
+            return Http::response($request['page'] > 1 ? [] : $g->issueComments);
+        }
+
+        if ($path === "{$repo}/pulls/12/comments") {
+            if ($method === 'POST') {
+                $g->reviewComments[] = $comment = ['id' => $g->next++, 'body' => $request['body'], 'path' => $request['path'], 'line' => $request['line'], 'user' => ['login' => 'review-bot', 'id' => 42], 'created_at' => now()->toIso8601String()];
+                $g->threads["PRRT_{$comment['id']}"] = ['resolved' => false, 'comments' => [$comment['id']]];
+
+                return Http::response($comment, 201);
+            }
+
+            return Http::response($request['page'] > 1 ? [] : $g->reviewComments);
+        }
+
+        if (preg_match("~^{$repo}/pulls/12/comments/(\\d+)/replies$~", $path, $m) === 1) {
+            $parent = collect($g->reviewComments)->firstWhere('id', (int) $m[1]);
+
+            if ($parent === null) {
+                return Http::response(['message' => 'Not Found'], 404);
+            }
+
+            $g->reviewComments[] = $comment = ['id' => $g->next++, 'body' => $request['body'], 'path' => $parent['path'], 'line' => $parent['line'], 'in_reply_to_id' => $parent['id'], 'user' => ['login' => 'review-bot', 'id' => 42], 'created_at' => now()->toIso8601String()];
+            $thread = collect($g->threads)->search(fn (array $thread): bool => in_array($parent['id'], $thread['comments'], true));
+            $g->threads[$thread]['comments'][] = $comment['id'];
+
+            return Http::response($comment, 201);
+        }
+
+        if (preg_match("~^{$repo}/(pulls|issues)/comments/(\\d+)$~", $path, $m) === 1) {
+            $list = $m[1] === 'pulls' ? 'reviewComments' : 'issueComments';
+            $index = collect($g->{$list})->search(fn (array $comment): bool => $comment['id'] === (int) $m[2]);
+
+            if ($index === false) {
+                return Http::response(['message' => 'Not Found'], 404);
+            }
+
+            if ($method === 'PATCH') {
+                $g->{$list}[$index]['body'] = $request['body'];
+            }
+
+            return Http::response($g->{$list}[$index] + ['node_id' => "IC_{$m[2]}"]);
+        }
+
+        if ($path === "{$repo}/pulls/12/reviews") {
+            if ($method === 'POST') {
+                $g->reviews[] = $review = ['id' => $g->next++, 'state' => ['APPROVE' => 'APPROVED', 'REQUEST_CHANGES' => 'CHANGES_REQUESTED'][$request['event']], 'user' => ['id' => 42], 'body' => $request['body'] ?? ''];
+
+                return Http::response($review);
+            }
+
+            return Http::response($request['page'] > 1 ? [] : $g->reviews);
+        }
+
+        if (preg_match("~^{$repo}/pulls/12/reviews/(\\d+)/dismissals$~", $path, $m) === 1) {
+            $index = collect($g->reviews)->search(fn (array $review): bool => $review['id'] === (int) $m[1]);
+            $g->reviews[$index]['state'] = 'DISMISSED';
+
+            return Http::response($g->reviews[$index]);
+        }
+
+        if (str_starts_with($path, "{$repo}/statuses/")) {
+            $g->statuses[] = $request->data();
+
+            return Http::response([], 201);
+        }
+
+        if (str_starts_with($path, "{$repo}/commits/")) {
+            return Http::response(['sha' => $this->sha, 'commit' => ['message' => 'Add the export', 'author' => ['name' => 'Nora']]]);
+        }
+
+        return Http::response(['message' => "Not faked: {$method} {$path}"], 500);
+    });
+
+    $this->client = new GitHubClient('acme', 'shop', 'github-token');
+
+    // A signed delivery of GitHub's.
+    $this->deliver = fn (string $event, array $payload) => $this->call('POST', '/api/webhooks/hook-gh', [], [], [], [
+        'CONTENT_TYPE' => 'application/json', 'HTTP_X_GITHUB_EVENT' => $event,
+        'HTTP_X_HUB_SIGNATURE_256' => 'sha256='.hash_hmac('sha256', $body = (string) json_encode($payload), 'secret'),
+    ], $body);
+});
+
+it('posts a finding on its line, replies in its thread, and reads both back as one conversation', function () {
+    $finding = $this->client->addPullRequestComment('12', 'The export skips the last row.', 'app/Export.php', 12);
+    $this->client->addPullRequestComment('12', 'Fixed in abc.', parentId: $finding['id']);
+
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'POST' && str_ends_with($request->url(), '/pulls/12/comments')
+        && $request['commit_id'] === $this->sha && $request['line'] === 12 && $request['side'] === 'RIGHT');
+
+    $comments = $this->client->getPullRequestComments('12');
+
+    expect($comments)->toHaveCount(2)
+        ->and($comments[0])->toMatchArray(['id' => $finding['id'], 'inline' => ['path' => 'app/Export.php', 'to' => 12]])
+        ->and($comments[1]['parent'])->toBe(['id' => $finding['id']])
+        ->and($comments[1]['user'])->toBe(['display_name' => 'review-bot', 'nickname' => 'review-bot', 'account_id' => '42']);
+});
+
+it('answers a comment on the pull request itself, which has no thread, with one that names it', function () {
+    $question = $this->client->addPullRequestComment('12', 'Why is this slow?');
+    $this->client->addPullRequestComment('12', 'Because it reads every row.', parentId: $question['id']);
+
+    $comments = $this->client->getPullRequestComments('12');
+
+    expect($comments[1]['parent'])->toBe(['id' => $question['id']])
+        ->and($comments[1]['content']['raw'])->toEndWith("[//]: # (ai-reply-to {$question['id']})")
+        ->and($comments[1])->not->toHaveKey('inline');
+});
+
+it('edits either kind of comment, and resolves a thread or folds a comment away as resolved', function () {
+    $inline = $this->client->addPullRequestComment('12', 'On a line.', 'app/Export.php', 3);
+    $general = $this->client->addPullRequestComment('12', 'On the pull request.');
+
+    $this->client->updatePullRequestComment('12', $inline['id'], 'On a line, edited.');
+    $this->client->updatePullRequestComment('12', $general['id'], 'On the pull request, edited.');
+    $this->client->resolvePullRequestComment('12', $inline['id']);
+    $this->client->resolvePullRequestComment('12', $general['id']);
+
+    $comments = collect((new GitHubClient('acme', 'shop', 'github-token'))->getPullRequestComments('12'))->keyBy('id');
+
+    expect($comments[$inline['id']]['content']['raw'])->toBe('On a line, edited.')
+        ->and($comments[$general['id']]['content']['raw'])->toBe('On the pull request, edited.')
+        ->and($comments[$inline['id']]['resolution'])->toBe(['type' => 'resolved'])
+        ->and($comments[$general['id']]['resolution'])->toBe(['type' => 'resolved']);
+
+    $this->client->resolvePullRequestComment('12', $inline['id'], false);
+
+    expect(collect((new GitHubClient('acme', 'shop', 'github-token'))->getPullRequestComments('12'))->keyBy('id')[$inline['id']])->not->toHaveKey('resolution');
+});
+
+it('approves once, requests changes in its place, and withdraws by dismissing its own review', function () {
+    expect($this->client->approve('12', true))->toBe(200)
+        // Approving again while that stands adds nothing to the pull request.
+        ->and($this->client->approve('12', true))->toBe(200)
+        ->and($this->github->reviews)->toHaveCount(1);
+
+    // Nothing to withdraw is not a failure, as Bitbucket's 404 is not.
+    expect($this->client->requestChanges('12', false))->toBe(404)
+        ->and($this->client->requestChanges('12', true))->toBe(200)
+        ->and($this->github->reviews[1])->toMatchArray(['state' => 'CHANGES_REQUESTED'])
+        ->and($this->github->reviews[1]['body'])->not->toBe('')
+        // The request for changes is what stands now, not the approval.
+        ->and($this->client->approve('12', false))->toBe(404);
+
+    expect($this->client->requestChanges('12', false))->toBe(200)
+        ->and($this->github->reviews[1]['state'])->toBe('DISMISSED');
+});
+
+it('shows the review as a commit status, and posts nothing without a token', function () {
+    $this->client->setBuildStatus($this->sha, BuildState::InProgress, 'https://review.example.com/run', 'Reviewing');
+    $this->client->setBuildStatus($this->sha, BuildState::Failed, 'https://review.example.com/run', str_repeat('x', 300));
+
+    expect($this->github->statuses)->toHaveCount(2)
+        ->and($this->github->statuses[0])->toMatchArray(['context' => 'AI Review', 'state' => 'pending'])
+        ->and($this->github->statuses[1]['state'])->toBe('failure')
+        ->and(mb_strlen($this->github->statuses[1]['description']))->toBe(140);
+
+    $public = new GitHubClient('acme', 'shop');
+    $public->setBuildStatus($this->sha, BuildState::Successful, 'https://review.example.com/run', 'Done');
+
+    expect($public->publishes())->toBeFalse()
+        ->and($this->client->publishes())->toBeTrue()
+        ->and($this->client->supportsTasks())->toBeFalse()
+        ->and($this->github->statuses)->toHaveCount(2);
+});
+
+it('posts a whole review on GitHub: the description, its findings, and changes requested instead of tasks', function () {
+    $this->fileReview([
+        'branch' => 'feature/export', 'commit' => $this->sha, 'build' => 7, 'pull_request_id' => 12,
+        'result' => 'FAILED', 'summary' => 'One finding.',
+        'findings' => [[
+            'id' => 'F1', 'status' => 'new', 'severity' => 'HIGH', 'category' => 'correctness', 'confidence' => 9,
+            'title' => 'The export skips the last row', 'details' => 'The loop ends one early.', 'path' => 'app/Export.php', 'line' => 12,
+        ]],
+    ])->assertOk()
+        ->assertJsonPath('publish.published', true)
+        ->assertJsonPath('publish.tasks.skipped', 'the host has no tasks; the request for changes holds the merge');
+
+    expect($this->github->pull['body'])->toContain('The export skips the last row')
+        ->and($this->github->reviewComments)->toHaveCount(1)
+        ->and($this->github->reviewComments[0])->toMatchArray(['path' => 'app/Export.php', 'line' => 12])
+        ->and(collect($this->github->reviews)->pluck('state')->all())->toBe(['CHANGES_REQUESTED']);
+
+    // The next run finds it fixed: the thread is resolved, and the pull request approved.
+    $this->fileReview([
+        'branch' => 'feature/export', 'commit' => $this->sha, 'build' => 8, 'pull_request_id' => 12,
+        'result' => 'PASSED', 'summary' => 'Fixed.',
+        'findings' => [[
+            'id' => 'F1', 'status' => 'fixed', 'severity' => 'HIGH', 'category' => 'correctness', 'confidence' => 9,
+            'title' => 'The export skips the last row', 'details' => 'The loop ends one early.', 'path' => 'app/Export.php', 'line' => 12,
+        ]],
+    ])->assertOk();
+
+    expect(collect($this->github->threads)->first()['resolved'])->toBeTrue()
+        ->and(collect($this->github->reviewComments)->last()['body'])->toStartWith('Fixed in')
+        ->and(collect($this->github->reviews)->pluck('state')->all())->toBe(['DISMISSED', 'APPROVED']);
+});
+
+it('takes only a delivery signed with the connection\'s secret, and starts a review for a new commit', function () {
+    Queue::fake();
+
+    $this->call('POST', '/api/webhooks/hook-gh', [], [], [], [
+        'CONTENT_TYPE' => 'application/json', 'HTTP_X_GITHUB_EVENT' => 'pull_request', 'HTTP_X_HUB_SIGNATURE_256' => 'sha256=wrong',
+    ], '{}')->assertForbidden();
+
+    ($this->deliver)('ping', ['zen' => 'Keep it logically awesome.', 'hook_id' => 1])->assertOk();
+    Queue::assertNothingPushed();
+
+    ($this->deliver)('pull_request', ['action' => 'synchronize', 'pull_request' => ($this->pull)(), 'repository' => ['name' => 'shop', 'owner' => ['login' => 'acme']]])->assertOk();
+
+    Queue::assertPushed(RunContainerReview::class, fn (RunContainerReview $job): bool => $job->repositoryId === $this->repository->id && $job->branch === 'feature/export');
+    expect($this->repository->refresh()->webhook_received_at)->not->toBeNull();
+});
+
+it('starts a review on a /review comment on the pull request, reading its branch from GitHub', function () {
+    Queue::fake();
+
+    ($this->deliver)('issue_comment', [
+        'action' => 'created',
+        'issue' => ['number' => 12, 'pull_request' => ['url' => 'https://api.github.com/repos/acme/shop/pulls/12']],
+        'comment' => ['id' => 501, 'body' => '/review please', 'user' => ['login' => 'nora', 'id' => 5]],
+        'repository' => ['name' => 'shop', 'owner' => ['login' => 'acme']],
+    ])->assertOk();
+
+    Queue::assertPushed(RunContainerReview::class, fn (RunContainerReview $job): bool => $job->branch === 'feature/export');
+
+    // A comment on an issue that is not a pull request starts nothing.
+    Queue::fake();
+    ($this->deliver)('issue_comment', [
+        'action' => 'created', 'issue' => ['number' => 3],
+        'comment' => ['id' => 502, 'body' => '/review', 'user' => ['login' => 'nora', 'id' => 5]],
+        'repository' => ['name' => 'shop', 'owner' => ['login' => 'acme']],
+    ])->assertOk();
+
+    Queue::assertNothingPushed();
+});
+
+it('adds the webhook to the organisation, or to each repository when it may not', function () {
+    $this->github->orgHooks = [];
+    app(Connections::class)->installWebhook($this->connection);
+
+    expect($this->github->orgHooks)->toHaveCount(1)
+        ->and($this->github->orgHooks[0])->toMatchArray(['name' => 'web', 'events' => ['pull_request', 'issue_comment', 'pull_request_review_comment']])
+        ->and($this->github->orgHooks[0]['config'])->toMatchArray(['url' => route('api.webhooks', ['key' => 'hook-gh']), 'content_type' => 'json', 'secret' => 'secret'])
+        ->and($this->github->hooks)->toBe([]);
+
+    // Asked again, the hook that is there is updated rather than a second added.
+    $this->github->orgHooks[0]['id'] = 1;
+    app(Connections::class)->installWebhook($this->connection);
+
+    expect($this->github->orgHooks)->toHaveCount(1);
+
+    // An organisation whose hooks the token may not manage: each repository instead.
+    $this->github->orgHooks = false;
+    app(Connections::class)->installWebhook($this->connection);
+
+    expect($this->github->hooks['shop'])->toHaveCount(1);
+});
+
+it('says what is missing when there is nowhere to add the webhook', function () {
+    Repository::query()->delete();
+
+    expect(fn () => app(Connections::class)->installWebhook($this->connection))
+        ->toThrow(ConnectionFailed::class, 'Add a repository first');
+});

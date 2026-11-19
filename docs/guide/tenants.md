@@ -6,7 +6,10 @@ In the admin panel, at `/admin`:
 
 In the tenant's panel, at `/app/<tenant>`:
 
-2. **Source control**: add the host. **Bitbucket Cloud**, with a workspace access token that may write pull requests, is the one reviews are posted on. **GitHub** is read-only for now: a token (or none, for public repositories) to read and clone, so its pull requests can be tried without posting. **Git** clones any other host over HTTPS.
+2. **Source control**: add the host.
+   - **GitHub**: a fine-grained personal access token for the repositories, with read access to Contents and Metadata, read and write access to Pull requests, Issues and Commit statuses, and Webhooks to have the webhook added for you. The review comments, approves and requests changes as the account that owns the token, so give it an account of its own, a machine user: GitHub does not let an account approve its own pull request. The owner is the user or organisation from the address. Without a token, a public repository is only read, and its pull requests can be tried.
+   - **Bitbucket Cloud**: a workspace access token that may write pull requests.
+   - **Git**: clones any other host over HTTPS, and posts nothing.
 
    **AI providers**: add a key, with the model and effort Claude Code or Codex reviews at on it. "Test" checks the credentials.
 
@@ -19,9 +22,9 @@ In the tenant's panel, at `/app/<tenant>`:
    Anthropic and OpenAI take a base URL too, for a gateway that speaks their API.
 3. **Tickets**, for ticket context: the tracker (Jira, Asana or GitHub issues) with its credentials, and which references in a pull request title name a ticket there: `PREFIX-123` with a list of prefixes, or `#1234`. Jira and Asana take a token, or a sign-in there when the installation has an OAuth app for them (see [below](#signing-in-to-asana-and-jira)).
 4. **Repositories**: choose the connection and search for the repository by name. The workspace is the connection's, and the stack is read from the repository's `composer.json` when it is added; editing the repository changes the stack, its name here and the instructions it reads.
-5. On the source control connection, **Webhook** shows the address and secret. The webhook is what starts a review: for a push to a pull request, a `/review` comment and a draft marked ready. **Add it for me** adds it for every repository of the workspace, which needs the webhook scope on the token: Bitbucket has no screen for a workspace's webhooks, only an API. Without that scope, add it to each repository under Repository settings, Webhooks.
-
-Added by hand, the webhook takes the pull request events Created, Updated, Merged, Declined and Comment created. Nothing is needed in the repository itself.
+5. On the source control connection, **Webhook** shows the address and secret. The webhook is what starts a review: for a push to a pull request, a `/review` comment and a draft marked ready. **Add it for me** adds it for you; the screen says how to add it by hand. Nothing is needed in the repository itself.
+   - **GitHub**: on the organisation, which covers every repository it has and gets, when the token may manage the organisation's webhooks; otherwise on each repository of the connection, so add the webhook again after adding a repository. By hand: the repository's or organisation's **Settings → Webhooks**, with this URL as the payload URL, content type `application/json`, the secret, and the events **Pull requests**, **Issue comments** and **Pull request review comments**.
+   - **Bitbucket**: on every repository of the workspace, which needs the webhook scope on the token: Bitbucket has no screen for a workspace's webhooks, only an API. Without that scope, add it to each repository under **Repository settings → Webhooks**, with the pull request events Created, Updated, Merged, Declined and Comment created.
 
 A tenant's own colours are set on the tenant: see [Appearance](./appearance).
 

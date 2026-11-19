@@ -492,6 +492,10 @@ class ReviewPublisher
             return $counts + ['skipped' => 'this run asked for no tasks'];
         }
 
+        if (! $repository->sourceControl()->supportsTasks()) {
+            return $counts + ['skipped' => 'the host has no tasks; the request for changes holds the merge'];
+        }
+
         try {
             $existing = $this->tasksByFinding(
                 $repository->sourceControl()->getPullRequestTasks($pullRequestId),

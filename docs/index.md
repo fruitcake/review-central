@@ -25,7 +25,7 @@ features:
     details: The reviewer reads the pull request with its ticket from Jira, Asana or GitHub Issues, so it checks what was asked for, not only what was written.
   - icon: 💬
     title: Posted where you work
-    details: A summary in the description, a comment per finding, tasks for what blocks the merge, and an approval or a request for changes. The next push marks what was fixed. Posts on Bitbucket Cloud today; GitHub is read-only for now, and its pull requests can be tried without posting.
+    details: A summary in the description, a comment per finding, and an approval or a request for changes. The next push marks what was fixed and resolves its threads. On GitHub and Bitbucket Cloud.
   - icon: 🧰
     title: Your reviewer, your model
     details: Claude Code, Codex, OpenCodeReview or Pi, with the model and effort you set, and a budget per reviewer. Or only the diff, sent to your AI provider.

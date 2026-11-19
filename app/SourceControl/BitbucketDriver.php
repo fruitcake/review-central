@@ -145,6 +145,11 @@ class BitbucketDriver implements SourceControlDriver
         );
     }
 
+    public function webhookHelp(): string
+    {
+        return 'Starts a review on a /review comment, when a draft is marked ready, and on every new commit of a pull request. "Add it for me" adds it for every repository of the workspace. By hand it goes on each repository, under Repository settings, Webhooks, with the pull request events Created, Updated, Merged, Declined and Comment created.';
+    }
+
     public function webhookEvent(Connection $connection, Request $request): ?WebhookEvent
     {
         $secret = (string) $connection->webhook_secret;

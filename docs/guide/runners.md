@@ -14,13 +14,13 @@ The platform's runner is picked under **Admin → Settings**, from the ones that
 
 ## A container on this server
 
-The review runs as a queued job on this installation's own worker. What it prints is kept in a file while it runs, and the review's page in the tenant panel shows it as it goes, asking again every few seconds. The log may quote the repository's code; it is removed after `REVIEW_CONTAINER_LOG_DAYS` (14), and `REVIEW_CONTAINER_LOG=false` keeps none. The connection's webhook starts a review for every new commit on a pull request that is not a draft, and the pull request shows it among its builds as "AI Review".
+The review runs as a queued job on this installation's own worker. What it prints is kept in a file while it runs, and the review's page in the tenant panel shows it as it goes, asking again every few seconds. The log may quote the repository's code; it is removed after `REVIEW_CONTAINER_LOG_DAYS` (14), and `REVIEW_CONTAINER_LOG=false` keeps none. The connection's webhook starts a review for every new commit on a pull request that is not a draft, and the pull request shows it among its checks as "AI Review": a build status on Bitbucket, a commit status on GitHub.
 
 The job clones the repository on the worker, and then runs the review's scripts in containers that are thrown away:
 
 - the reviewer is the only step that sees the pull request's code. It gets the AI provider's key and nothing else: no credential for this server or for the repository's host. It cannot change the scripts the other steps run.
 - the worker itself decides whether to review and writes what the reviewer reads: the pull request, its comments, the ticket and the instructions. That reads no code, so it needs no container.
-- the worker reads the report the reviewer wrote, as data, and files it: the review on the pull request and the Code Insights report on the commit. Each review uses one container; a review that is turned away uses none.
+- the worker reads the report the reviewer wrote, as data, and files it: the review on the pull request and, on Bitbucket, the Code Insights report on the commit. Each review uses one container; a review that is turned away uses none.
 
 To turn it on, on a machine that runs `php artisan queue:work --queue=reviews`:
 

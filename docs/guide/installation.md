@@ -105,7 +105,7 @@ The same on a plain Ubuntu server: nginx with PHP-FPM on `public/`, MySQL and Re
 | Key | Made where | Kept where |
 |---|---|---|
 | `APP_KEY` | Forge, when it creates the site (`php artisan key:generate` elsewhere) | `.env` on the server. Encrypts everything below. |
-| Source control token | Bitbucket: workspace settings, access tokens. It has to write pull requests, read the repository, set a build status on a commit, and manage webhooks when the webhook is added for you. | A tenant's source control connection. |
+| Source control token | GitHub: a fine-grained personal access token, of an account of its own (see [Setting up a tenant](./tenants)). Bitbucket: workspace settings, access tokens. Either has to read the repository, write pull requests and comments, set a status on a commit, and manage webhooks when the webhook is added for you. | A tenant's source control connection. |
 | AI provider key | The provider's console: Anthropic, OpenAI, Gemini and the others. | A tenant's AI provider connection. |
 | Ticket tracker token | Jira, Asana or GitHub. | A tenant's ticket connection. |
 | Google sign-in, Asana and Jira apps | Optional, at Google, Asana and Atlassian: see [Setting up a tenant](./tenants#signing-in-with-google). | `.env`: `GOOGLE_*`, `ASANA_*`, `ATLASSIAN_*`. |

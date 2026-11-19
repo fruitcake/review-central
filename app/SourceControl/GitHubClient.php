@@ -4,32 +4,90 @@ declare(strict_types=1);
 
 namespace App\SourceControl;
 
+use App\Enums\BuildState;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use LogicException;
+use RuntimeException;
 use Throwable;
 
 /**
- * A repository on GitHub, read and not written to.
+ * A repository on GitHub.
  *
  * A pull request and its comments are handed on in the shape the review reads
  * them in everywhere, which is Bitbucket's: a state of OPEN, MERGED or DECLINED,
- * a source and a destination with a branch and a commit. A public repository
- * needs no token; a private one a token that can read it.
+ * a source and a destination with a branch and a commit, and comments with an
+ * inline place, a parent and a resolution.
  *
- * Not here yet: comments, approvals and checks on GitHub, its webhooks, and an
- * open pull request from a fork, whose branch is not in this repository.
+ * With a token the review is posted here: its comments, an approval or a request
+ * for changes as a review of GitHub's, and its state as a commit status. Without
+ * one the repository is only read, which is all a public repository needs to be
+ * tried. GitHub has no tasks on a pull request, and a report with annotations on
+ * a commit (a check run) is for GitHub Apps only, so neither is posted: a request
+ * for changes is what holds the merge.
+ *
+ * GitHub keeps two kinds of comment on a pull request. One on a line is part of a
+ * review thread, which can be replied to and resolved. One on the pull request as
+ * a whole is an issue comment, which has neither: a reply to one is another issue
+ * comment that names its parent in a hidden marker, and one is resolved by
+ * minimising it as resolved, which is how GitHub folds it away.
  */
 class GitHubClient implements SourceControl
 {
-    use ReadsOnly;
+    /** Pages of 100 read before giving up on a list. */
+    public const MAX_PAGES = 20;
+
+    /** The name a review's commit status goes by; a later one of the same name replaces it. */
+    public const STATUS_CONTEXT = 'AI Review';
+
+    /** What an issue comment written as a reply says its parent is. */
+    public const PARENT_MARKER = '/\[\/\/\]:\s*#\s*\(ai-reply-to (\d+)\)/';
 
     protected const API = 'https://api.github.com';
+
+    /** The account the token acts as, once asked. */
+    protected ?string $account = null;
+
+    /**
+     * Review threads and folded comments of a pull request, once asked: by comment.
+     *
+     * @var array<string, array{threads: array<int, array{id: string, resolved: bool}>, minimized: array<int, bool>}>
+     */
+    protected array $threads = [];
 
     public function __construct(
         protected string $owner,
         protected string $name,
         protected ?string $token = null,
     ) {}
+
+    /**
+     * Only with a token: without one nothing can be written, and the repository
+     * is read as anyone may read it.
+     */
+    public function publishes(): bool
+    {
+        return $this->token !== null;
+    }
+
+    public function supportsTasks(): bool
+    {
+        return false;
+    }
+
+    /**
+     * The id of the account the token acts as, which is how a comment's author is
+     * told from it.
+     */
+    public function accountId(): ?string
+    {
+        if ($this->token === null) {
+            return null;
+        }
+
+        return $this->account ??= rescue(fn (): ?string => is_numeric($id = $this->request(8)->get(self::API.'/user')->json('id')) ? (string) $id : null, null, false);
+    }
 
     public function getPullRequest(string $id): ?array
     {
@@ -40,7 +98,7 @@ class GitHubClient implements SourceControl
         }
 
         $pull = $response->throw()->json();
-        $pullRequest = $this->pullRequest($pull);
+        $pullRequest = self::pullRequest($pull);
 
         if (is_array($pullRequest['merge_commit']) && $this->rebased($pull)) {
             $pullRequest['merge_commit']['rebased'] = true;
@@ -93,31 +151,214 @@ class GitHubClient implements SourceControl
             ->throw()
             ->json()[0] ?? null;
 
-        return is_array($found) ? $this->pullRequest($found) : null;
+        return is_array($found) ? self::pullRequest($found) : null;
     }
 
     /**
-     * The remarks on the pull request and the ones on its lines, oldest first.
+     * The remarks on the pull request and the ones on its lines, oldest first,
+     * with whether each one's thread is resolved.
      */
     public function getPullRequestComments(string $id): array
     {
-        $general = (array) $this->request(15)->get($this->url("issues/{$id}/comments"), ['per_page' => 100])->throw()->json();
-        $inline = (array) $this->request(15)->get($this->url("pulls/{$id}/comments"), ['per_page' => 100])->throw()->json();
+        $general = $this->all($this->url("issues/{$id}/comments"));
+        $inline = $this->all($this->url("pulls/{$id}/comments"));
+        $threads = $this->threads($id);
 
-        return collect([...$general, ...$inline])
+        return collect([
+            ...array_map(fn (mixed $comment): mixed => is_array($comment) ? $comment + ['kind' => 'issue'] : $comment, $general),
+            ...array_map(fn (mixed $comment): mixed => is_array($comment) ? $comment + ['kind' => 'review'] : $comment, $inline),
+        ])
             ->filter(fn (mixed $comment): bool => is_array($comment) && isset($comment['id']))
-            ->map(fn (array $comment): array => array_filter([
-                'id' => (int) $comment['id'],
-                'content' => ['raw' => (string) ($comment['body'] ?? '')],
-                'user' => ['display_name' => (string) ($comment['user']['login'] ?? ''), 'account_id' => (string) ($comment['user']['id'] ?? '')],
-                'created_on' => $comment['created_at'] ?? null,
-                'updated_on' => $comment['updated_at'] ?? null,
-                'inline' => isset($comment['path']) ? ['path' => (string) $comment['path'], 'to' => $comment['line'] ?? $comment['original_line'] ?? null] : null,
-                'parent' => isset($comment['in_reply_to_id']) ? ['id' => (int) $comment['in_reply_to_id']] : null,
-            ], fn (mixed $value): bool => $value !== null))
+            ->map(function (array $comment) use ($threads): array {
+                $id = (int) $comment['id'];
+                $body = (string) ($comment['body'] ?? '');
+                $parent = $comment['in_reply_to_id'] ?? (preg_match(self::PARENT_MARKER, $body, $match) === 1 ? (int) $match[1] : null);
+                $resolved = $comment['kind'] === 'review'
+                    ? ($threads['threads'][$id]['resolved'] ?? false)
+                    : ($threads['minimized'][$id] ?? false);
+
+                return array_filter([
+                    'id' => $id,
+                    'content' => ['raw' => $body],
+                    'user' => [
+                        'display_name' => (string) ($comment['user']['login'] ?? ''),
+                        'nickname' => (string) ($comment['user']['login'] ?? ''),
+                        'account_id' => (string) ($comment['user']['id'] ?? ''),
+                    ],
+                    'created_on' => $comment['created_at'] ?? null,
+                    'updated_on' => $comment['updated_at'] ?? null,
+                    'inline' => $comment['kind'] === 'review' && isset($comment['path'])
+                        ? ['path' => (string) $comment['path'], 'to' => $comment['line'] ?? $comment['original_line'] ?? null]
+                        : null,
+                    'parent' => $parent === null ? null : ['id' => (int) $parent],
+                    'resolution' => $resolved ? ['type' => 'resolved'] : null,
+                ], fn (mixed $value): bool => $value !== null);
+            })
             ->sortBy('created_on')
             ->values()
             ->all();
+    }
+
+    /**
+     * On a line when a path is given, as a reply when a parent is, and on the pull
+     * request otherwise. A line that is not part of the diff is refused, which the
+     * caller turns into a comment on the pull request.
+     */
+    public function addPullRequestComment(string $id, string $content, ?string $path = null, ?int $line = null, ?int $parentId = null): array
+    {
+        if ($parentId !== null) {
+            $reply = $this->request(15)->post($this->url("pulls/{$id}/comments/{$parentId}/replies"), ['body' => $content]);
+
+            if ($reply->successful()) {
+                return (array) $reply->json();
+            }
+
+            // Not a comment in a review thread: one on the pull request, which has
+            // no threads, so the reply says which comment it answers.
+            return (array) $this->request(15)->post($this->url("issues/{$id}/comments"), [
+                'body' => rtrim($content)."\n\n[//]: # (ai-reply-to {$parentId})",
+            ])->throw()->json();
+        }
+
+        if ($path !== null) {
+            $head = $this->getPullRequest($id)['source']['commit']['hash'] ?? null;
+
+            if (! is_string($head) || $head === '') {
+                throw new RuntimeException("Pull request #{$id} has no head commit to comment on.");
+            }
+
+            return (array) $this->request(15)->post($this->url("pulls/{$id}/comments"), array_filter([
+                'body' => $content,
+                'commit_id' => $head,
+                'path' => $path,
+                'line' => $line,
+                'side' => $line === null ? null : 'RIGHT',
+                'subject_type' => $line === null ? 'file' : null,
+            ], fn (mixed $value): bool => $value !== null))->throw()->json();
+        }
+
+        return (array) $this->request(15)->post($this->url("issues/{$id}/comments"), ['body' => $content])->throw()->json();
+    }
+
+    public function updatePullRequestComment(string $id, int $commentId, string $content): array
+    {
+        $response = $this->request(15)->patch($this->url("pulls/comments/{$commentId}"), ['body' => $content]);
+
+        if ($response->status() === 404) {
+            $response = $this->request(15)->patch($this->url("issues/comments/{$commentId}"), ['body' => $content]);
+        }
+
+        return (array) $response->throw()->json();
+    }
+
+    /**
+     * Resolves the review thread a comment on a line is in, or minimises a comment
+     * on the pull request as resolved; or the other way around.
+     */
+    public function resolvePullRequestComment(string $id, int $commentId, bool $resolved = true): array
+    {
+        $thread = $this->threads($id, fresh: true)['threads'][$commentId] ?? null;
+
+        if ($thread !== null) {
+            $mutation = $resolved ? 'resolveReviewThread' : 'unresolveReviewThread';
+
+            return $this->graphql("mutation(\$id: ID!) { {$mutation}(input: {threadId: \$id}) { thread { isResolved } } }", ['id' => $thread['id']]);
+        }
+
+        $node = $this->request(10)->get($this->url("issues/comments/{$commentId}"))->throw()->json('node_id');
+
+        if (! is_string($node) || $node === '') {
+            throw new RuntimeException("Comment {$commentId} is not on pull request #{$id}.");
+        }
+
+        return $resolved
+            ? $this->graphql('mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: RESOLVED}) { minimizedComment { isMinimized } } }', ['id' => $node])
+            : $this->graphql('mutation($id: ID!) { unminimizeComment(input: {subjectId: $id}) { unminimizedComment { isMinimized } } }', ['id' => $node]);
+    }
+
+    public function getPullRequestTasks(string $id): array
+    {
+        return [];
+    }
+
+    public function createPullRequestTask(string $id, string $content, ?int $commentId = null): array
+    {
+        throw new LogicException('GitHub has no tasks on a pull request.');
+    }
+
+    public function resolvePullRequestTask(string $id, int $taskId, string $content): array
+    {
+        throw new LogicException('GitHub has no tasks on a pull request.');
+    }
+
+    public function updatePullRequestDescription(string $id, string $title, string $description): int
+    {
+        return $this->request(15)->patch($this->url("pulls/{$id}"), ['title' => $title, 'body' => $description])->status();
+    }
+
+    /**
+     * An approving review, or the dismissal of the token's approval. Approving
+     * again while the last one stands adds nothing, so it is left at that rather
+     * than adding a review to the pull request's history on every run.
+     */
+    public function approve(string $id, bool $approved): int
+    {
+        return $this->verdict($id, 'APPROVED', 'APPROVE', $approved, '');
+    }
+
+    /**
+     * A review that requests changes, or the dismissal of the token's request.
+     */
+    public function requestChanges(string $id, bool $requested): int
+    {
+        return $this->verdict($id, 'CHANGES_REQUESTED', 'REQUEST_CHANGES', $requested, 'The AI review found something that holds the merge: see its comments and the description.');
+    }
+
+    /**
+     * @return int the HTTP status: 404 for nothing to withdraw, as Bitbucket answers
+     */
+    protected function verdict(string $id, string $state, string $event, bool $wanted, string $body): int
+    {
+        $last = $this->lastOwnReview($id);
+
+        if ($wanted) {
+            if (($last['state'] ?? null) === $state) {
+                return 200;
+            }
+
+            return $this->request(15)->post($this->url("pulls/{$id}/reviews"), array_filter(['event' => $event, 'body' => $body]))->status();
+        }
+
+        if (($last['state'] ?? null) !== $state || ! isset($last['id'])) {
+            return 404;
+        }
+
+        return $this->request(15)->put($this->url("pulls/{$id}/reviews/{$last['id']}/dismissals"), [
+            'event' => 'DISMISS',
+            'message' => 'Withdrawn by the AI review after a newer review of this pull request.',
+        ])->status();
+    }
+
+    /**
+     * The newest review the token's account left that approved, requested changes
+     * or was dismissed: what stands of it now. A review that only commented does
+     * not change that.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function lastOwnReview(string $id): ?array
+    {
+        $account = $this->accountId();
+
+        if ($account === null) {
+            return null;
+        }
+
+        return collect($this->all($this->url("pulls/{$id}/reviews")))
+            ->filter(fn (mixed $review): bool => is_array($review)
+                && (string) ($review['user']['id'] ?? '') === $account
+                && in_array($review['state'] ?? null, ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'], true))
+            ->last();
     }
 
     public function getCommit(string $commit): ?array
@@ -177,6 +418,41 @@ class GitHubClient implements SourceControl
         return $response->throw()->body();
     }
 
+    /**
+     * A commit status, which the pull request lists among its checks. Without a
+     * token there is nothing to show it with.
+     */
+    public function setBuildStatus(string $commit, BuildState $state, string $url, string $description): void
+    {
+        if ($this->token === null) {
+            return;
+        }
+
+        $this->request(15)->post($this->url("statuses/{$commit}"), [
+            'context' => self::STATUS_CONTEXT,
+            'state' => match ($state) {
+                BuildState::InProgress => 'pending',
+                BuildState::Successful => 'success',
+                BuildState::Failed => 'failure',
+                BuildState::Stopped => 'error',
+            },
+            'target_url' => $url,
+            // GitHub refuses a longer one.
+            'description' => mb_substr($description, 0, 140),
+        ])->throw();
+    }
+
+    /**
+     * A report on a commit is a check run, which only a GitHub App may create. The
+     * findings are on the pull request as comments, and the status says how it ended.
+     */
+    public function putCommitReport(string $commit, array $report): void {}
+
+    public function addCommitReportAnnotations(string $commit, array $annotations): ?int
+    {
+        return null;
+    }
+
     public function cloneAccess(): array
     {
         return [
@@ -203,10 +479,10 @@ class GitHubClient implements SourceControl
     }
 
     /**
-     * @param  array<string, mixed>  $pull  as GitHub describes it
+     * @param  array<string, mixed>  $pull  as GitHub describes it, from its API or a webhook
      * @return array<string, mixed> as the review reads a pull request
      */
-    protected function pullRequest(array $pull): array
+    public static function pullRequest(array $pull): array
     {
         return [
             'id' => (int) ($pull['number'] ?? 0),
@@ -226,6 +502,103 @@ class GitHubClient implements SourceControl
             // Whether its branch is in this repository: one from a fork is not.
             'from_fork' => ($pull['head']['repo']['full_name'] ?? null) !== ($pull['base']['repo']['full_name'] ?? null),
         ];
+    }
+
+    /**
+     * The review threads of a pull request, by each comment in them, and which of
+     * its comments on the pull request itself are minimised as resolved. Only
+     * GitHub's GraphQL API says either; without a token, or when it does not
+     * answer, nothing is known to be resolved.
+     *
+     * @return array{threads: array<int, array{id: string, resolved: bool}>, minimized: array<int, bool>}
+     */
+    protected function threads(string $id, bool $fresh = false): array
+    {
+        if (! $fresh && isset($this->threads[$id])) {
+            return $this->threads[$id];
+        }
+
+        $known = ['threads' => [], 'minimized' => []];
+
+        if ($this->token === null) {
+            return $known;
+        }
+
+        try {
+            $data = $this->graphql(<<<'GRAPHQL'
+                query($owner: String!, $name: String!, $number: Int!) {
+                  repository(owner: $owner, name: $name) {
+                    pullRequest(number: $number) {
+                      reviewThreads(first: 100) { nodes { id isResolved comments(first: 100) { nodes { databaseId } } } }
+                      comments(last: 100) { nodes { databaseId isMinimized minimizedReason } }
+                    }
+                  }
+                }
+                GRAPHQL, ['owner' => $this->owner, 'name' => $this->name, 'number' => (int) $id]);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return $known;
+        }
+
+        foreach ((array) ($data['repository']['pullRequest']['reviewThreads']['nodes'] ?? []) as $thread) {
+            foreach ((array) ($thread['comments']['nodes'] ?? []) as $comment) {
+                if (is_numeric($comment['databaseId'] ?? null) && is_string($thread['id'] ?? null)) {
+                    $known['threads'][(int) $comment['databaseId']] = ['id' => $thread['id'], 'resolved' => (bool) ($thread['isResolved'] ?? false)];
+                }
+            }
+        }
+
+        foreach ((array) ($data['repository']['pullRequest']['comments']['nodes'] ?? []) as $comment) {
+            if (is_numeric($comment['databaseId'] ?? null)) {
+                $known['minimized'][(int) $comment['databaseId']] = ($comment['isMinimized'] ?? false) === true
+                    && strtolower((string) ($comment['minimizedReason'] ?? '')) === 'resolved';
+            }
+        }
+
+        return $this->threads[$id] = $known;
+    }
+
+    /**
+     * @param  array<string, mixed>  $variables
+     * @return array<string, mixed> the answer's data
+     *
+     * @throws RuntimeException when GitHub answers with errors
+     */
+    protected function graphql(string $query, array $variables): array
+    {
+        $response = $this->request(15)->post(self::API.'/graphql', ['query' => $query, 'variables' => $variables])->throw();
+        $errors = $response->json('errors');
+
+        if (is_array($errors) && $errors !== []) {
+            throw new RuntimeException('GitHub answered: '.implode('; ', array_map(fn (mixed $error): string => (string) ($error['message'] ?? 'an error'), $errors)));
+        }
+
+        return (array) $response->json('data');
+    }
+
+    /**
+     * Every page of a list, up to MAX_PAGES. A failed page throws: a partial list
+     * reads as one that ends there.
+     *
+     * @return array<int, mixed>
+     */
+    protected function all(string $url): array
+    {
+        $items = [];
+
+        for ($page = 1; $page <= self::MAX_PAGES; $page++) {
+            /** @var Response $response */
+            $response = $this->request(15)->get($url, ['per_page' => 100, 'page' => $page])->throw();
+            $batch = array_values((array) $response->json());
+            $items = [...$items, ...$batch];
+
+            if (count($batch) < 100) {
+                break;
+            }
+        }
+
+        return $items;
     }
 
     protected function url(string $path): string

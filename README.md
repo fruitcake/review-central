@@ -18,7 +18,7 @@ by the reviewer and model you choose, on your own server and with your own AI ke
 ## What it does
 
 - **Reviews against the ticket.** The reviewer reads the pull request with its ticket from Jira, Asana or GitHub Issues, so it checks what was asked for, not only what was written.
-- **Posts on the pull request.** A summary in the description, a comment per finding, tasks for what blocks the merge, and an approval or a request for changes. The next push marks what was fixed. Reviews are posted on **Bitbucket Cloud**. GitHub is read-only for now: its pull requests can be tried without posting, and nothing is posted on GitHub.
+- **Posts on the pull request.** A summary in the description, a comment per finding, and an approval or a request for changes. The next push marks what was fixed and resolves its threads. On **GitHub** and **Bitbucket Cloud**; on Bitbucket also tasks for what blocks the merge.
 - **Your reviewer, your model.** Claude Code, Codex, OpenCodeReview or Pi, with the model and effort you set, or only the diff sent to your AI provider: Anthropic, OpenAI, Gemini, Mistral, Groq, DeepSeek, xAI or OpenRouter.
 - **Sandboxed.** The reviewer reads the code in a throwaway container under gVisor, or in a Cloudflare sandbox (experimental), holding nothing but the AI key.
 - **Many teams, one installation.** Each tenant brings its own connections, colours, currency and time zone; the admin panel shows every tenant's cost against its budget.

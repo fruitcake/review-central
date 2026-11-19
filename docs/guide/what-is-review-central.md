@@ -26,7 +26,7 @@ A review that finds nothing blocking but names something only a person can settl
 
 | | Supported |
 |---|---|
-| Source control | **Bitbucket Cloud**: reviews start from its webhook and are posted on the pull request. **GitHub, read-only for now**: a pull request can be [tried](./reviews#trying-a-pull-request) without posting, and nothing starts a review from GitHub on its own. **Any git host**, for cloning only. |
+| Source control | **GitHub**, with a personal access token, and **Bitbucket Cloud**: reviews start from their webhook and are posted on the pull request. Bitbucket also gets a task per finding that blocks the merge and a Code Insights report; GitHub has neither, and its review requests changes instead. Without a token, a public GitHub repository can be [tried](./reviews#trying-a-pull-request) without posting. **Any git host**, for cloning only. |
 | Tickets | Jira, Asana, GitHub Issues |
 | AI providers | Anthropic and OpenAI, or a gateway that speaks their API, for every reviewer. Gemini, Mistral, Groq, DeepSeek, xAI and OpenRouter for the review from the diff, and for Pi in a trial. |
 | Reviewers | Claude Code, Codex CLI, OpenCodeReview, Pi, or the diff alone |

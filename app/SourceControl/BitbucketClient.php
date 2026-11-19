@@ -85,6 +85,11 @@ class BitbucketClient implements SourceControl
         return true;
     }
 
+    public function supportsTasks(): bool
+    {
+        return true;
+    }
+
     public function accountId(): ?string
     {
         // Not every kind of token may ask who it is; then nobody is mentioned by it.

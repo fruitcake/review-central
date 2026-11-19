@@ -61,9 +61,9 @@ it('reads a pull request on GitHub in the shape the review reads one in', functi
         // The remarks on the pull request and on its lines as one conversation, oldest first.
         ->and(array_column($client->getPullRequestComments('12'), 'id'))->toBe([1, 2])
         ->and($client->getPullRequestComments('12')[0])->toMatchArray(['content' => ['raw' => 'Why this?'], 'inline' => ['path' => 'app/Export.php', 'to' => 12]])
-        // Read from, and that is all.
-        ->and($client->publishes())->toBeFalse()
-        ->and(fn () => $client->addPullRequestComment('12', 'A finding.'))->toThrow(LogicException::class);
+        // With a token the review is posted there; without one, as anyone, it is only read.
+        ->and($client->publishes())->toBeTrue()
+        ->and((new GitHubClient('acme', 'shop'))->publishes())->toBeFalse();
 
     Http::assertSent(fn (Request $request): bool => $request->hasHeader('Authorization', 'Bearer token-one') && $request->hasHeader('User-Agent', 'review-central'));
 });

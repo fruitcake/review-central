@@ -26,7 +26,7 @@ The result is on the review's page a minute later. Nothing is posted on GitHub.
 From there:
 
 - **A reviewer that reads the repository** (Claude Code, Codex, OpenCodeReview, Pi) needs a sandbox for the pull request's code: [Docker on your server](./runners#a-container-on-this-server), or [Cloudflare sandboxes](./runners#a-cloudflare-sandbox) (experimental), which can also run on this machine with `npx wrangler dev` and your own Docker.
-- **Reviews posted on your pull requests** need a source control connection on Bitbucket Cloud, and the webhook it shows. See [Setting up a tenant](./tenants). GitHub is read-only for now: its pull requests can be tried, as above, but nothing is posted there.
+- **Reviews posted on your pull requests** need a source control connection with a token, GitHub or Bitbucket Cloud, and the webhook it shows. See [Setting up a tenant](./tenants).
 - **Admin → Setup** says what is in place, and what to do about what is not.
 
 The review from the diff is the default runner until another is set up and picked under Admin → Settings. It is the safe one: nothing of the pull request runs. It is also the weaker one, since it sees the diff and not the code around it.

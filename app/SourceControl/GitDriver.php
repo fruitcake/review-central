@@ -74,6 +74,11 @@ class GitDriver implements SourceControlDriver
         return new GitClient((string) $connection->setting('base_url'), $repository->slug, $connection->setting('username'), $connection->credential('password'));
     }
 
+    public function webhookHelp(): string
+    {
+        return 'A git server that is only cloned from has no webhook: nothing there starts a review.';
+    }
+
     public function webhookEvent(Connection $connection, Request $request): ?WebhookEvent
     {
         return null;
