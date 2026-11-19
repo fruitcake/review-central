@@ -2,7 +2,9 @@
 
 use App\Enums\ReviewsFrom;
 use App\Filament\App\Resources\PullRequests\Pages\ListPullRequests;
+use App\Jobs\AnswerReviewQuestion;
 use App\Jobs\RunContainerReview;
+use App\Models\Connection;
 use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\User;
@@ -164,4 +166,22 @@ it('starts a review by comment only for a trusted account where only theirs are 
     $comment(2, 'trusted-dev')->assertOk();
 
     Queue::assertPushed(RunContainerReview::class, fn (RunContainerReview $job): bool => $job->branch === 'feature/export');
+});
+
+it('answers a question only from a trusted account where only theirs are reviewed', function () {
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    $this->repository->update(['reviews_from' => ReviewsFrom::Trusted]);
+    $this->repository->tenant->update(['review_forks' => true]);
+    $ask = fn (int $id, string $nickname): TestResponse => deliverPullRequest([], 'outsider', 'pullrequest:comment_created', [
+        'comment' => ['id' => $id, 'content' => ['raw' => '@review why is this a problem?'], 'user' => ['display_name' => ucfirst($nickname), 'account_id' => "id-{$nickname}", 'nickname' => $nickname]],
+    ]);
+
+    $ask(1, 'outsider')->assertOk();
+
+    Queue::assertNotPushed(AnswerReviewQuestion::class);
+    Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/comments') && str_contains((string) json_encode($request->data()), 'only the accounts this team trusts ask the reviewer'));
+
+    $ask(2, 'trusted-dev')->assertOk();
+
+    Queue::assertPushed(AnswerReviewQuestion::class, 1);
 });
