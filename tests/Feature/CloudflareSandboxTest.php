@@ -1,0 +1,344 @@
+<?php
+
+use App\Models\Repository;
+use App\Models\ReviewRun;
+use App\Runners\Container\CloudflareSandbox;
+use App\Runners\Container\ReviewSessions;
+use App\Runners\Container\RunLog;
+use App\Runners\Container\Sandbox;
+use App\Runners\Container\Sandboxes;
+use App\Runners\Container\Trial;
+use App\Services\PlatformSettings;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Storage;
+
+beforeEach(function () {
+    $this->work = storage_path('framework/testing/review-work/7-41');
+    // What a run that was cut short left behind is not this one's.
+    File::deleteDirectory(storage_path('framework/testing/review-work'));
+    File::deleteDirectory(storage_path('framework/testing/review-home'));
+    File::ensureDirectoryExists($this->work);
+    Storage::fake('r2');
+
+    config(['review.cloudflare' => ['url' => 'https://sandbox.example.com', 'token' => 'worker-token', 'disk' => 'r2', 'instance' => 'basic', 'local' => false] + config('review.cloudflare')]);
+});
+
+// Not the directory itself: it is the repository's, with a file of its own.
+afterEach(function () {
+    foreach (['review-work', 'review-home', 'review-logs', 'review-sessions'] as $directory) {
+        File::deleteDirectory(storage_path("framework/testing/{$directory}"));
+    }
+
+    File::delete(storage_path('framework/testing/review-home-own.txt'));
+});
+
+/**
+ * The Worker's answer, as server-sent events.
+ *
+ * @param  array<int, array{string, mixed}>  $events
+ */
+function sandboxEvents(array $events): string
+{
+    return collect($events)->map(fn (array $event): string => "event: {$event[0]}\ndata: ".json_encode($event[1])."\n\n")->implode(": keep-alive\n\n");
+}
+
+it('runs a step in a Cloudflare sandbox: the checkout up through the bucket, the output streamed, the reviewer\'s files back', function () {
+    $home = storage_path('framework/testing/review-home');
+    File::ensureDirectoryExists($home);
+    $asked = null;
+    $uploaded = null;
+
+    // tar and gzip are the worker's own; what they would have made is put there.
+    Process::fake(function ($process) {
+        $command = (array) $process->command;
+
+        if ($command[0] === 'gzip') {
+            File::put(end($command).'.gz', 'the checkout, packed');
+        }
+
+        // find is the worker's own too: the links in the home go, as it would remove them.
+        if ($command[0] === 'find' && is_link($command[1].'/.review-session')) {
+            unlink($command[1].'/.review-session');
+        }
+
+        if ($command[0] === 'tar' && $command[1] === '-xzf') {
+            $to = $command[array_search('-C', $command, true) + 1];
+            File::ensureDirectoryExists("{$to}/work");
+            File::ensureDirectoryExists("{$to}/home/reviewer");
+            File::put("{$to}/work/ai-review.json", '{"result":"PASSED"}');
+            // Not one this worker reads: it stays in the sandbox's archive.
+            File::put("{$to}/work/composer.json", '{}');
+            File::put("{$to}/home/reviewer/.review-session", 'session-one');
+        }
+
+        return Process::result();
+    });
+
+    Http::fake(['sandbox.example.com/*' => function (Request $request) use (&$asked, &$uploaded) {
+        if ($request->method() !== 'POST') {
+            return Http::response(['destroyed' => true]);
+        }
+
+        $asked = $request->data();
+        $uploaded = Storage::disk('r2')->get($asked['input']);
+        Storage::disk('r2')->put($asked['output'], 'what the reviewer left');
+
+        return Http::response(sandboxEvents([
+            ['note', 'Sandbox started (basic).'],
+            ['output', "Reviewing\npull "],
+            ['output', "request 570\n"],
+            ['exit', ['exitCode' => 0, 'seconds' => 200, 'kept' => true]],
+        ]), 200, ['Content-Type' => 'text/event-stream']);
+    }]);
+
+    // The pull request committed a name the worker copies back as a link to a
+    // file of the worker's own, and left another in the reviewer's home.
+    $own = storage_path('framework/testing/review-home-own.txt');
+    File::put($own, 'the worker\'s own');
+    symlink($own, "{$this->work}/ai-review.json");
+    symlink($own, "{$home}/.review-session");
+
+    $printed = '';
+    $sandbox = app(CloudflareSandbox::class);
+    $result = $sandbox->run('review-7-41-review', 'sh .review/skill/run-review.sh', $this->work, ['ANTHROPIC_API_KEY' => 'sk-ant-one'], trusted: false, timeout: 1800, home: $home, output: function (string $type, string $piece) use (&$printed) {
+        $printed .= $piece;
+    });
+
+    expect($result->successful())->toBeTrue()
+        ->and($printed)->toBe("Sandbox started (basic).\nReviewing\npull request 570\n")
+        ->and($uploaded)->toBe('the checkout, packed')
+        ->and($asked['script'])->toBe('mkdir -p "$HOME" && sh .review/skill/run-review.sh')
+        // On Cloudflare's own image the review brings what installs its tools, and
+        // a name for the snapshot of a sandbox that ran it.
+        ->and($asked['setup'])->toBe(File::get(resource_path('review/skill/sandbox-setup.sh')))
+        ->and($asked['setupVersion'])->toBe(substr(hash_file('sha256', resource_path('review/skill/sandbox-setup.sh')), 0, 16))
+        ->and($asked['env'])->toBe(['ANTHROPIC_API_KEY' => 'sk-ant-one'])
+        ->and($asked['timeout'])->toBe(1800)
+        ->and($asked['instance'])->toBe('basic')
+        ->and($asked['keep'])->toContain('ai-review.json', 'ai-usage.json')
+        // Back on the worker: the report it reads, and the session for the next review.
+        ->and(File::get("{$this->work}/ai-review.json"))->toBe('{"result":"PASSED"}')
+        ->and(is_link("{$this->work}/ai-review.json"))->toBeFalse()
+        // Written beside the link's target, never through it.
+        ->and(File::get($own))->toBe('the worker\'s own')
+        ->and(File::exists("{$this->work}/composer.json"))->toBeFalse()
+        ->and(File::get("{$home}/.review-session"))->toBe('session-one')
+        // 200 seconds of a quarter of a processor, 1 GiB and 4 GB of disk.
+        ->and($sandbox->seconds)->toBe(200)
+        ->and($sandbox->cost)->toBe(0.0016)
+        ->and($sandbox->name())->toBe('cloudflare')
+        // Nothing of the review stays in the bucket.
+        ->and(Storage::disk('r2')->allFiles())->toBe([]);
+
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'POST' && str_starts_with($request->url(), 'https://sandbox.example.com/runs/review-7-41-review-')
+        && $request->hasHeader('Authorization', 'Bearer worker-token'));
+    // Told to go, whether or not it had gone already.
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'DELETE' && str_starts_with($request->url(), 'https://sandbox.example.com/runs/review-7-41-review-'));
+    // Links in what came back are removed before anything is copied.
+    Process::assertRan(fn ($process): bool => ((array) $process->command)[0] === 'find' && in_array('-delete', (array) $process->command, true));
+});
+
+it('fails the step when the sandbox did not run it, and leaves nothing behind', function (string $answer, int $status, string $message) {
+    Process::fake(function ($process) {
+        if (((array) $process->command)[0] === 'gzip') {
+            File::put(end($process->command).'.gz', 'packed');
+        }
+
+        return Process::result();
+    });
+    Http::fake(['sandbox.example.com/*' => fn (Request $request) => $request->method() === 'POST' ? Http::response($answer, $status) : Http::response([])]);
+
+    expect(fn () => app(CloudflareSandbox::class)->run('review-7-41-review', 'true', $this->work, [], trusted: false, timeout: 60))
+        ->toThrow(RuntimeException::class, $message);
+
+    expect(Storage::disk('r2')->allFiles())->toBe([]);
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'DELETE');
+})->with([
+    'the Worker refuses' => ['{"error":"Not allowed."}', 401, 'The Cloudflare Worker answered 401: Not allowed.'],
+    'the sandbox does not start' => [sandboxEvents([['error', 'The sandbox did not start within a minute.']]), 200, 'did not run the step: The sandbox did not start within a minute.'],
+    'the stream ends early' => [sandboxEvents([['output', 'Reviewing']]), 200, 'stopped answering before the step ended'],
+]);
+
+it('reports a step that failed in the sandbox by its exit code, as Docker does', function () {
+    Process::fake(function ($process) {
+        if (((array) $process->command)[0] === 'gzip') {
+            File::put(end($process->command).'.gz', 'packed');
+        }
+
+        return Process::result();
+    });
+    Http::fake(['sandbox.example.com/*' => Http::response(sandboxEvents([['exit', ['exitCode' => 124, 'seconds' => 1800, 'kept' => false]]]))]);
+
+    $sandbox = app(CloudflareSandbox::class);
+    $result = $sandbox->run('review-7-41-review', 'true', $this->work, [], trusted: false, timeout: 1800);
+
+    // It ran, and it was paid for.
+    expect($result->failed())->toBeTrue()
+        ->and($result->exitCode())->toBe(124)
+        ->and($sandbox->seconds)->toBe(1800);
+});
+
+it('runs in the sandbox of the trial\'s runner, else the repository\'s, else the platform\'s, and on Docker when Cloudflare is not set up', function () {
+    $docker = new Sandbox;
+    $trial = fn (?string $runner): Trial => new Trial(pullRequestId: 570, destination: 'main', sandbox: $runner);
+    $repository = Repository::factory()->create(['review_runner' => null]);
+
+    expect(app(Sandboxes::class)->for($trial('cloudflare'), $repository, $docker))->toBeInstanceOf(CloudflareSandbox::class)
+        // The platform's runner: docker unless an administrator picked another.
+        ->and(app(Sandboxes::class)->for($trial(null), $repository, $docker))->toBe($docker)
+        ->and(app(Sandboxes::class)->for(null, $repository, $docker))->toBe($docker);
+
+    app(PlatformSettings::class)->save(['runner' => 'cloudflare']);
+    app()->forgetScopedInstances();
+
+    expect(app(Sandboxes::class)->for(null, $repository, $docker))->toBeInstanceOf(CloudflareSandbox::class)
+        // A repository's own runner over the platform's.
+        ->and(app(Sandboxes::class)->for(null, tap($repository)->update(['review_runner' => 'docker']), $docker))->toBe($docker)
+        // One that reviews from the diff has its trials and security reviews on the platform's.
+        ->and(app(Sandboxes::class)->for(null, tap($repository)->update(['review_runner' => 'diff']), $docker))->toBeInstanceOf(CloudflareSandbox::class);
+
+    config(['review.cloudflare.token' => null]);
+
+    // Without a Worker to ask, Docker, whatever is asked for.
+    expect(app(Sandboxes::class)->for($trial('cloudflare'), $repository, $docker))->toBe($docker);
+});
+
+it('copies a run\'s log to a disk, where a server that is not the worker reads it', function () {
+    config(['review.container.log.disk' => 'r2', 'review.container.log.directory' => storage_path('framework/testing/review-logs')]);
+    $repository = Repository::factory()->create();
+    $run = ReviewRun::query()->create([
+        'tenant_id' => $repository->tenant_id, 'repository_id' => $repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'feature/export', 'commit' => str_repeat('a', 40), 'build_number' => 41, 'status' => ReviewRun::STATUS_RUNNING, 'started_at' => now(),
+    ]);
+
+    $log = app(RunLog::class)->writer($repository->id, 41);
+    $log->note('── review ──');
+    $log->write('out', "Reviewing pull request 570\n");
+    $log->flush();
+    // The run's last line, with nothing after it to bring it along.
+    $log->note('Filed: the review is on the pull request.');
+
+    expect(Storage::disk('r2')->get("review/logs/{$repository->id}/41.log"))->toContain('── review ──', 'Reviewing pull request 570', 'Filed: the review is on the pull request.');
+
+    // The worker's own file is gone, or was never on this server.
+    File::deleteDirectory(storage_path('framework/testing/review-logs'));
+
+    expect(app(RunLog::class)->tail($run)['text'])->toContain('Reviewing pull request 570');
+
+    // And it goes with the others when it is old.
+    $this->travel(15)->days();
+
+    expect(app(RunLog::class)->prune())->toBe(1)
+        ->and(Storage::disk('r2')->allFiles())->toBe([]);
+});
+
+it('keeps a session on a disk too, for a worker that has not got it', function () {
+    config(['review.container.sessions.disk' => 'r2', 'review.container.sessions.directory' => storage_path('framework/testing/review-sessions')]);
+    $repository = Repository::factory()->create();
+    $sessions = app(ReviewSessions::class);
+
+    Process::fake(function ($process) {
+        $command = (array) $process->command;
+
+        if ($command[0] === 'tar' && $command[1] === '-czf') {
+            File::put($command[2], 'the session, packed');
+        }
+
+        if ($command[0] === 'tar' && $command[1] === '-xzf') {
+            File::put($command[array_search('-C', $command, true) + 1].'/.review-session', 'session-one');
+        }
+
+        return Process::result();
+    });
+
+    $home = $sessions->home($repository, 'feature/export');
+    File::put("{$home}/.review-session", 'session-one');
+    $sessions->store($repository, 'feature/export');
+
+    expect(Storage::disk('r2')->allFiles())->toHaveCount(1);
+
+    // Another worker: nothing of the branch on its disk.
+    File::deleteDirectory(storage_path('framework/testing/review-sessions'));
+
+    expect($sessions->resumes($sessions->home($repository, 'feature/export')))->toBeTrue();
+
+    // Merged or declined: gone from the disk as well.
+    $sessions->forget($repository, 'feature/export');
+
+    expect(Storage::disk('r2')->allFiles())->toBe([]);
+});
+
+it('talks to the Worker on this machine where none is deployed, and sends the files through it', function () {
+    config(['review.cloudflare.url' => null, 'review.cloudflare.token' => null, 'review.cloudflare.local' => true]);
+    $stored = [];
+
+    Process::fake(function ($process) {
+        $command = (array) $process->command;
+
+        if ($command[0] === 'gzip') {
+            File::put(end($command).'.gz', 'the checkout, packed');
+        }
+
+        if ($command[0] === 'tar' && $command[1] === '-xzf') {
+            $to = $command[array_search('-C', $command, true) + 1];
+            File::ensureDirectoryExists("{$to}/work");
+            File::put("{$to}/work/ai-review.json", '{"result":"PASSED"}');
+        }
+
+        return Process::result();
+    });
+
+    Http::fake(['127.0.0.1:8787/*' => function (Request $request) use (&$stored) {
+        $path = (string) parse_url($request->url(), PHP_URL_PATH);
+
+        if (str_starts_with($path, '/files/')) {
+            if ($request->method() === 'PUT') {
+                $stored[$path] = $request->body();
+            }
+
+            return $request->method() === 'GET' ? Http::response('what the reviewer left') : Http::response(['ok' => true]);
+        }
+
+        return $request->method() === 'POST'
+            ? Http::response(sandboxEvents([['exit', ['exitCode' => 0, 'seconds' => 60, 'kept' => true]]]))
+            : Http::response([]);
+    }]);
+
+    expect(CloudflareSandbox::configured())->toBeTrue()->and(CloudflareSandbox::local())->toBeTrue();
+
+    $result = app(CloudflareSandbox::class)->run('review-7-41-review', 'true', $this->work, [], trusted: false, timeout: 60);
+
+    expect($result->successful())->toBeTrue()
+        ->and(array_values($stored))->toBe(['the checkout, packed'])
+        ->and(array_key_first($stored))->toMatch('~^/files/review/sandbox/review-7-41-review-[a-f0-9]{8}/input\.tar\.gz$~')
+        ->and(File::get("{$this->work}/ai-review.json"))->toBe('{"result":"PASSED"}')
+        // No bucket of ours was touched: the Worker keeps its own.
+        ->and(Storage::disk('r2')->allFiles())->toBe([]);
+
+    // With the token `wrangler dev` reads from .dev.vars.
+    Http::assertSent(fn (Request $request): bool => $request->hasHeader('Authorization', 'Bearer local'));
+
+    // A deployed Worker, once it is named, is the one that is asked.
+    config(['review.cloudflare.url' => 'https://sandbox.example.com', 'review.cloudflare.token' => 'worker-token']);
+
+    expect(CloudflareSandbox::local())->toBeFalse();
+});
+
+it('keeps one vendor/ per repository, of its destination branch, under the repository\'s name', function () {
+    File::put("{$this->work}/composer.json", '{"require": {"laravel/framework": "^13.0"}}');
+
+    $cache = CloudflareSandbox::vendorCache(storage_path('app/review/cache/7'), $this->work);
+
+    expect($cache)->toBe(['key' => 'review/cache/7/vendor-base.tar', 'file' => '/cache/composer/vendor-base.tar'])
+        // The Worker takes only names of these shapes.
+        ->and(preg_match('/^review\/cache\/[A-Za-z0-9_-]+\/vendor-[a-z0-9-]+\.tar$/', $cache['key']))->toBe(1)
+        ->and(preg_match('/^\/cache\/composer\/vendor-[a-z0-9-]+\.tar$/', $cache['file']))->toBe(1);
+
+    // Nothing to install without a composer.json.
+    File::delete("{$this->work}/composer.json");
+
+    expect(CloudflareSandbox::vendorCache(storage_path('app/review/cache/7'), $this->work))->toBeNull();
+});

@@ -1,0 +1,3 @@
+# The token of the Worker on this machine, for `npx wrangler dev`.
+# Copy to .dev.vars. review-central sends "local" when REVIEW_CLOUDFLARE_LOCAL is on.
+API_TOKEN=local

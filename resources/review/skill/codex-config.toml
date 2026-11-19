@@ -1,0 +1,70 @@
+# Codex's half of the review, for comparing agents on the same pull request.
+#
+# Bitbucket merges base config, then this file, then config.overrides, then its own
+# enforced settings - later wins - so the pipeline YAML deliberately sets none of
+# these: anything it set would win over this file and there would be no point
+# editing it.
+#
+# Keep this file small. The first version turned the sandbox down to
+# workspace-write with no network and the run answered "The terminal is unavailable
+# here" - an agent that could not read the repository it was sent to review. The
+# runtime Bitbucket ships decides what is reachable; this file should ask it for as
+# little as possible.
+
+# Sol is the flagship; gpt-5.6-terra and gpt-5.6-luna are the cheaper tiers.
+#
+# CODEX_REVIEW_EFFORT overrides model_reasoning_effort per repository or workspace;
+# prepare-review.sh writes it in, because Bitbucket substitutes no variables inside
+# an agent's config block.
+#
+# low costs less. Across runs of one branch, low filed the same HIGH finding as
+# medium and high, a missing scope check on an authenticated route, at a quarter of
+# the cost and a third of the wall clock ($0.36 against $1.54, 90s against 389s).
+# Raising the effort bought no finding that low did not already have.
+#
+# Two caveats on that measurement, for whoever revisits it. It was made through the
+# Codex CLI rather than the agent runtime this file configures, and on a branch with
+# no pull request, no previous findings and no ticket to reconcile. That is a colder
+# and easier read than a follow-up review.
+#
+# "Model metadata for gpt-6.1-sol not found" is Codex's own table being older than
+# the model, not the API refusing it - the build here warns for gpt-5.6-sol just
+# the same. The fallback it defaults to is a guess at the context window, which is
+# what decides when it compacts, so the warning is worth clearing rather than
+# living with.
+#
+# The warning stays, and this is now a settled decision rather than a deferred one.
+#
+# model_catalog_json is the right key, and an absolute path written in by
+# prepare-review.sh would solve the path problem that defeated the first attempt.
+# The schema is what closes it. Measured against codex-cli 0.157.0: `models` is a
+# sequence, not a map - so the catalogue file this repository used to carry was the
+# wrong shape and could never have loaded - and each entry is Codex's internal model
+# struct. Feeding it one field at a time, it demanded slug, display_name,
+# context_window, max_output_tokens, shell_type, visibility (list|hide|none),
+# supported_in_api, priority, support_verbosity and supported_reasoning_levels as
+# structs of their own, and the binary's symbols list around forty more:
+# service_tiers, available_access_programs, model_messages, truncation_policy,
+# input_modalities, comp_hash, multi_agent_reasoning_effort.
+#
+# None of it is documented, all of it moves with Codex, and a single missing field
+# is not a warning - Codex refuses to start: "failed to parse model_catalog_json".
+# So the choice is a cosmetic warning against a pipeline that dies on the day the
+# struct gains a field. The warning wins. Revisit only with a catalogue Codex
+# publishes itself, never with one written by hand.
+# Not model_context_window either way: Codex clamps it silently and
+# openai/codex#16068 reports it breaks auto-compaction after the first overflow.
+model = "gpt-6.1-sol"
+model_reasoning_effort = "medium"
+
+# Codex loads AGENTS.md by itself and CLAUDE.md only when told to. A repository
+# with a CLAUDE.md and no AGENTS.md - one where Boost was set up for Claude alone,
+# or a Magento or Drupal project with its own CLAUDE.md - otherwise reaches the
+# reviewer only because SKILL.md names it. With this, Codex reads it the way
+# Claude does. AGENTS.md still wins where both exist.
+project_doc_fallback_filenames = ["CLAUDE.md"]
+
+# Nothing else about the runtime. No sandbox_mode, no network_access, no
+# approval_policy: the defaults are what the Bitbucket runtime is set up to work
+# with, and every one of those keys in the first version was part of why the agent
+# had no shell.
