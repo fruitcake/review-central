@@ -737,6 +737,29 @@ class ReviewPublisher
             }
         }
 
+        // A finding this run no longer reports because it was settled before, whose
+        // thread was left open: the run that settled it could not resolve it.
+        // Resolved now, as that run would have. Only where nobody but the review
+        // wrote under it since: a thread a person answered is theirs to close.
+        $reported = array_flip(array_map(fn (array $finding): string => (string) ($finding['id'] ?? ''), $findings));
+
+        foreach ($previous as $id => $existing) {
+            $commentId = $existing['comment_id'] ?? null;
+
+            if (isset($reported[$id]) || $commentId === null || ($existing['resolved'] ?? false)
+                || (($existing['replied'] ?? true) && ! ($existing['review_spoke_last'] ?? false))
+                || ! in_array(strtolower((string) ($existing['status'] ?? '')), self::RESOLVED, true)) {
+                continue;
+            }
+
+            try {
+                $repository->sourceControl()->resolvePullRequestComment($pullRequestId, (int) $commentId);
+                $counts['resolved']++;
+            } catch (Throwable $exception) {
+                report($exception);
+            }
+        }
+
         return $counts;
     }
 
@@ -1465,6 +1488,7 @@ class ReviewPublisher
         foreach ($state as $id => $finding) {
             $last = $lastReplies[(int) ($finding['comment_id'] ?? 0)] ?? null;
             $state[$id]['review_spoke_last'] = $last !== null && str_contains($last, self::REPLY_MARKER);
+            $state[$id]['replied'] = $last !== null;
         }
 
         return $state;

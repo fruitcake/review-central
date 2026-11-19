@@ -336,11 +336,35 @@ it('still says a finding was fixed when GitHub will not resolve its thread', fun
     expect(collect($this->github->threads)->first()['resolved'])->toBeFalse()
         ->and(collect($this->github->reviewComments)->last()['body'])->toStartWith('Fixed in');
 
-    // Once GitHub answers again, the next run resolves the thread it could not.
+    // Once GitHub answers again, the next run resolves the thread it could not,
+    // though it no longer reports the finding, which is settled.
     $this->github->graphqlFails = false;
-    $this->fileReview($report(9, 'fixed', 'PASSED'))->assertOk();
+    $this->fileReview(['findings' => []] + $report(9, 'fixed', 'PASSED'))->assertOk();
 
     expect(collect($this->github->threads)->first()['resolved'])->toBeTrue();
+});
+
+it('resolves a settled finding\'s open thread only where nobody but the review wrote under it', function () {
+    $finding = ['id' => 'F1', 'status' => 'new', 'severity' => 'HIGH', 'category' => 'correctness', 'confidence' => 9,
+        'title' => 'The export skips the last row', 'details' => 'The loop ends one early.', 'path' => 'app/Export.php', 'line' => 12];
+    $report = fn (int $build, array $findings, string $result): array => [
+        'branch' => 'feature/export', 'commit' => $this->sha, 'build' => $build, 'pull_request_id' => 12, 'result' => $result, 'summary' => 'Reviewed.', 'findings' => $findings,
+    ];
+
+    $this->fileReview($report(7, [$finding], 'FAILED'))->assertOk();
+    $this->github->graphqlFails = true;
+    $this->fileReview($report(8, [['status' => 'fixed'] + $finding], 'PASSED'))->assertOk();
+    $this->github->graphqlFails = false;
+
+    // Someone wrote under it after the review's reply: theirs to close.
+    $thread = array_key_first($this->github->threads);
+    $this->github->reviewComments[] = ['id' => $this->github->next++, 'body' => 'Not quite, see the import.', 'path' => 'app/Export.php', 'line' => 12,
+        'in_reply_to_id' => $this->github->reviewComments[0]['id'], 'user' => ['login' => 'nora', 'id' => 5], 'created_at' => now()->addMinute()->toIso8601String()];
+    $this->github->threads[$thread]['comments'][] = $this->github->next - 1;
+
+    $this->fileReview($report(9, [], 'PASSED'))->assertOk();
+
+    expect($this->github->threads[$thread]['resolved'])->toBeFalse();
 });
 
 it('takes only a delivery signed with the connection\'s secret, and starts a review for a new commit', function () {
