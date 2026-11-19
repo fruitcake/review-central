@@ -101,6 +101,14 @@ class RunPresenter
             : sprintf('%02d:%02d', intdiv($seconds, 60), $seconds % 60);
     }
 
+    /**
+     * Whether the run is still going: queued, waiting its turn or reviewing.
+     */
+    public static function live(ReviewRun $run): bool
+    {
+        return in_array($run->status, [ReviewRun::STATUS_QUEUED, ReviewRun::STATUS_RUNNING, ReviewRun::STATUS_PENDING], true);
+    }
+
     public static function title(ReviewRun $run): string
     {
         $title = $run->context['pull_request']['title'] ?? null;

@@ -235,7 +235,7 @@ class ViewReviewRun extends ViewRecord
             'ownScore' => $run->ratings()->where('user_id', auth()->id())->value('score'),
             // What a container review printed so far; null when there is no log of it.
             'log' => app(RunLog::class)->tail($run),
-            'live' => in_array($run->status, [ReviewRun::STATUS_QUEUED, ReviewRun::STATUS_RUNNING, ReviewRun::STATUS_PENDING], true),
+            'live' => RunPresenter::live($run),
             // With a broadcaster the page is told when to look. It still asks now and
             // then: a broadcast can be missed, and the last lines before a reviewer
             // goes quiet are not told of until it prints again.
