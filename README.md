@@ -71,7 +71,7 @@ The docs are in [`docs/`](docs), built with VitePress.
 
 ## Contributing and security
 
-Questions, bugs and ideas go in [GitHub issues](https://github.com/fruitcake/review-central/issues), and contributions are welcome as pull requests: see [CONTRIBUTING.md](CONTRIBUTING.md). Report a security problem privately, as [SECURITY.md](SECURITY.md) describes, not in a public issue. What changed in each release is in the [changelog](CHANGELOG.md).
+Questions, bugs and ideas go in [GitHub issues](https://github.com/fruitcake/review-central/issues), and contributions are welcome as pull requests: see [CONTRIBUTING.md](CONTRIBUTING.md). Report a security problem privately, as [SECURITY.md](SECURITY.md) describes, not in a public issue. What changed in each release is in its [release notes](https://github.com/fruitcake/review-central/releases).
 
 ## License
 

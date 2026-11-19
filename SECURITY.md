@@ -10,7 +10,7 @@ Include what you found, how to reproduce it, and what an attacker could do with 
 
 ## Supported versions
 
-Only the latest release receives security fixes; they are released as soon as they are ready, and named in the [changelog](CHANGELOG.md). Keep your installation up to date as described in [Updating](https://review-central.com/guide/updating).
+Only the latest release receives security fixes; they are released as soon as they are ready, and named in the [release notes](https://github.com/fruitcake/review-central/releases). Keep your installation up to date as described in [Updating](https://review-central.com/guide/updating).
 
 ## What is in scope
 

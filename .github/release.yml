@@ -1,0 +1,17 @@
+# How GitHub groups the pull requests in a release's generated notes. A pull
+# request someone running Review Central has to act on when updating gets the
+# label `upgrade`, and says what to do in its description.
+changelog:
+  exclude:
+    labels:
+      - skip-release-notes
+  categories:
+    - title: Needs action when updating
+      labels:
+        - upgrade
+    - title: Dependencies
+      labels:
+        - dependencies
+    - title: Changes
+      labels:
+        - '*'

@@ -43,7 +43,7 @@ Tests run on SQLite in memory and need no services: HTTP calls to source control
 - Keep a pull request to one change, with a title and description that say what it does and why.
 - Update the docs in `docs/` when you change setup, configuration or behaviour someone relies on.
 - New environment variables go in the [configuration reference](docs/guide/configuration.md), and in `.env.example` with a comment when a feature needs them set.
-- Add a line under **Unreleased** in [CHANGELOG.md](CHANGELOG.md) for a change someone running Review Central would notice.
+- Write the pull request's title for someone running Review Central: it goes into the release notes as it is. If they have to do something when updating, such as add a setting or deploy the Worker again, say what in the description and add the label `upgrade`.
 
 ## Adding a stack guide or a provider
 
@@ -52,21 +52,18 @@ Tests run on SQLite in memory and need no services: HTTP calls to source control
 
 ## Releasing
 
-For maintainers. A release is named after the day it comes out, `2026.11.19`, without leading zeros (`2027.1.5`). A second release on the same day gets a count: `2026.11.19.1`. Pushing the tag is the release; the `release` workflow does the rest.
+For maintainers. A release is named after the day it comes out, `2026.11.19`, without leading zeros (`2027.1.5`). A second release on the same day gets a count: `2026.11.19.1`. Pushing the tag is the release; the `release` workflow does the rest:
 
-1. On `main`, turn **Unreleased** in `CHANGELOG.md` into the release's heading, `## 2026.11.19`, with what someone updating has to do, and merge it.
-2. Tag the merged commit and push the tag:
+```bash
+git switch main && git pull
+git tag 2026.11.19 && git push origin 2026.11.19
+```
 
-   ```bash
-   git switch main && git pull
-   git tag 2026.11.19 && git push origin 2026.11.19
-   ```
+The workflow runs the checks on the tag and makes a GitHub Release whose notes GitHub writes from the pull requests merged since the last release, grouped by label as `.github/release.yml` says: those labelled `upgrade` first, under **Needs action when updating**. Then it fast-forwards `stable` to the tag, and servers that deploy `stable` take it from there. Edit a release's notes on GitHub afterwards to add anything the titles do not say.
 
-3. The workflow runs the checks on the tag, makes a GitHub Release from the release's section of the changelog, and fast-forwards `stable` to the tag. Servers that deploy `stable` take it from there.
+A tag with a suffix, such as `2026.11.19-rc.1`, is released as a pre-release and leaves `stable` where it is.
 
-What someone has to do when updating, such as a setting to add or a Worker to deploy again, goes in the changelog under the release. A tag with a suffix, such as `2026.11.19-rc.1`, is released as a pre-release and leaves `stable` where it is.
-
-The workflow refuses a tag that is not on `main`, that is not named after a day, or whose release has no section in the changelog. Fix that on `main`, delete the tag (`git push origin :refs/tags/2026.11.19`), and tag again.
+The workflow refuses a tag that is not on `main` or not named after a day. Delete it (`git push origin :refs/tags/2026.11.19`) and tag again.
 
 To roll back, move `stable` back to the previous release by hand, which a server deploying it then takes: `git push --force origin 2026.11.12^{commit}:refs/heads/stable`. Then release the fix as a new release; the workflow only ever moves `stable` forward.
 
