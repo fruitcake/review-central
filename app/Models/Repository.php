@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
  * @property int $id
@@ -31,11 +32,15 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property array<int, string>|null $review_available_providers
  * @property CarbonInterface|null $review_available_at
  * @property CarbonInterface|null $webhook_received_at
+ * @property CarbonInterface|null $deleted_at
  */
 class Repository extends Model
 {
     /** @use HasFactory<RepositoryFactory> */
     use HasFactory;
+
+    // Removed, it is kept with its history, and comes back when added again.
+    use SoftDeletes;
 
     protected $guarded = [];
 
@@ -72,7 +77,8 @@ class Repository extends Model
      */
     public function integration(): BelongsTo
     {
-        return $this->belongsTo(Connection::class, 'connection_id');
+        // Also a removed one: a removed repository's history still names its host.
+        return $this->belongsTo(Connection::class, 'connection_id')->withTrashed();
     }
 
     /**

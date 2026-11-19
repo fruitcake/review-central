@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\Connection;
 use App\Models\Repository;
+use App\Models\Tenant;
 use Throwable;
 
 /**
@@ -32,6 +33,32 @@ class RepositorySetup
         }
 
         return $data;
+    }
+
+    /**
+     * Adds the repository, or brings back the one that was removed, on this
+     * connection or another to the same host: with its history, and its own
+     * settings as they were.
+     *
+     * @param  array<string, mixed>  $data  as the form sent it
+     */
+    public function add(Tenant $tenant, Connection $connection, array $data): Repository
+    {
+        $removed = Repository::onlyTrashed()
+            ->where('tenant_id', $tenant->getKey())
+            ->where('workspace', (string) ($connection->setting('workspace') ?? $data['workspace'] ?? ''))
+            ->where('slug', (string) ($data['slug'] ?? ''))
+            ->get()
+            ->first(fn (Repository $repository): bool => $repository->integration->sameHostAs($connection));
+
+        if ($removed !== null) {
+            $removed->restore();
+            $removed->update(['connection_id' => $connection->getKey()]);
+
+            return $removed;
+        }
+
+        return Repository::query()->create(['tenant_id' => $tenant->getKey(), 'connection_id' => $connection->getKey()] + $this->complete($data, $connection));
     }
 
     /**

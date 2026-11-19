@@ -204,7 +204,8 @@ class ReviewRun extends Model
      */
     public function repository(): BelongsTo
     {
-        return $this->belongsTo(Repository::class);
+        // Also a removed one, whose history this is.
+        return $this->belongsTo(Repository::class)->withTrashed();
     }
 
     /**
