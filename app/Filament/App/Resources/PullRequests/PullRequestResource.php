@@ -93,7 +93,8 @@ class PullRequestResource extends Resource
                     ->label(fn (OpenPullRequest $record): string => $record->awaiting_approval ? 'Approve and review' : 'Review')
                     ->icon(Heroicon::OutlinedPlay)
                     ->color(fn (OpenPullRequest $record): string => $record->awaiting_approval ? 'primary' : 'gray')
-                    ->visible(fn (OpenPullRequest $record): bool => $record->branch !== null)
+                    // Not a fork's whose branch its host keeps nowhere here, as on Bitbucket: it can only be tried from the diff.
+                    ->visible(fn (OpenPullRequest $record): bool => $record->branch !== null && ReviewRequest::reviewable(['from_fork' => $record->from_fork, 'source' => ['branch' => ['name' => $record->branch]]]))
                     ->requiresConfirmation()
                     ->modalHeading(fn (OpenPullRequest $record): string => "Review #{$record->pull_request_id}?")
                     ->modalDescription(fn (OpenPullRequest $record): string => ($record->from_fork || ! $record->repository->tenant->trusts($record->author_id, $record->author_nickname)
