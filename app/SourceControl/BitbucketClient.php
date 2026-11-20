@@ -13,8 +13,10 @@ use Throwable;
 /**
  * A repository on Bitbucket Cloud.
  */
-class BitbucketClient implements SourceControl
+class BitbucketClient implements FiltersSecrets, SourceControl
 {
+    use SecretFiltering;
+
     /**
      * Pages of 100 comments or tasks read before giving up on a pull request.
      */
@@ -369,6 +371,8 @@ class BitbucketClient implements SourceControl
             ->retry(3, 500, fn (Throwable $exception, PendingRequest $request, ?string $method): bool => $exception instanceof ConnectionException
                 && $method !== 'POST'
                 && ! str_contains($exception->getMessage(), 'cURL error 28'), throw: false);
+
+        $request = $this->filtered($request);
 
         return $this->username !== null
             ? $request->withBasicAuth($this->username, $this->token)

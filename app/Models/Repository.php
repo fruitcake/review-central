@@ -8,7 +8,9 @@ use App\Connections\SourceControlDriver;
 use App\Enums\ReviewsFrom;
 use App\Runners\ReviewRunner;
 use App\Runners\Runners;
+use App\SourceControl\FiltersSecrets;
 use App\SourceControl\SourceControl;
+use App\Support\SecretFilter;
 use Carbon\CarbonInterface;
 use Database\Factories\RepositoryFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -41,6 +43,9 @@ class Repository extends Model
 
     // Removed, it is kept with its history, and comes back when added again.
     use SoftDeletes;
+
+    /** The tenant's secrets, read once for every client of this repository. */
+    protected ?SecretFilter $secretFilter = null;
 
     protected $guarded = [];
 
@@ -126,6 +131,19 @@ class Repository extends Model
 
     public function sourceControl(): SourceControl
     {
-        return $this->driver()->client($this);
+        $client = $this->driver()->client($this);
+
+        // Whatever the review writes on the host passes the tenant's secrets first:
+        // it reads what anyone wrote on the pull request, and can be talked into
+        // writing a key it can reach.
+        // One not saved yet, as when its stack is looked up, is its connection's tenant's.
+        $tenant = $this->getAttribute('tenant_id') ?? $this->integration->tenant_id;
+
+        if ($client instanceof FiltersSecrets) {
+            $this->secretFilter ??= SecretFilter::forTenant((int) $tenant);
+            $client->keepingOut($this->secretFilter);
+        }
+
+        return $client;
     }
 }

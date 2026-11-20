@@ -8,6 +8,7 @@ use App\Filament\App\Resources\ReviewRuns\ReviewRunResource;
 use App\Filament\RunPresenter;
 use App\Models\ReviewRun;
 use App\SourceControl\GitHubClient;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Shows a running review on its pull request as it goes: how long it has taken,
@@ -15,12 +16,20 @@ use App\SourceControl\GitHubClient;
  * Hosts without such a check, and a token's commit status, show nothing more.
  *
  * The log is what the review page shows, secrets already taken out. On a public
- * repository whoever reads the pull request reads it too, as they read the code.
+ * repository whoever reads the pull request would read it too, and the reviewer's
+ * words in it are words a pull request can put in its mouth: a filter does not
+ * catch a key written in a way it does not know. There only the steps are shown.
  */
 class CheckProgress
 {
     /** Lines of the log shown: enough to follow, well within GitHub's 65,535 characters. */
     public const LINES = 60;
+
+    /** A line of the runner's own that starts a step: "12:03:01  ── review ──". */
+    protected const STEP = '/^\S+\s+── .+ ──$/u';
+
+    /** How long whether a repository is public is believed, in seconds. */
+    protected const VISIBILITY_SECONDS = 3600;
 
     public function __construct(protected RunLog $log) {}
 
@@ -42,15 +51,32 @@ class CheckProgress
             return;
         }
 
-        $lines = array_slice(explode("\n", rtrim($this->log->tail($run)['text'] ?? '')), -self::LINES);
+        $public = $this->public($run, $sourceControl);
+        $lines = explode("\n", rtrim($this->log->tail($run)['text'] ?? ''));
+        $lines = array_slice($public ? array_values(preg_grep(self::STEP, $lines) ?: []) : $lines, -self::LINES);
         $elapsed = RunPresenter::duration((int) $run->started_at->diffInSeconds(now()));
+        $log = ReviewRunResource::getUrl('view', ['record' => $run], panel: 'app', tenant: $run->repository->tenant);
 
         $sourceControl->showProgress(
             $run->commit,
             "Reviewing · {$elapsed}",
-            'The review is running. The last lines of its log follow, brought up to date every 20 seconds; [the whole log]('
-                .ReviewRunResource::getUrl('view', ['record' => $run], panel: 'app', tenant: $run->repository->tenant).') is in Review Central.',
+            $public
+                ? "The review is running. Its steps so far follow, brought up to date every 20 seconds; [the whole log]({$log}) is in Review Central. The repository is public, so its log is not shown here."
+                : "The review is running. The last lines of its log follow, brought up to date every 20 seconds; [the whole log]({$log}) is in Review Central.",
             $lines,
+        );
+    }
+
+    /**
+     * Whether anyone can read the repository, and so its checks. One the host does
+     * not say of, or cannot be asked about, counts as public.
+     */
+    protected function public(ReviewRun $run, GitHubClient $sourceControl): bool
+    {
+        return (bool) Cache::remember(
+            "repository-public:{$run->repository_id}",
+            self::VISIBILITY_SECONDS,
+            fn (): bool => rescue(fn (): bool => ($sourceControl->getRepository()['private'] ?? null) !== true, true, false),
         );
     }
 }

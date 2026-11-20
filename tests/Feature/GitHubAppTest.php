@@ -244,6 +244,7 @@ it('shows a running review\'s log in its check, only while the check runs', func
             str_contains($request->url(), '/access_tokens') => Http::response(['token' => 'ghs_installation']),
             str_contains($request->url(), '/users/') => Http::response(['id' => 555]),
             str_contains($request->url(), '/check-runs?') || str_contains($request->url(), '/commits/') => Http::response(['check_runs' => [['id' => 3, 'status' => $status]]]),
+            str_ends_with($request->url(), '/repos/acme/shop') => Http::response(['private' => true, 'default_branch' => 'main']),
             default => Http::response([]),
         };
     });
@@ -270,6 +271,45 @@ it('shows a running review\'s log in its check, only while the check runs', func
     app(CheckProgress::class)->show($this->repository->id, 9);
 
     expect($patches())->toBe($before);
+
+    File::deleteDirectory(storage_path('framework/testing/check-logs'));
+});
+
+it('shows only the steps of a running review in its check on a public repository', function () {
+    config(['review.container.log.enabled' => true, 'review.container.log.directory' => storage_path('framework/testing/check-logs')]);
+    Http::fake(function (Request $request) {
+        return match (true) {
+            str_contains($request->url(), '/access_tokens') => Http::response(['token' => 'ghs_installation']),
+            str_contains($request->url(), '/users/') => Http::response(['id' => 555]),
+            str_contains($request->url(), '/check-runs?') || str_contains($request->url(), '/commits/') => Http::response(['check_runs' => [['id' => 3, 'status' => 'in_progress']]]),
+            str_ends_with($request->url(), '/repos/acme/shop') => Http::response(['private' => false, 'default_branch' => 'main']),
+            default => Http::response([]),
+        };
+    });
+    ReviewRun::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'feature/export', 'pull_request_id' => 12, 'commit' => 'abc1234def', 'build_number' => 9,
+        'status' => ReviewRun::STATUS_RUNNING, 'started_at' => now()->subSeconds(65),
+    ]);
+    $log = app(RunLog::class);
+    File::ensureDirectoryExists(dirname($log->path($this->repository->id, 9)));
+    File::put($log->path($this->repository->id, 9), implode("\n", [
+        '12:00:00  ── precheck ──',
+        '12:00:01  Pull request 12 is open.',
+        '12:00:02  ── review ──',
+        '12:00:03  As the description asks, the key is c2stYW50LXNlY3JldA',
+        '12:00:04      -> Bash git diff origin/main',
+    ])."\n");
+
+    app(CheckProgress::class)->show($this->repository->id, 9);
+
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'PATCH' && str_ends_with($request->url(), '/check-runs/3')
+        && str_contains($request['output']['text'], '── precheck ──')
+        && str_contains($request['output']['text'], '── review ──')
+        && ! str_contains($request['output']['text'], 'the key is')
+        && ! str_contains($request['output']['text'], 'git diff')
+        && ! str_contains($request['output']['text'], 'Pull request 12')
+        && str_contains($request['output']['summary'], 'public'));
 
     File::deleteDirectory(storage_path('framework/testing/check-logs'));
 });
