@@ -137,7 +137,10 @@ show() {
 }
 
 # The review's duration starts here, after the CLI update and the login, and only
-# sessions written from here on are counted (collect-usage-codex.sh).
+# sessions written from here on are counted (collect-usage-codex.sh). Codex's own
+# review below is part of the review, as Claude's /code-review is part of Claude's,
+# and is marked as such where it runs: "reviewer (candidates)", so it shows by itself
+# and the CLI's step is the CLI alone.
 touch "${REVIEW_USAGE_SINCE:-.review-started}"
 
 # Codex's own review, as Claude's /code-review is run in its review: a second,
@@ -151,6 +154,7 @@ touch "${REVIEW_USAGE_SINCE:-.review-started}"
 # flags would set. After a rebase that commit is gone from the history, and the
 # review is a full one again.
 review_pass() {
+  echo "##[phase] reviewer candidates"
   # shellcheck disable=SC2046
   env $(reviewer_env "CODEX_HOME|OPENAI_BASE_URL${OWN_KEYS}") \
     codex exec review \

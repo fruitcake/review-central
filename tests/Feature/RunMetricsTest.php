@@ -30,12 +30,16 @@ it('notes when each step starts, from the runner\'s notes and the scripts\' mark
     $writer->write('out', "##[phase] composer\nInstalling\n");
     $this->travel(30)->seconds();
     // What the reviewer prints is no step, nor is a step named twice.
-    $writer->write('out', "##[phase] secrets\n##[phase] precheck\n##[phase] reviewer\n");
+    $writer->write('out', "##[phase] secrets\n##[phase] precheck\n##[phase] reviewer candidates\n");
+    $this->travel(60)->seconds();
+    $writer->write('out', "##[phase] reviewer\n");
 
     expect($log->phases(7, 41))->toBe([
         ['at' => 1_800_000_000, 'name' => 'precheck'],
         ['at' => 1_800_000_012, 'name' => 'composer'],
-        ['at' => 1_800_000_042, 'name' => 'reviewer'],
+        // Codex's own review, part of the review and shown by itself.
+        ['at' => 1_800_000_042, 'name' => 'reviewer (candidates)'],
+        ['at' => 1_800_000_102, 'name' => 'reviewer'],
     ])
         // On the page, the mark reads as the runner's own.
         ->and(File::get($log->path(7, 41)))->toContain('── composer ──')
@@ -97,6 +101,8 @@ it('advises the size the sandboxes\' own measurements fit', function () {
     foreach (range(1, 6) as $build) {
         sandboxRun($repository, $build, 'standard-2', ['peak_memory_mb' => 600 + $build * 30, 'steps' => [
             ['name' => 'composer', 'seconds' => 20, 'starved_percent' => 0],
+            // Codex's own review waits on the model as the reviewer does: not the sandbox's to answer for.
+            ['name' => 'reviewer (candidates)', 'seconds' => 150, 'starved_percent' => 90],
             ['name' => 'reviewer', 'seconds' => 200, 'starved_percent' => 90],
         ]]);
     }
