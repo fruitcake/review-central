@@ -152,6 +152,18 @@ describe('for the installation', function () {
             ->assertMountedActionModalSee(['Object Read & Write', 'Secret Access Key']);
     });
 
+    it('says the GitHub App is not working while its webhook secret is missing', function () {
+        config(['services.github_app' => ['id' => '1', 'slug' => 'review', 'client_id' => 'Iv1', 'client_secret' => 'cs', 'private_key' => 'pem', 'webhook_secret' => null]]);
+        $check = fn (): array => collect(app(SetupCheck::class)->groups())->flatMap(fn (array $group): array => $group['checks'])->firstWhere('title', 'Reviewing as a GitHub App');
+
+        expect($check())->state->toBe(SetupCheck::WRONG)
+            ->and($check()['fix'])->toContain('GITHUB_APP_WEBHOOK_SECRET');
+
+        config(['services.github_app.webhook_secret' => 'secret']);
+
+        expect($check())->state->toBe(SetupCheck::OK);
+    });
+
     it('offers a guide on each optional check that is off, and has one for every name', function () {
         config(['services.google.client_id' => null, 'services.google.client_secret' => null, 'services.github_app.id' => null]);
 

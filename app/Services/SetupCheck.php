@@ -369,9 +369,14 @@ class SetupCheck
         $values = ['GITHUB_APP_ID' => 'id', 'GITHUB_APP_SLUG' => 'slug', 'GITHUB_APP_CLIENT_ID' => 'client_id', 'GITHUB_APP_CLIENT_SECRET' => 'client_secret', 'GITHUB_APP_PRIVATE_KEY' => 'private_key'];
         $missing = array_keys(array_filter($values, fn (string $key): bool => blank(config("services.github_app.{$key}"))));
 
-        return match (count($missing)) {
-            0 => ['state' => self::OK, 'title' => $title, 'detail' => 'Set up: tenants can connect GitHub as the app.', 'fix' => null],
-            count($values) => ['state' => self::NOTE, 'title' => $title, 'detail' => 'Not set up; GitHub connections use a token instead.', 'fix' => 'To turn it on, register a GitHub App and set GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_CLIENT_ID, GITHUB_APP_CLIENT_SECRET and GITHUB_APP_PRIVATE_KEY.', 'guide' => SetupGuides::GITHUB_APP],
+        // Not needed to offer the app, but without it every delivery from GitHub
+        // is refused: tenants connect it, and no pull request is ever reviewed.
+        $unsigned = blank(config('services.github_app.webhook_secret'));
+
+        return match (true) {
+            $missing === [] && $unsigned => ['state' => self::WRONG, 'title' => $title, 'detail' => 'Tenants can connect the app, but GITHUB_APP_WEBHOOK_SECRET is not set, so every webhook delivery from GitHub is refused and no pull request is reviewed.', 'fix' => 'Set GITHUB_APP_WEBHOOK_SECRET to the webhook secret in the app\'s settings on GitHub.', 'guide' => SetupGuides::GITHUB_APP],
+            $missing === [] => ['state' => self::OK, 'title' => $title, 'detail' => 'Set up: tenants can connect GitHub as the app.', 'fix' => null],
+            count($missing) === count($values) => ['state' => self::NOTE, 'title' => $title, 'detail' => 'Not set up; GitHub connections use a token instead.', 'fix' => 'To turn it on, register a GitHub App and set GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_CLIENT_ID, GITHUB_APP_CLIENT_SECRET, GITHUB_APP_PRIVATE_KEY and GITHUB_APP_WEBHOOK_SECRET.', 'guide' => SetupGuides::GITHUB_APP],
             default => ['state' => self::WRONG, 'title' => $title, 'detail' => 'Half set up, so it is off. Missing: '.implode(', ', $missing).'.', 'fix' => 'Set '.implode(', ', $missing).' from the app\'s settings on GitHub.', 'guide' => SetupGuides::GITHUB_APP],
         };
     }
