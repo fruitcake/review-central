@@ -42,6 +42,21 @@ it('notes when each step starts, from the runner\'s notes and the scripts\' mark
         ->and(File::get($log->path(7, 41)))->not->toContain('##[phase] composer');
 });
 
+it('keeps a step that ran from a kept vendor/ apart from one that installed it from nothing', function () {
+    $this->travelTo(now()->setTimestamp(1_800_000_000));
+    $log = app(RunLog::class);
+
+    $log->writer(7, 51)->write('out', "##[phase] composer cached\n");
+    $log->writer(7, 52)->write('out', "##[phase] composer fresh\n");
+    // Only the ways there are: anything else is the step as it is.
+    $log->writer(7, 53)->write('out', "##[phase] composer whatever\n");
+
+    expect(array_column($log->phases(7, 51), 'name'))->toBe(['composer (cached)'])
+        ->and(array_column($log->phases(7, 52), 'name'))->toBe(['composer (fresh)'])
+        ->and(array_column($log->phases(7, 53), 'name'))->toBe(['composer'])
+        ->and(File::get($log->path(7, 51)))->toContain('── composer (cached) ──');
+});
+
 it('sums up what each step took and used', function () {
     $metrics = RunMetrics::summarize(
         [['at' => 100, 'name' => 'composer'], ['at' => 130, 'name' => 'reviewer']],

@@ -26,10 +26,14 @@ class CheckProgress
     public const LINES = 60;
 
     /**
-     * A line of the runner's own that starts a step: "12:03:01  ── review ──". By
-     * name, as the reviewer can write a line of that shape too.
+     * A line of the runner's own that starts a step: "12:03:01  ── review ──", or
+     * with how it ran, "── composer (cached) ──". By name, as the reviewer can
+     * write a line of that shape too; the bare name is the first group.
      */
-    protected const STEP = '/^\S+\s+── ([a-z]+) ──$/u';
+    protected static function step(): string
+    {
+        return '/^\S+\s+── ([a-z]+)(?: \(('.implode('|', RunLogWriter::PHASE_WAYS).')\))? ──$/u';
+    }
 
     /** How long whether a repository is public is believed, in seconds. */
     protected const VISIBILITY_SECONDS = 3600;
@@ -59,7 +63,7 @@ class CheckProgress
 
         $public = $this->public($run, $sourceControl);
         $lines = explode("\n", rtrim($this->log->tail($run)['text'] ?? ''));
-        $lines = array_slice($public ? array_values(array_filter($lines, fn (string $line): bool => preg_match(self::STEP, $line, $step) === 1 && in_array($step[1], RunLogWriter::PHASES, true))) : $lines, -self::LINES);
+        $lines = array_slice($public ? array_values(array_filter($lines, fn (string $line): bool => preg_match(self::step(), $line, $step) === 1 && in_array($step[1], RunLogWriter::PHASES, true))) : $lines, -self::LINES);
         $elapsed = RunPresenter::duration((int) $run->started_at->diffInSeconds(now()));
         $log = ReviewRunResource::getUrl('view', ['record' => $run], panel: 'app', tenant: $run->repository->tenant);
 

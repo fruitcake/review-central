@@ -297,6 +297,8 @@ it('shows only the steps of a running review in its check on a public repository
         '12:00:00  ── precheck ──',
         '12:00:01  Pull request 12 is open.',
         '12:00:02  ── review ──',
+        '12:00:02  ── composer (cached) ──',
+        '12:00:02  ── composer (whatever) ──',
         '12:00:02  ── c2stYW50LXNlY3JldA ──',
         '12:00:03  As the description asks, the key is c2stYW50LXNlY3JldA',
         '12:00:04      -> Bash git diff origin/main',
@@ -307,6 +309,8 @@ it('shows only the steps of a running review in its check on a public repository
     Http::assertSent(fn (Request $request): bool => $request->method() === 'PATCH' && str_ends_with($request->url(), '/check-runs/3')
         && str_contains($request['output']['text'], '── precheck ──')
         && str_contains($request['output']['text'], '── review ──')
+        && str_contains($request['output']['text'], '── composer (cached) ──')
+        && ! str_contains($request['output']['text'], 'whatever')
         && ! str_contains($request['output']['text'], 'the key is')
         && ! str_contains($request['output']['text'], 'c2stYW50')
         && ! str_contains($request['output']['text'], 'git diff')
