@@ -34,7 +34,7 @@ The usual way: review-central deploys it itself, from the machine that runs its 
 2. Under **Admin → Settings → Cloudflare sandboxes**, set the account ID, that token, and the bucket's keys. The Worker's name and the bucket's default to `review-central-sandbox` and `review-central`.
 3. On **Admin → Setup**, press **Deploy the Worker**. On the reviews' queue it installs Wrangler, makes the bucket when it is not there, deploys the Worker with those names, and gives it a token it makes. The Worker's address and that token are kept under Settings; the setup page shows how the deploy went, with what Wrangler printed.
 
-Then add the bucket's two lifecycle rules, as in [step 1](#_1-the-bucket); a deploy makes the bucket but sets no rules.
+Then add the bucket's two lifecycle rules, as in [step 1](#1-the-bucket); a deploy makes the bucket but sets no rules.
 
 Press it again after an update: the setup page says when the Worker runs an older version. The same from a shell is `php artisan review:deploy-worker`, which also takes `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` from the environment. What `.env` sets always goes before what is under Settings.
 
