@@ -376,9 +376,9 @@ class SetupCheck
         $checks = [];
 
         foreach ([
-            'Signing in with Google' => ['services.google.client_id', 'services.google.client_secret', 'GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, from an OAuth client with '.url('/sign-in/google/callback').' as redirect address', SetupGuides::GOOGLE],
-            'Connecting Asana by signing in' => ['services.asana.client_id', 'services.asana.client_secret', 'ASANA_CLIENT_ID and ASANA_CLIENT_SECRET, from an app with '.url('/connections/oauth/callback').' as redirect address', SetupGuides::ASANA],
-            'Connecting Jira by signing in' => ['services.atlassian.client_id', 'services.atlassian.client_secret', 'ATLASSIAN_CLIENT_ID and ATLASSIAN_CLIENT_SECRET, from an app with '.url('/connections/oauth/callback').' as redirect address', SetupGuides::ATLASSIAN],
+            'Signing in with Google' => ['services.google.client_id', 'services.google.client_secret', 'the client ID and secret under Settings → Integrations (or GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET), from an OAuth client with '.url('/sign-in/google/callback').' as redirect address', SetupGuides::GOOGLE],
+            'Connecting Asana by signing in' => ['services.asana.client_id', 'services.asana.client_secret', 'the client ID and secret under Settings → Integrations (or ASANA_CLIENT_ID and ASANA_CLIENT_SECRET), from an app with '.url('/connections/oauth/callback').' as redirect address', SetupGuides::ASANA],
+            'Connecting Jira by signing in' => ['services.atlassian.client_id', 'services.atlassian.client_secret', 'the client ID and secret under Settings → Integrations (or ATLASSIAN_CLIENT_ID and ATLASSIAN_CLIENT_SECRET), from an app with '.url('/connections/oauth/callback').' as redirect address', SetupGuides::ATLASSIAN],
         ] as $title => [$id, $secret, $needs, $guide]) {
             $has = [filled(config($id)), filled(config($secret))];
 
@@ -413,10 +413,10 @@ class SetupCheck
         $unsigned = blank(config('services.github_app.webhook_secret'));
 
         return match (true) {
-            $missing === [] && $unsigned => ['state' => self::WRONG, 'title' => $title, 'detail' => 'Tenants can connect the app, but GITHUB_APP_WEBHOOK_SECRET is not set, so every webhook delivery from GitHub is refused and no pull request is reviewed.', 'fix' => 'Set GITHUB_APP_WEBHOOK_SECRET to the webhook secret in the app\'s settings on GitHub.', 'guide' => SetupGuides::GITHUB_APP],
+            $missing === [] && $unsigned => ['state' => self::WRONG, 'title' => $title, 'detail' => 'Tenants can connect the app, but GITHUB_APP_WEBHOOK_SECRET is not set, so every webhook delivery from GitHub is refused and no pull request is reviewed.', 'fix' => 'Fill in the webhook secret under Settings → Integrations (or GITHUB_APP_WEBHOOK_SECRET), as in the app\'s settings on GitHub.', 'guide' => SetupGuides::GITHUB_APP],
             $missing === [] => ['state' => self::OK, 'title' => $title, 'detail' => 'Set up: tenants can connect GitHub as the app.', 'fix' => null],
-            count($missing) === count($values) => ['state' => self::NOTE, 'title' => $title, 'detail' => 'Not set up; GitHub connections use a token instead.', 'fix' => 'To turn it on, register a GitHub App and set GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_CLIENT_ID, GITHUB_APP_CLIENT_SECRET, GITHUB_APP_PRIVATE_KEY and GITHUB_APP_WEBHOOK_SECRET.', 'guide' => SetupGuides::GITHUB_APP],
-            default => ['state' => self::WRONG, 'title' => $title, 'detail' => 'Half set up, so it is off. Missing: '.implode(', ', $missing).'.', 'fix' => 'Set '.implode(', ', $missing).' from the app\'s settings on GitHub.', 'guide' => SetupGuides::GITHUB_APP],
+            count($missing) === count($values) => ['state' => self::NOTE, 'title' => $title, 'detail' => 'Not set up; GitHub connections use a token instead.', 'fix' => 'To turn it on, register a GitHub App and fill it in under Settings → Integrations (or GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_CLIENT_ID, GITHUB_APP_CLIENT_SECRET, GITHUB_APP_PRIVATE_KEY and GITHUB_APP_WEBHOOK_SECRET in .env).', 'guide' => SetupGuides::GITHUB_APP],
+            default => ['state' => self::WRONG, 'title' => $title, 'detail' => 'Half set up, so it is off. Missing: '.implode(', ', $missing).'.', 'fix' => 'Fill in what is missing under Settings → Integrations (or '.implode(', ', $missing).'), from the app\'s settings on GitHub.', 'guide' => SetupGuides::GITHUB_APP],
         };
     }
 

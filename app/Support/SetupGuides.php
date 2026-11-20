@@ -106,7 +106,7 @@ class SetupGuides
                 'In the Google Cloud console, pick or create a project for this installation, and set up its consent screen (**Google Auth Platform → Branding**) when it asks: the app\'s name and a support address.',
                 'Open the link and choose **Create credentials → OAuth client ID**, of the type **Web application**.',
                 'Add `'.url('/sign-in/google/callback').'` under **Authorised redirect URIs**, and create it.',
-                'Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env` to the client\'s ID and secret.',
+                'Fill in the client\'s ID and secret under **Settings → Integrations**, or set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`, which goes first.',
             ],
             permissions: [
                 'openid, email, profile' => 'who signs in: their address, verified by Google, and their name. Nothing else is asked.',
@@ -129,7 +129,8 @@ class SetupGuides
             steps: [
                 'Open the link and choose **Create new app**.',
                 'Under **OAuth**, add `'.url('/connections/oauth/callback').'` as a redirect URL.',
-                'Set `ASANA_CLIENT_ID` and `ASANA_CLIENT_SECRET` in `.env` to the app\'s client ID and secret.',
+                'Fill in the app\'s client ID and secret under **Settings → Integrations**, or set `ASANA_CLIENT_ID` and `ASANA_CLIENT_SECRET` in `.env`, which goes first.',
+                'Under **Manage distribution**, let the app be used in any workspace, so tenants outside your own organisation can connect.',
                 'Give the app the scopes below, which is what `ASANA_OAUTH_SCOPE` asks for unless it is set. For an app with full permissions instead, set `ASANA_OAUTH_SCOPE` empty: Asana refuses scopes such an app does not name.',
             ],
             permissions: [
@@ -155,7 +156,8 @@ class SetupGuides
                 'Open the link and choose **Create → OAuth 2.0 integration**.',
                 'Under **Permissions**, add the Jira API, and its classic scopes below.',
                 'Under **Authorization**, add `'.url('/connections/oauth/callback').'` as the callback URL.',
-                'Under **Settings**, copy the client ID and secret into `ATLASSIAN_CLIENT_ID` and `ATLASSIAN_CLIENT_SECRET` in `.env`.',
+                'Under the app\'s **Settings**, copy the client ID and secret into **Settings → Integrations** here, or into `ATLASSIAN_CLIENT_ID` and `ATLASSIAN_CLIENT_SECRET` in `.env`, which goes first.',
+                'Under **Distribution**, set it to **Sharing**, so people of other organisations can authorize it, not only you.',
             ],
             permissions: [
                 'read:jira-work' => 'reads issues, their subtasks and comments.',
@@ -183,8 +185,8 @@ class SetupGuides
                 'Name the app; its comments show as `<name>[bot]`. Homepage URL: `'.url('/').'`.',
                 'Callback URL: `'.url('/connections/oauth/callback').'`. Leave **Request user authorization (OAuth) during installation** off.',
                 'Webhook URL: `'.url('/api/webhooks/github-app').'`, with a long random secret of your own.',
-                'Set the permissions below, subscribe to the events **Pull request**, **Issue comment**, **Pull request review comment**, **Pull request review** and **Check run**, and let it be installed on **Any account** for tenants outside your organisation.',
-                'Create it, then **Generate a private key**. Set `GITHUB_APP_ID`, `GITHUB_APP_SLUG` (the name in the app\'s address), `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` (generate one), `GITHUB_APP_PRIVATE_KEY` (the PEM file\'s path, or its contents) and `GITHUB_APP_WEBHOOK_SECRET` in `.env`.',
+                'Set the permissions below, subscribe to the events **Pull request**, **Issue comment**, **Pull request review comment**, **Pull request review** and **Check run**, and under **Where can this GitHub App be installed?** pick **Any account** for tenants outside your organisation. No verification is needed for that; GitHub asks for it only for a paid listing in the Marketplace.',
+                'Create it, then **Generate a private key** and generate a client secret. Fill in the app ID, the name in its address, the client ID and secret, the webhook secret and the contents of the private key under **Settings → Integrations**; or set `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY` (the PEM file\'s path, or its contents) and `GITHUB_APP_WEBHOOK_SECRET` in `.env`, which goes first.',
             ],
             permissions: [
                 'Repository → Contents: Read' => 'clones the repository and reads its files.',

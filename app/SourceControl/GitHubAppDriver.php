@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\SourceControl;
 
 use App\Connections\ConnectsWithOAuth;
+use App\Connections\Integrations;
 use App\Connections\NeedsSetup;
 use App\Exceptions\ConnectionFailed;
 use App\Models\Connection;
@@ -135,6 +136,11 @@ class GitHubAppDriver extends GitHubDriver implements ConnectsWithOAuth, NeedsSe
     protected function installation(Connection $connection): ?string
     {
         return $connection->setting('installation_id');
+    }
+
+    public function oauthIntegration(): string
+    {
+        return Integrations::GITHUB_APP;
     }
 
     public function oauthConfigured(): bool

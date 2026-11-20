@@ -7,6 +7,7 @@ namespace App\Tickets;
 use App\Connections\ConnectsWithOAuth;
 use App\Connections\ExplainsSetup;
 use App\Connections\Fields\Secret;
+use App\Connections\Integrations;
 use App\Connections\OAuthTokens;
 use App\Connections\TicketDriver;
 use App\Exceptions\ConnectionFailed;
@@ -37,10 +38,10 @@ class JiraDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
         return [
             Secret::make('api_token')->label('API token')
                 // With this installation registered at Atlassian, signing in there does instead.
-                ->required(fn (string $operation): bool => $operation === 'create' && ! $this->oauthConfigured())
-                ->helperText($this->oauthConfigured()
+                ->required(fn (string $operation): bool => $operation === 'create' && ! Integrations::offered($this))
+                ->helperText(fn (): string => Integrations::offered($this)
                     ? 'Created at id.atlassian.com, under Security, API tokens. Or leave it empty, save, and use "Connect" in the list to sign in at Atlassian instead.'
-                    : 'Created at id.atlassian.com, under Security, API tokens.'),
+                    : 'Created at id.atlassian.com, under Security, API tokens. '.Integrations::unavailable($this, 'Atlassian')),
         ];
     }
 
@@ -50,7 +51,7 @@ class JiraDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
             TextInput::make('site')->label('Site')->placeholder('example.atlassian.net')->required()
                 ->rule('regex:/^(https?:\/\/)?[a-z0-9-]+\.atlassian\.net\/?$/i'),
             TextInput::make('email')->label('Account email')->email()
-                ->required(fn (): bool => ! $this->oauthConfigured())
+                ->required(fn (): bool => ! Integrations::offered($this))
                 ->helperText('The account the API token belongs to. Not needed when you sign in at Atlassian instead.'),
         ];
     }
@@ -78,7 +79,7 @@ class JiraDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
             notes: [
                 'A token with scopes does not work here: Atlassian takes one only through api.atlassian.com, and this connection calls your site directly.',
                 'A token expires, after a year at most: replace it here before then. **Test** in the list says whether it still works.',
-                ...($this->oauthConfigured() ? ['Or leave the token and email empty, save, and use **Connect** in the list to sign in at Atlassian instead.'] : []),
+                ...(Integrations::offered($this) ? ['Or leave the token and email empty, save, and use **Connect** in the list to sign in at Atlassian instead.'] : []),
             ],
         );
     }
@@ -211,6 +212,11 @@ class JiraDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
             : Http::withBasicAuth((string) $connection->setting('email'), (string) $connection->credential('api_token'));
 
         return $request->acceptJson()->timeout(20)->connectTimeout(4);
+    }
+
+    public function oauthIntegration(): string
+    {
+        return Integrations::JIRA;
     }
 
     public function oauthConfigured(): bool

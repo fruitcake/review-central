@@ -35,7 +35,9 @@ class Drivers
 
         foreach (config("review.drivers.{$kind->value}", []) as $driver => $class) {
             // One that needs this installation to be registered somewhere, and is not.
-            if (is_string($driver) && ! (($found = $this->get($kind, $driver)) instanceof NeedsSetup && ! $found->isSetUp())) {
+            // Or one this tenant may not sign in through.
+            if (is_string($driver) && ! (($found = $this->get($kind, $driver)) instanceof NeedsSetup && ! $found->isSetUp())
+                && ! ($found instanceof NeedsSetup && $found instanceof ConnectsWithOAuth && ! Integrations::offered($found))) {
                 $options[$driver] = $found->label();
             }
         }
