@@ -137,8 +137,11 @@ show() {
 }
 
 # The review's duration starts here, after the CLI update and the login, and only
-# sessions written from here on are counted (collect-usage-codex.sh).
+# sessions written from here on are counted (collect-usage-codex.sh). Its step too:
+# Codex's own review below is part of the review, as Claude's /code-review is part of
+# Claude's, so the steps compare one reviewer with another.
 touch "${REVIEW_USAGE_SINCE:-.review-started}"
+echo "##[phase] reviewer"
 
 # Codex's own review, as Claude's /code-review is run in its review: a second,
 # independent hunt whose findings are candidates for the main review, never findings
@@ -195,7 +198,6 @@ jq -L "$HERE" 'include "strict-schema"; strict_schema' "$HERE/ai-review.schema.j
   fi
 } > "$PROMPT"
 
-echo "##[phase] reviewer"
 printf '\n-------------------- Reviewing --------------------\n'
 reviewer_env_report "CODEX_HOME|OPENAI_BASE_URL${OWN_KEYS}"
 {
