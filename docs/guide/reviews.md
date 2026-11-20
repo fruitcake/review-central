@@ -2,9 +2,9 @@
 
 ## Settings and instructions
 
-- **Review settings**, in the sidebar, choose the reviewers and their share, the model and the effort for every repository of the tenant. A reviewer can have a monthly budget, in the tenant's currency: once its reviews have cost that much across the tenant it is passed over for the rest of the month. Give the first reviewer a share and a budget and the second a share of 0 to use one until its budget is spent and the other after. A repository can set its own under **Review settings**.
+- **Review defaults**, in the sidebar, choose the reviewers and their share, the model and the effort for every repository of the tenant, and also the review's language, whether it grades the change against its ticket, Claude Code's extra passes and its advisor, a second check of each finding, and the most a review may cost (**Budget per review**, $10 unless changed). A reviewer can have a monthly budget, in the tenant's currency: once its reviews have cost that much across the tenant it is passed over for the rest of the month. Give the first reviewer a share and a budget and the second a share of 0 to use one until its budget is spent and the other after. A repository can set its own under **Review settings**.
 - **Trusted accounts**, on the same page, are the tenant's own people on its hosts: listed by GitHub user name or Bitbucket nickname, or account ID, never by display name, which anyone can copy. A repository can review only their pull requests by itself (see [Pull requests](#pull-requests)), and the `/review` command can be limited to them.
-- **Starting a review by comment**, on the same page, says who may start one by commenting `/review` on a pull request: anyone who can comment (the default), only the trusted accounts, or nobody. Anyone else gets a reply saying so, and nothing starts. It holds for every repository of the tenant; on one that reviews only the trusted accounts' pull requests, only they can, whatever this says. A review still starts on every push, and from the panel.
+- **Starting a review by comment**, on the same page, says who may start one by commenting `/review` on a pull request: anyone who can comment (the default), only the trusted accounts, or nobody. Anyone else gets a reply saying so, and nothing starts. It holds for every repository of the tenant; on one that reviews only the trusted accounts' pull requests, only they can, whatever this says. A review still starts on every push, from **Review a pull request** under Reviews, which posts on the pull request as a push would, and with `php artisan review:start <repository> <branch>`.
 - **Pull requests from forks**, on the same page, are not reviewed by themselves unless that is turned on: a fork's code is anyone's, and a review runs it in the sandbox with the tenant's AI key and on its budget. Turned on, a pull request from a fork on GitHub is reviewed on every push and on a comment, as any other; off, it waits under **Pull requests**, and a `/review` comment or a question on one gets a reply saying so. On Bitbucket, which keeps no copy of a fork's branch in the repository, a pull request from a fork is never reviewed by itself; it can be [tried](#trying-a-pull-request) from the diff alone.
 - **Instructions** are what the review is told to look for: a method, the defect lenses and a guide per stack. The administrator keeps the defaults; a tenant can copy one and change it for its own repositories. What is saved is what the next review reads.
 
@@ -29,7 +29,7 @@ None of them is needed: without them the reviewer goes by the review instruction
 A repository reviews every pull request by itself on a push, unless its settings say otherwise:
 
 - **Review its pull requests** off: nothing starts by itself. Its pull requests are listed, and a tenant member starts a review with **Review**.
-- **Whose pull requests are reviewed by themselves** set to the trusted accounts: theirs are reviewed on every push, as before. Anyone else's waits, and so does a pull request from a fork while those are not reviewed by themselves. A waiting pull request shows on its host as an *AI Review* build status in progress, *Waiting for someone in the team to start the review*, which leads here. **Approve and review** starts it; the review's own status then replaces the waiting one. A new push waits again.
+- **Whose pull requests are reviewed by themselves** set to the trusted accounts: theirs are reviewed on every push, as before. Anyone else's waits, and so does a pull request from a fork while those are not reviewed by themselves. A waiting pull request shows on its host as an *AI Review* build status in progress, *Waiting for someone in the team to start the review*, which leads here, under the *Waiting for approval* tab. **Approve and review** starts it; the review's own status then replaces the waiting one. A new push waits again.
 
 For a public repository this keeps outside contributors from spending the tenant's AI budget, while the team's own pull requests are reviewed as they are pushed.
 
@@ -54,7 +54,11 @@ Where the tenant has an AI provider, a small model also writes it in a sentence 
 
 **With me** lists the pull requests whose turn is yours. It goes by the accounts on your profile (the menu at the top right): your Bitbucket nickname or account ID and your GitHub login. With none listed, your name is matched to the name the host shows. A row's details show the reviewers, the summary and the history: opened, pushed, asked to review, approved, changes requested, and each AI review.
 
-Approvals and requests for changes reach Review Central through the webhook events listed under [Connections](./tenants). `php artisan review:sync-pull-requests` reads every listed pull request from its host again, for those from before and for a delivery that was missed; it runs every night by itself.
+Approvals and requests for changes reach Review Central through the webhook events listed under [Setting up a tenant](./tenants). `php artisan review:sync-pull-requests` reads every listed pull request from its host again, for those from before and for a delivery that was missed; it runs every night by itself.
+
+## A security review of a branch
+
+**Security review**, under Reviews, has the reviewer read a whole branch for security problems as it stands, rather than one pull request's change: pick the repository and the branch, such as the default one. Nothing is posted; the report shows under the *Security* view. It reads far more than a pull request's review, so it takes longer and costs more. It needs a runner that reads the code, a Cloudflare sandbox or Docker, and an Anthropic connection, since Claude Code is its reviewer. Its model and effort are set with `SECURITY_REVIEW_MODEL` and the variables beside it in the [configuration](./configuration).
 
 ## Reviews and cost
 
@@ -62,7 +66,7 @@ Approvals and requests for changes reach Review Central through the webhook even
 
 ![The list of reviews](/screenshots/reviews.png)
 
-A tenant's panel opens on **Overview**: what needs attention (a repository that cannot start, high findings left open, runs that failed), the period's figures, reviews per day, findings by category and the repositories. **Reviews** lists the runs under the views *Needs action*, *Running* and *Failed or timed out*, and a review's own page shows every run on its pull request, the findings and what the run cost. Cost is what the reviewer reported, or an estimate from its tokens and the price list when it reported none.
+A tenant's panel opens on **Overview**: what needs attention (a repository that cannot start, high findings left open, runs that failed), the period's figures, reviews per day, findings by category and the repositories. **Reviews** lists the runs under the views *Needs action*, *Queued or running*, *Did not finish*, *Skipped or waiting*, *Trials* and *Security*, **Questions** lists what was asked with `@review` and what each answer cost, and a review's own page shows every run on its pull request, the findings and what the run cost. Cost is what the reviewer reported, or an estimate from its tokens and the price list when it reported none.
 
 *Findings accepted* counts what people said of the findings: on a review's own page, where each finding takes *Valid, will fix*, *Not a problem* or *Factually wrong*, and on the rating page. Only a valid finding counts as accepted. It says nothing until findings are answered.
 

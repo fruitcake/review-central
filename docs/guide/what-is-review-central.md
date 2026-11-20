@@ -16,8 +16,8 @@ It was made for Bitbucket Cloud. On GitHub, AI review is a few clicks away: Copi
 ## How a review runs
 
 1. A push to a pull request reaches the server through the connection's webhook, which queues a review.
-2. The job decides whether to review. A draft, a commit that was already reviewed and a pull request with a review still running are skipped before anything starts.
-3. The reviewer (Claude Code, the Codex CLI, OpenCodeReview or Pi) runs on a checkout of the pull request in a sandbox, with the tenant's AI provider key. It reads the pull request, its comments, the ticket and the review instructions from the context the server gives it. A lighter [diff runner](./runners#the-diff-alone) sends only the diff and that context to the AI provider, and runs nothing.
+2. The job decides whether to review. A draft and a commit that was already reviewed are skipped before anything starts; a push during a running review waits for it (see [Carrying on with a new commit](./runners#carrying-on-with-a-new-commit)).
+3. The reviewer (Claude Code, the Codex CLI or OpenCodeReview, and Pi in a trial) runs on a checkout of the pull request in a sandbox: a Cloudflare sandbox, which never holds the AI provider's key, or a container on your server, which holds it. It reads the pull request, its comments, the ticket and the review instructions from the context the server gives it. A lighter [diff runner](./runners#the-diff-alone) sends only the diff and that context to the AI provider, and runs nothing.
 4. The server reads the report the reviewer wrote and posts it:
    - a summary in the pull request's description;
    - a comment per finding, and replies in the threads people answered;
@@ -38,8 +38,8 @@ A review that finds nothing blocking but names something only a person can settl
 | Source control | **GitHub**, with a personal access token or as a [GitHub App](./tenants#github-as-an-app), and **Bitbucket Cloud**: reviews start from their webhook and are posted on the pull request. Bitbucket also gets a task per finding that blocks the merge and a Code Insights report; GitHub has neither, and its review requests changes instead. Without a token, a public GitHub repository can be [tried](./reviews#trying-a-pull-request) without posting. **Any git host**, for cloning only. |
 | Tickets | Jira, Asana, GitHub Issues |
 | AI providers | Anthropic and OpenAI, or a gateway that speaks their API, for every reviewer. Gemini, Mistral, Groq, DeepSeek, xAI and OpenRouter for the review from the diff, and for Pi in a trial. |
-| Reviewers | Claude Code, Codex CLI, OpenCodeReview, Pi, or the diff alone |
-| Sandboxes | Docker with gVisor on your own server; Cloudflare sandboxes (experimental) |
+| Reviewers | Claude Code, Codex CLI, OpenCodeReview, or the diff alone; Pi in a trial |
+| Sandboxes | Cloudflare sandboxes, the safest; Docker with gVisor on your own server |
 | Stacks with their own guide | Laravel, Magento, Hyvä, Drupal; a tenant can write its own for any other |
 | Signing in | Email and password, or Google, with the domains whose people may join a tenant |
 

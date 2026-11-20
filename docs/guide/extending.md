@@ -5,8 +5,8 @@
 A provider is a driver class, registered in `config/review.php`:
 
 - source control: implement `App\Connections\SourceControlDriver`, and `App\SourceControl\SourceControl` for the repository calls. `SourceControl` documents the shape pull requests and comments are passed in.
-- tickets: implement `App\Connections\TicketDriver`, which reads one ticket by its reference and returns it as markdown.
-- AI providers: implement `App\Connections\LlmDriver`, which names the environment variables the reviewer reads the key from.
+- tickets: implement `App\Connections\TicketDriver`, which reads one ticket by its reference (`fetch()`) and returns it as a `Ticket`.
+- AI providers: implement `App\Connections\LlmDriver`, which names the environment variables the reviewer reads the key from and the reviewers it can run, and answers the diff runner's review, a yes or no about a text, and the note on whose turn a pull request is.
 
 A driver declares its own credential and setting fields, so a new one shows up in the Connections form without further work. To say where its key or token is made, implement `App\Connections\ExplainsSetup` too: its `App\Support\SetupGuide` (the page's link, the steps and the scopes it needs) is offered as **How to get this** next to the service.
 
@@ -18,7 +18,7 @@ A runner is a class that implements `App\Runners\ReviewRunner`, registered under
 
 A stack guide tells the reviewer what to look for in one stack, with the reasoning, so it can judge rather than match patterns.
 
-**For your own installation**, no code is needed: under **Instructions**, a tenant adds a guide with a stack name of its own, and picks that stack on the repositories it applies to. The administrator can add one for every tenant the same way, under **Default Instructions**.
+**For your own installation**, no code is needed: under **Instructions**, a tenant adds a guide with a stack name of its own, and picks that stack on the repositories it applies to. The administrator can add one for every tenant the same way, under **Default instructions**.
 
 **To ship one with Review Central**:
 

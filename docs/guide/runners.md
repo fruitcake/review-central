@@ -6,7 +6,7 @@ How a review runs is its **runner**. There are three, from the lightest to the s
 |---|---|---|
 | `diff` | The pull request's diff, with its ticket, comments and earlier findings. Nothing is cloned and nothing runs. | Only an AI provider key. The default. |
 | `docker` | The whole checkout, in a throwaway container under gVisor on your own server. | Docker, gVisor and a worker of its own. |
-| `cloudflare` | The whole checkout, in a Cloudflare sandbox. **Experimental.** | A Cloudflare account on the Workers Paid plan, and the Worker deployed: from **Admin → Setup**, or by hand. |
+| `cloudflare` | The whole checkout, in a Cloudflare sandbox. The safest that reads the code. | A Cloudflare account on the Workers Paid plan, and the Worker deployed: from **Admin → Setup**, or by hand. |
 
 For a review that reads the code, the Cloudflare sandbox is the one to use: the code runs in a microVM of its own away from your server, and the AI provider's key never enters it. Docker is for your own repositories on a machine of its own. [Security](./security#which-runner) compares the three.
 
@@ -20,7 +20,7 @@ The review runs as a queued job on this installation's own worker. What it print
 
 The job clones the repository on the worker, and then runs the review's scripts in containers that are thrown away:
 
-- the reviewer is the only step that sees the pull request's code. It gets the key of the AI provider that runs it and nothing else: no other provider's key, no credential for this server or for the repository's host. It cannot change the scripts the other steps run, and it runs with the review's own settings for its CLI, not the pull request's: see [Security](./security#what-goes-where).
+- the reviewer is the only step that sees the pull request's code. It gets the key of the AI provider that runs it and nothing else: no other provider's key, no credential for this server or for the repository's host. It cannot change the scripts the other steps run, and it runs with the review's own settings for its CLI, not the pull request's: see [Security](./security#what-it-does).
 - the worker itself decides whether to review and writes what the reviewer reads: the pull request, its comments, the ticket and the instructions. That reads no code, so it needs no container.
 - the worker reads the report the reviewer wrote, as data, and files it: the review on the pull request and, on Bitbucket, the Code Insights report on the commit. Each review uses one container; a review that is turned away uses none.
 
@@ -45,14 +45,14 @@ The lightest review, and the default until another runner is set up and picked. 
 
 Nothing is cloned and no container starts, so it needs no Docker and finishes in a minute or two. The reviewer sees only what the diff shows: it cannot read the code around a change, a caller or a definition, so it finds less and is told to report only what the diff itself establishes. Lock files, built files and binary files are left out, and so are whole files once the diff passes `REVIEW_DIFF_MAX_BYTES` (600,000); the review's log names each.
 
-Which provider is asked follows the repository's reviewer settings: Codex means OpenAI, anything else Anthropic, and a tenant with one provider is asked through that one. The model and effort are the ones set for that reviewer. A Claude model that is an alias only Claude Code knows, such as `opus`, gives way to `claude-opus-5-5`; without a Codex model, OpenAI is asked for `REVIEW_DIFF_OPENAI_MODEL`. On Anthropic's own API a request a safety classifier declines is run again on the model Anthropic recommends for it (`fallbacks`), which a diff full of security code can need.
+Which provider is asked follows the repository's reviewer settings: Codex means OpenAI, anything else Anthropic, and a tenant without that provider is asked through the one it connected first. The model and effort are the ones set for that reviewer. A Claude model that is an alias only Claude Code knows, such as `opus`, gives way to `claude-opus-5-5`; without a Codex model, OpenAI is asked for `REVIEW_DIFF_OPENAI_MODEL`. On Anthropic's own API a request a safety classifier declines is run again on the model Anthropic recommends for it (`fallbacks`), which a diff full of security code can need.
 
 `REVIEW_DIFF_ENABLED=false` takes the choice away.
 
 ## A Cloudflare sandbox
 
-::: warning Experimental
-This runner is newer than the other two, and runs Cloudflare's Sandbox SDK, which is in beta itself. Use Docker or the diff for reviews you rely on until it has run well for you. Reports of how it went are welcome as [GitHub issues](https://github.com/fruitcake/review-central/issues).
+::: tip
+Cloudflare's Sandbox SDK and its snapshots are in beta at Cloudflare. Reports of how it went are welcome as [GitHub issues](https://github.com/fruitcake/review-central/issues).
 :::
 
 The reviewer can also run in a [Cloudflare sandbox](https://developers.cloudflare.com/sandbox/): the job stays on this server, and the pull request's code runs on Cloudflare's side, in a container of its own for every review. It needs no Docker on the server and scales with the number of reviews: a worker on this server only waits for its sandbox.
@@ -61,7 +61,7 @@ The reviewer can also run in a [Cloudflare sandbox](https://developers.cloudflar
 
 All of it can be done from the admin panel:
 
-1. Under **Admin → Settings → Cloudflare sandboxes**, set the account ID, an API token for the account, and the bucket's access keys. **How to get this** next to each field says where it is made and which permissions it needs. The Worker's name and the bucket's default to `review-central-sandbox` and `review-central`. **Test** checks the token and the bucket the way a review uses them, and says what a refused token lacks. What `.env` sets goes before what is saved here, and the field says so.
+1. Under **Admin → Settings → Cloudflare sandboxes**, set the account ID, an API token for the account, and the bucket's access keys. **How to get this** next to the token and the bucket's keys says where they are made and which permissions it needs. The Worker's name and the bucket's default to `review-central-sandbox` and `review-central`. **Test** checks the token and the bucket the way a review uses them, and says what a refused token lacks. What `.env` sets goes before what is saved here, and the field says so.
 2. On **Admin → Setup**, **Deploy the Worker** installs Wrangler on the reviews' queue, makes the bucket when it is not there, and deploys the Worker under that name with a token of its own. Its address and token are kept under Settings. From a shell, `php artisan review:deploy-worker` does the same.
 3. **Prepare the sandbox** has the Worker install PHP, Composer and the reviewers' tools once and keep a snapshot, so the first review does not wait for that. The snapshot belongs to one version of the setup script: pressing it again does nothing until a release changes the script. A reviewer's CLI that has a newer release since is updated in the review's own step, which costs a few seconds and says so in its log.
 
