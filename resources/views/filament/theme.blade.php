@@ -269,6 +269,12 @@
     .rc-advice { display: flex; flex-direction: column; gap: 8px; }
     .rc-advice-item { display: flex; gap: 12px; align-items: flex-start; background: var(--rc-ground); border-radius: 0; padding: 12px 14px; }
     .rc-advice-item > span:last-child { display: flex; flex-direction: column; gap: 2px; }
+    /* Figures folded away until asked for: the steps of a review, a sandbox's per size. */
+    .rc-collapse > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-weight: 600; color: var(--rc-ink); }
+    .rc-collapse > summary::marker { color: var(--rc-muted); }
+    .rc-collapse[open] > summary { margin-bottom: 8px; }
+    .rc-collapse > summary .rc-muted { font-weight: 400; }
+    .rc-collapse .rc-scroll + .rc-scroll { margin-top: 16px; }
     .rc-advice-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 8px; }
     .rc-figures-plain { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
     .rc-figures-plain .rc-figure { display: flex; flex-direction: column; border: 1px solid var(--rc-border); border-radius: 0; }

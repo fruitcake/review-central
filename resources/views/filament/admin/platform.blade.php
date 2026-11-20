@@ -145,32 +145,41 @@
                 </div>
             </div>
 
-            @foreach ($capacity['sandbox_steps'] as $size)
-                <div class="rc-scroll">
-                    <table class="rc-table">
-                        <caption class="rc-muted">
-                            Cloudflare sandbox <strong>{{ $size['size'] }}</strong>{{ $size['size'] === $capacity['sizing']['instance'] ? ' (now)' : '' }} · {{ $size['runs'] }} {{ $size['runs'] === 1 ? 'review' : 'reviews' }}
-                            · review {{ $seconds($size['seconds']) }} on average · sandbox {{ $seconds($size['sandbox_seconds']) }}
-                            @if ($size['cost'] !== null) · {{ \App\Services\Currency::show($size['cost']) }} a review in the sandbox @endif
-                        </caption>
-                        <thead><tr><th>Step</th><th class="rc-num">Average</th><th class="rc-num">9 in 10 within</th><th class="rc-num">Most memory</th><th class="rc-num">Waited for processor</th><th class="rc-num">Reviews</th></tr></thead>
-                        <tbody>
-                            @forelse ($size['steps'] as $step)
-                                <tr>
-                                    <td>{{ $step['name'] }}</td>
-                                    <td class="rc-num">{{ $seconds($step['average']) }}</td>
-                                    <td class="rc-num">{{ $seconds($step['p90']) }}</td>
-                                    <td class="rc-num">{{ $step['peak_memory_mb'] === null ? '—' : number_format($step['peak_memory_mb'] / 1024, 1).' GB' }}</td>
-                                    <td class="rc-num">{{ $step['starved_percent'] === null ? '—' : $step['starved_percent'].'%' }}</td>
-                                    <td class="rc-num">{{ $step['runs'] }}</td>
-                                </tr>
-                            @empty
-                                <tr><td colspan="6" class="rc-muted">No steps measured for these reviews.</td></tr>
-                            @endforelse
-                        </tbody>
-                    </table>
-                </div>
-            @endforeach
+            @if ($capacity['sandbox_steps'] !== [])
+                {{-- Closed: the figures behind the sandbox advice, for whoever wants them. --}}
+                <details class="rc-collapse">
+                    <summary>
+                        <span>What each step took in a sandbox</span>
+                        <span class="rc-muted">{{ count($capacity['sandbox_steps']) }} {{ count($capacity['sandbox_steps']) === 1 ? 'size' : 'sizes' }} · {{ array_sum(array_column($capacity['sandbox_steps'], 'runs')) }} reviews</span>
+                    </summary>
+                @foreach ($capacity['sandbox_steps'] as $size)
+                    <div class="rc-scroll">
+                        <table class="rc-table">
+                            <caption class="rc-muted">
+                                Cloudflare sandbox <strong>{{ $size['size'] }}</strong>{{ $size['size'] === $capacity['sizing']['instance'] ? ' (now)' : '' }} · {{ $size['runs'] }} {{ $size['runs'] === 1 ? 'review' : 'reviews' }}
+                                · review {{ $seconds($size['seconds']) }} on average · sandbox {{ $seconds($size['sandbox_seconds']) }}
+                                @if ($size['cost'] !== null) · about {{ \App\Services\Currency::show($size['cost'], decimals: $size['cost'] < 0.1 ? 4 : 2) }} a review in the sandbox @endif
+                            </caption>
+                            <thead><tr><th>Step</th><th class="rc-num">Average</th><th class="rc-num">9 in 10 within</th><th class="rc-num">Most memory</th><th class="rc-num">Waited for processor</th><th class="rc-num">Reviews</th></tr></thead>
+                            <tbody>
+                                @forelse ($size['steps'] as $step)
+                                    <tr>
+                                        <td>{{ $step['name'] }}</td>
+                                        <td class="rc-num">{{ $seconds($step['average']) }}</td>
+                                        <td class="rc-num">{{ $seconds($step['p90']) }}</td>
+                                        <td class="rc-num">{{ $step['peak_memory_mb'] === null ? '—' : number_format($step['peak_memory_mb'] / 1024, 1).' GB' }}</td>
+                                        <td class="rc-num">{{ $step['starved_percent'] === null ? '—' : $step['starved_percent'].'%' }}</td>
+                                        <td class="rc-num">{{ $step['runs'] }}</td>
+                                    </tr>
+                                @empty
+                                    <tr><td colspan="6" class="rc-muted">No steps measured for these reviews.</td></tr>
+                                @endforelse
+                            </tbody>
+                        </table>
+                    </div>
+                @endforeach
+                </details>
+            @endif
 
             @if ($trend !== [])
                 <div>
