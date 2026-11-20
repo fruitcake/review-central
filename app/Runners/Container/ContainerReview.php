@@ -234,7 +234,7 @@ class ContainerReview
                 $build,
                 'export REVIEW_AGENT="$REVIEW_REVIEWER" && . .review/skill/prepare-review.sh && sh .review/skill/run-review.sh && sh .review/skill/collect-usage.sh',
                 $directory,
-                $pipeline + $handover + $this->credentials->environment($repository->tenant)
+                $pipeline + $handover + $this->credentials->environment($repository->tenant, $handover['REVIEW_REVIEWER'] ?: null)
                     // Picks the reviewer's session up where the last review left it.
                     + ($resumes ? ['REVIEW_CONTINUE' => 'true'] : []),
                 trusted: false,

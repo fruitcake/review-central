@@ -50,3 +50,24 @@ reviewer_env_report() {
   dropped=$(reviewer_env_dropped "${1:-}" | tr '\n' ' ' | sed 's/ $//; s/ /, /g')
   echo "Reviewer environment: the step's, without ${dropped:-anything}"
 }
+
+# The pull request's own settings for the reviewer's CLI, out of the checkout
+# before the CLI starts in it. They are the pull request's to write, and a CLI
+# reads them as the project's: a hook in .claude/settings.json runs a command as
+# the reviewer, and an env entry such as ANTHROPIC_BASE_URL sends the key to
+# whoever it names. Codex reads .codex/config.toml, and Pi loads .pi/ with its
+# extensions, the same way. The skills, agents and CLAUDE.md stay: those are text
+# the reviewer reads, not settings it runs.
+#
+# Run after the vendor cache is unpacked, so a file an archive brought goes too.
+# Marked skip-worktree where the repository tracks it, so the removal is no change
+# in `git status` or `git diff`; where git is locked, it stays a removal.
+reviewer_drop_project_settings() {
+  for path in .claude/settings.json .claude/settings.local.json .codex .pi; do
+    if [ -e "$path" ] || [ -L "$path" ]; then
+      rm -rf -- "$path"
+      git ls-files -z -- "$path" 2> /dev/null | xargs -0 -r git update-index --skip-worktree -- 2> /dev/null || true
+      echo "Left out the pull request's $path: the reviewer runs with the review's own settings."
+    fi
+  done
+}

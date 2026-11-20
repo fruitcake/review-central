@@ -19,20 +19,34 @@ class ReviewCredentials
     /**
      * With several connections to one provider, the oldest is the one used.
      *
+     * Given the reviewer that runs, only the keys of the providers that run it:
+     * the step runs beside the pull request's code, and a key it does not need is
+     * one it cannot lose. A reviewer no provider names as its own, such as Pi on a
+     * trial, reviews with whichever there is, and gets them all.
+     *
      * @return array<string, string>
      */
-    public function environment(Tenant $tenant): array
+    public function environment(Tenant $tenant, ?string $reviewer = null): array
     {
+        $connections = collect($this->connections($tenant));
+        $own = $connections->filter(fn (Connection $connection): bool => collect($this->driver($connection)->reviewers())
+            ->contains(fn (ReviewProvider $provider): bool => $provider->value === $reviewer));
+
         $environment = [];
 
-        foreach ($this->connections($tenant) as $connection) {
-            /** @var LlmDriver $driver */
-            $driver = $connection->driver();
-
-            $environment += $driver->environment($connection);
+        foreach ($reviewer !== null && $own->isNotEmpty() ? $own : $connections as $connection) {
+            $environment += $this->driver($connection)->environment($connection);
         }
 
         return $environment;
+    }
+
+    protected function driver(Connection $connection): LlmDriver
+    {
+        /** @var LlmDriver $driver */
+        $driver = $connection->driver();
+
+        return $driver;
     }
 
     /**

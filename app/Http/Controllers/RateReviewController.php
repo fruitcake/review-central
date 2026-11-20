@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Models\ReviewRun;
+use App\Support\SecretFilter;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -20,7 +21,16 @@ class RateReviewController extends Controller
 {
     public function show(string $token): View
     {
-        return view('reviews.rate', ['run' => $this->run($token), 'saved' => session('saved', false)]);
+        $run = $this->run($token);
+
+        // The page is anyone's who has the link, which the pull request shows: what
+        // the review wrote goes through the tenant's secret filter, as it does on
+        // its way to the host. Only shown, never saved.
+        $filter = SecretFilter::forTenant($run->tenant_id);
+        $run->summary = $run->summary === null ? null : $filter->filter($run->summary);
+        $run->findings = $run->findings === null ? null : $filter->filterValue($run->findings);
+
+        return view('reviews.rate', ['run' => $run, 'saved' => session('saved', false)]);
     }
 
     public function store(Request $request, string $token): RedirectResponse

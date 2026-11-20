@@ -28,6 +28,8 @@ set -u
 echo "##[phase] cli"
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$HERE/reviewer-env.sh"
+# The pull request's own settings for the CLI are not the review's: see reviewer-env.sh.
+[ "${REVIEW_LOCAL:-false}" = "true" ] || reviewer_drop_project_settings
 TRANSCRIPT="${REVIEW_TRANSCRIPT_FILE:-pi-review.jsonl}"
 REPORT="${REVIEW_REPORT_FILE:-ai-review.json}"
 rm -f "$REPORT" "$TRANSCRIPT"

@@ -443,11 +443,14 @@ if [ -f composer.json ]; then
     VENDOR_TAR="$COMPOSER_CACHE_DIR/vendor-nodev2-$(cat composer.json composer.lock | sha256sum | cut -c1-32).tar"
   fi
 
-  if [ -n "$VENDOR_BASE" ] && [ -f "$VENDOR_BASE" ] && rm -rf vendor && tar -xf "$VENDOR_BASE"; then
+  # Only vendor/ comes out of an archive: one is written from inside a review's
+  # sandbox, and anything else in it would land in the checkout of every review
+  # that unpacks it, settings for the reviewer's CLI included.
+  if [ -n "$VENDOR_BASE" ] && [ -f "$VENDOR_BASE" ] && rm -rf vendor && tar -xf "$VENDOR_BASE" vendor; then
     echo "vendor/ of the destination branch unpacked; Composer installs what this pull request changes."
   fi
 
-  if [ -n "$VENDOR_TAR" ] && [ -f "$VENDOR_TAR" ] && rm -rf vendor && tar -xf "$VENDOR_TAR"; then
+  if [ -n "$VENDOR_TAR" ] && [ -f "$VENDOR_TAR" ] && rm -rf vendor && tar -xf "$VENDOR_TAR" vendor; then
     # Its last use, which is what keeps it among the newest.
     touch "$VENDOR_TAR"
     echo "vendor/ unpacked from the cache for this composer.lock."
