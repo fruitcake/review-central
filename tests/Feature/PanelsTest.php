@@ -126,7 +126,7 @@ it('adds the webhook to the workspace, with the connection\'s address and secret
         && $request['url'] === url('/api/webhooks/hook-one')
         && $request['secret'] === 'hook-secret'
         && $request['active'] === true
-        && $request['events'] === ['pullrequest:created', 'pullrequest:updated', 'pullrequest:fulfilled', 'pullrequest:rejected', 'pullrequest:comment_created']);
+        && $request['events'] === ['pullrequest:created', 'pullrequest:updated', 'pullrequest:fulfilled', 'pullrequest:rejected', 'pullrequest:comment_created', 'pullrequest:approved', 'pullrequest:unapproved', 'pullrequest:changes_request_created', 'pullrequest:changes_request_removed']);
 });
 
 it('updates the webhook that is already there instead of adding a second', function () {

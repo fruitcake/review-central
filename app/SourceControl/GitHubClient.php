@@ -721,10 +721,78 @@ class GitHubClient implements FiltersSecrets, SourceControl
                 'account_id' => is_numeric($pull['user']['id'] ?? null) ? (string) $pull['user']['id'] : null,
                 'nickname' => is_string($pull['user']['login'] ?? null) ? $pull['user']['login'] : null,
             ],
+            'created_on' => $pull['created_at'] ?? null,
             'updated_on' => $pull['updated_at'] ?? null,
+            // Who is asked to review and has yet to: GitHub lists only them, and
+            // those who reviewed are told of by their reviews.
+            'reviewers' => array_values(array_map(fn (array $user): array => self::user($user), array_filter((array) ($pull['requested_reviewers'] ?? []), 'is_array'))),
+            'reviewers_partial' => true,
             // Whether its branch is in this repository: one from a fork is not.
             'from_fork' => $fork,
             'fork_branch' => $fork ? (string) ($pull['head']['label'] ?? $pull['head']['ref'] ?? '') : null,
+        ];
+    }
+
+    /**
+     * A pull request with what its reviews say as Bitbucket's participants: each
+     * reviewer's newest approval or request for changes, oldest review first. A
+     * comment alone says neither; a dismissed review asks for a new one.
+     *
+     * @param  array<string, mixed>  $pullRequest  as pullRequest() gives it
+     * @param  array<int, array<string, mixed>>  $reviews  as GitHub describes them
+     * @return array<string, mixed>
+     */
+    public static function withReviews(array $pullRequest, array $reviews): array
+    {
+        $participants = [];
+
+        foreach ($reviews as $review) {
+            $state = match ($review['state'] ?? null) {
+                'APPROVED' => Reviewers::APPROVED,
+                'CHANGES_REQUESTED' => Reviewers::CHANGES_REQUESTED,
+                'DISMISSED' => null,
+                default => false,
+            };
+
+            if ($state === false || ! is_array($review['user'] ?? null)) {
+                continue;
+            }
+
+            $user = self::user($review['user']);
+            $participants[Reviewers::key(Reviewers::person($user))] = [
+                'user' => $user,
+                'role' => 'REVIEWER',
+                'approved' => $state === Reviewers::APPROVED,
+                'state' => $state,
+                'participated_on' => $review['submitted_at'] ?? null,
+            ];
+        }
+
+        return ['participants' => array_values($participants)] + $pullRequest;
+    }
+
+    /**
+     * Every review of a pull request, oldest first.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getPullRequestReviews(string $id): array
+    {
+        return array_values(array_filter((array) $this->request(10)->get($this->url("pulls/{$id}/reviews"), ['per_page' => 100])->throw()->json(), 'is_array'));
+    }
+
+    /**
+     * A GitHub user as Bitbucket names one: the ID and the name signed in with.
+     *
+     * @param  array<string, mixed>  $user
+     * @return array{display_name: string, account_id: string|null, nickname: string|null}
+     */
+    protected static function user(array $user): array
+    {
+        return [
+            'display_name' => (string) ($user['login'] ?? ''),
+            'account_id' => is_numeric($user['id'] ?? null) ? (string) $user['id'] : null,
+            'nickname' => is_string($user['login'] ?? null) ? $user['login'] : null,
         ];
     }
 

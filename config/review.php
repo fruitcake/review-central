@@ -98,6 +98,18 @@ return [
         'openai_model' => env('REVIEW_DIFF_OPENAI_MODEL', 'gpt-6.1-sol'),
     ],
 
+    /*
+    | Whose turn an open pull request is: a small model says in a sentence what the
+    | one at turn has to do, and sums up the pull request, each time its state
+    | changes. With the tenant's first AI provider; off, the fixed rules' words show.
+    */
+    'turn' => [
+        'notes' => (bool) env('REVIEW_TURN_NOTES', true),
+        // The OpenAI model it is written with. Anthropic's is its small model; any
+        // other provider's is the model its connection names.
+        'openai_model' => env('REVIEW_TURN_OPENAI_MODEL', env('REVIEW_DIFF_OPENAI_MODEL', 'gpt-6.1-sol')),
+    ],
+
     // The effort a reviewer runs at where neither the repository nor the tenant
     // sets one. Given to the reviewer rather than left to its own default, so a
     // review records what it ran at, also after a reviewer's default changes.

@@ -33,6 +33,29 @@ A repository reviews every pull request by itself on a push, unless its settings
 
 For a public repository this keeps outside contributors from spending the tenant's AI budget, while the team's own pull requests are reviewed as they are pushed.
 
+### Whose turn
+
+Each pull request says whose turn it is, and what they have to do, read from its reviewers, its newest commits and its AI review:
+
+| The pull request | Whose turn |
+| --- | --- |
+| is a draft | the author, to mark it ready |
+| waits for approval | someone in the team, to start the review |
+| is being reviewed by the AI | the AI review |
+| has a reviewer's request for changes, with new commits since | that reviewer, to review again |
+| has a reviewer's request for changes | the author |
+| failed its AI review on its newest commit | the author |
+| has no reviewer | nobody yet: assign one |
+| has an approval from before its newest commits | that reviewer, to review again |
+| has reviewers who have not reviewed | them |
+| is approved by every reviewer | the author, to merge |
+
+Where the tenant has an AI provider, a small model also writes it in a sentence or two from the description, the comments, the history and the AI review, and sums up what the pull request changes: Anthropic's Haiku, OpenAI's `REVIEW_TURN_OPENAI_MODEL`, or the model another provider's connection names. It is written once each time the state changes; until then, and with `REVIEW_TURN_NOTES=false`, the rules' own words show. The account the review acts as is not counted as a reviewer.
+
+**With me** lists the pull requests whose turn is yours. It goes by the accounts on your profile (the menu at the top right): your Bitbucket nickname or account ID and your GitHub login. With none listed, your name is matched to the name the host shows. A row's details show the reviewers, the summary and the history: opened, pushed, asked to review, approved, changes requested, and each AI review.
+
+Approvals and requests for changes reach Review Central through the webhook events listed under [Connections](./tenants). `php artisan review:sync-pull-requests` reads every listed pull request from its host again, for those from before and for a delivery that was missed; it runs every night by itself.
+
 ## Reviews and cost
 
 ![The overview of a tenant](/screenshots/overview.png)

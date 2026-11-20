@@ -13,6 +13,9 @@ final readonly class WebhookEvent
 
     public const PULL_REQUEST_CHANGED = 'pull_request_changed';
 
+    /** Approved, changes requested, or either withdrawn: whose turn it is, and nothing to start. */
+    public const PULL_REQUEST_REVIEWED = 'pull_request_reviewed';
+
     /**
      * @param  string  $type  one of the constants, or the host's own name for anything else
      * @param  array<string, mixed>  $pullRequest  in the shape SourceControl documents

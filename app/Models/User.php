@@ -27,11 +27,12 @@ use Illuminate\Support\Str;
  * @property CarbonInterface|null $email_verified_at
  * @property string $password
  * @property bool $is_admin
+ * @property array<int, string>|null $source_accounts Who they are on the hosts: a nickname, login or account ID each
  * @property string|null $remember_token
  * @property CarbonInterface|null $created_at
  * @property CarbonInterface|null $updated_at
  */
-#[Fillable(['name', 'email', 'password', 'is_admin'])]
+#[Fillable(['name', 'email', 'password', 'is_admin', 'source_accounts'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable implements FilamentUser, HasTenants
 {
@@ -54,7 +55,28 @@ class User extends Authenticatable implements FilamentUser, HasTenants
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'is_admin' => 'boolean',
+            'source_accounts' => 'array',
         ];
+    }
+
+    /**
+     * Whether a person on a host is this user: by an account they listed as theirs,
+     * or, while they listed none, by their name as the host shows it.
+     *
+     * @param  array{name?: string|null, account_id?: string|null, nickname?: string|null}  $person
+     */
+    public function isOnHost(array $person): bool
+    {
+        $accounts = collect($this->source_accounts ?? [])->map(fn (mixed $account): string => mb_strtolower(trim((string) $account)))->filter();
+
+        if ($accounts->isNotEmpty()) {
+            return $accounts->intersect(array_filter([
+                mb_strtolower((string) ($person['account_id'] ?? '')),
+                mb_strtolower((string) ($person['nickname'] ?? '')),
+            ]))->isNotEmpty();
+        }
+
+        return filled($person['name'] ?? null) && mb_strtolower(trim((string) $person['name'])) === mb_strtolower(trim($this->name));
     }
 
     /**

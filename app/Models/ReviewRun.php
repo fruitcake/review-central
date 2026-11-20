@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Services\Broadcasts;
+use App\Services\PullRequestTracking;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -87,6 +88,18 @@ class ReviewRun extends Model
         static::updated(function (self $run): void {
             if ($run->wasChanged(['status', 'result'])) {
                 Broadcasts::runChanged($run);
+
+                // Whose turn the pull request is may have moved with it.
+                if ($run->pull_request_id !== null) {
+                    $record = OpenPullRequest::query()->with('repository.tenant')
+                        ->where('repository_id', $run->repository_id)
+                        ->where('pull_request_id', $run->pull_request_id)
+                        ->first();
+
+                    if ($record !== null) {
+                        rescue(fn () => app(PullRequestTracking::class)->describe($record), null, true);
+                    }
+                }
             }
         });
     }

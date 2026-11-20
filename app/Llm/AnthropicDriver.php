@@ -10,6 +10,7 @@ use App\Enums\ReviewProvider;
 use App\Exceptions\ConnectionFailed;
 use App\Exceptions\ReviewerFailed;
 use App\Llm\Agents\Decider;
+use App\Llm\Agents\Describer;
 use App\Llm\Agents\DiffReviewer;
 use App\Models\Connection;
 use App\Rules\PublicUrl;
@@ -154,6 +155,13 @@ class AnthropicDriver implements LlmDriver
         $answer = (new Decider($question))->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: self::SMALL_MODEL, timeout: 30);
 
         return is_bool($answer['answer'] ?? null) ? $answer['answer'] : null;
+    }
+
+    public function describes(Connection $connection, string $instructions, string $text): ?array
+    {
+        $answer = (new Describer($instructions))->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: self::SMALL_MODEL, timeout: 60);
+
+        return Describer::read($answer);
     }
 
     /**

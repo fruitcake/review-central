@@ -9,6 +9,7 @@ use App\Connections\LlmDriver;
 use App\Exceptions\ConnectionFailed;
 use App\Exceptions\ReviewerFailed;
 use App\Llm\Agents\Decider;
+use App\Llm\Agents\Describer;
 use App\Llm\Agents\DiffReviewer;
 use App\Models\Connection;
 use App\Runners\Diff\Answer;
@@ -132,6 +133,18 @@ abstract class ApiKeyDriver implements LlmDriver
         );
 
         return is_bool($answer['answer'] ?? null) ? $answer['answer'] : null;
+    }
+
+    public function describes(Connection $connection, string $instructions, string $text): ?array
+    {
+        $answer = (new Describer($instructions))->prompt(
+            $text,
+            provider: $this->provider($connection, ['driver' => $this->sdk(), 'key' => (string) $connection->credential('api_key')]),
+            model: (string) $connection->setting('model'),
+            timeout: 60,
+        );
+
+        return Describer::read($answer);
     }
 
     /**

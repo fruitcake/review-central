@@ -66,6 +66,8 @@ class ReviewRequest
         ReviewRun::STATUS_FINISHED,
     ];
 
+    public function __construct(protected PullRequestTracking $tracking) {}
+
     public static function isRequest(string $comment): bool
     {
         return preg_match('~^'.preg_quote(self::COMMAND, '~').'(?:\s|$)~', ltrim($comment)) === 1;
@@ -90,6 +92,13 @@ class ReviewRequest
         // them, for a person to start the ones that wait.
         if ($event->type === WebhookEvent::PULL_REQUEST_CHANGED) {
             $this->handlePullRequest($repository, $event->pullRequest);
+
+            return;
+        }
+
+        // An approval or a request for changes: whose turn it is, and nothing to start.
+        if ($event->type === WebhookEvent::PULL_REQUEST_REVIEWED) {
+            $this->handleReviewed($repository, $event->pullRequest);
 
             return;
         }
@@ -227,7 +236,7 @@ class ReviewRequest
 
         $commit = $data['source']['commit']['hash'] ?? null;
 
-        $markedReady = DB::transaction(function () use ($key, $data, $updatedOn, $commit): bool {
+        $markedReady = DB::transaction(function () use ($repository, $key, $data, $updatedOn, $commit): bool {
             $record = OpenPullRequest::query()->where($key)->lockForUpdate()->firstOrFail();
 
             // Deliveries arrive out of order, so an older snapshot says nothing.
@@ -236,16 +245,9 @@ class ReviewRequest
             }
 
             $wasDraft = $record->draft;
-            $record->forceFill([
-                'draft' => $data['draft'],
-                'source_updated_on' => $updatedOn ?? $record->source_updated_on,
-                'title' => self::text($data['title'] ?? null),
-                'author' => self::text($data['author']['display_name'] ?? null),
-                'author_id' => self::text($data['author']['account_id'] ?? null),
-                'author_nickname' => self::text($data['author']['nickname'] ?? null),
-                'branch' => self::text($data['source']['branch']['name'] ?? null),
-                'from_fork' => ($data['from_fork'] ?? false) === true,
-            ]);
+            $this->tracking->track($repository, $record, $data);
+            $this->fill($record, $data);
+            $record->source_updated_on = $updatedOn ?? $record->source_updated_on;
 
             // A new head waits afresh, if it waits at all: decided below.
             if (is_string($commit) && $commit !== '' && $record->commit !== $commit) {
@@ -257,6 +259,8 @@ class ReviewRequest
 
             return $wasDraft && ! $record->draft;
         });
+
+        $this->describe($key);
 
         // Nothing else starts a review: every new head of a pull request that is
         // not a draft is started here. The review's own edit of the description
@@ -296,6 +300,104 @@ class ReviewRequest
         }
 
         $this->start($repository, $data['source']['branch']['name'] ?? null);
+    }
+
+    /**
+     * Brings a listed pull request up to date with the host's own word of it, for
+     * a delivery that was missed or came before its turn was kept: gone when it is
+     * no longer open, and nothing started.
+     *
+     * @param  array<string, mixed>|null  $data  the pull request as the host gives it, null when it has none
+     */
+    public function sync(Repository $repository, int $pullRequestId, ?array $data): void
+    {
+        if ($data === null || ($data['state'] ?? null) !== 'OPEN') {
+            OpenPullRequest::query()->where(['repository_id' => $repository->getKey(), 'pull_request_id' => $pullRequestId])->delete();
+
+            return;
+        }
+
+        $this->handleReviewed($repository, $data);
+    }
+
+    /**
+     * Keeps an approval, a request for changes or the withdrawal of either, which
+     * changes whose turn it is and starts nothing. A pull request not seen before
+     * is listed from it.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function handleReviewed(Repository $repository, array $data): void
+    {
+        if (! isset($data['id']) || ($data['state'] ?? null) !== 'OPEN') {
+            return;
+        }
+
+        $key = ['repository_id' => $repository->getKey(), 'pull_request_id' => (int) $data['id']];
+
+        OpenPullRequest::query()->createOrFirst($key, ['draft' => ($data['draft'] ?? false) === true]);
+
+        $updatedOn = self::timestamp($data['updated_on'] ?? null);
+
+        DB::transaction(function () use ($repository, $key, $data, $updatedOn): void {
+            $record = OpenPullRequest::query()->where($key)->lockForUpdate()->firstOrFail();
+
+            // A snapshot older than the one kept says nothing of the head or the
+            // title: only what the reviewers did, which is the delivery's own news.
+            if ($updatedOn !== null && $record->source_updated_on !== null && $updatedOn < $record->source_updated_on) {
+                $this->tracking->track($repository, $record, ['source' => [], 'draft' => null] + $data);
+                $record->save();
+
+                return;
+            }
+
+            $this->tracking->track($repository, $record, $data);
+            $this->fill($record, $data);
+            $record->source_updated_on = $updatedOn ?? $record->source_updated_on;
+
+            $commit = $data['source']['commit']['hash'] ?? null;
+
+            // A new head waits afresh, if it waits at all: its own delivery decides.
+            if (is_string($commit) && $commit !== '' && $record->commit !== $commit) {
+                $record->commit = $commit;
+                $record->awaiting_approval = false;
+            }
+
+            $record->save();
+        });
+
+        $this->describe($key);
+    }
+
+    /**
+     * The fields a delivery says of the pull request. A new head waits afresh for
+     * the review: whether it waits at all is decided by the caller.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function fill(OpenPullRequest $record, array $data): void
+    {
+        $record->forceFill([
+            'draft' => is_bool($data['draft'] ?? null) ? $data['draft'] : $record->draft,
+            'title' => self::text($data['title'] ?? null),
+            'author' => self::text($data['author']['display_name'] ?? null),
+            'author_id' => self::text($data['author']['account_id'] ?? null),
+            'author_nickname' => self::text($data['author']['nickname'] ?? null),
+            'branch' => self::text($data['source']['branch']['name'] ?? null),
+            'from_fork' => ($data['from_fork'] ?? false) === true,
+        ]);
+    }
+
+    /**
+     * @param  array{repository_id: mixed, pull_request_id: int}  $key
+     */
+    protected function describe(array $key): void
+    {
+        $record = OpenPullRequest::query()->with('repository.tenant')->where($key)->first();
+
+        if ($record !== null) {
+            rescue(fn () => $this->tracking->describe($record), null, true);
+        }
     }
 
     /**

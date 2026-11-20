@@ -10,6 +10,8 @@ use App\Filament\CurrentTenant;
 use App\Filament\RunPresenter;
 use App\Models\OpenPullRequest;
 use App\Models\ReviewRun;
+use App\Models\User;
+use App\Services\PullRequestTurn;
 use App\Services\ReviewRequest;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -18,8 +20,12 @@ use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\HtmlString;
+use Illuminate\Support\Str;
 use Throwable;
 
 /**
@@ -83,12 +89,29 @@ class PullRequestResource extends Resource
                     ->placeholder('Someone')
                     ->description(fn (OpenPullRequest $record): ?string => $record->repository->tenant->trusts($record->author_id, $record->author_nickname) ? 'Trusted' : null)
                     ->searchable(['author', 'author_nickname']),
+                TextColumn::make('turn')
+                    ->label('Whose turn')
+                    ->wrap()
+                    ->state(fn (OpenPullRequest $record): HtmlString => self::turnCell($record)),
                 TextColumn::make('state')
-                    ->label('Review')
+                    ->label('AI review')
                     ->state(fn (OpenPullRequest $record): HtmlString => ReviewRunResource::chip(...self::standing($record))),
                 TextColumn::make('updated_at')->label('Last change')->since()->sortable(),
             ])
+            ->recordAction('details')
             ->recordActions([
+                Action::make('details')
+                    ->label('Details')
+                    ->icon(Heroicon::OutlinedInformationCircle)
+                    ->iconButton()
+                    ->tooltip('Whose turn, and what happened so far')
+                    ->color('gray')
+                    ->slideOver()
+                    ->modalHeading(fn (OpenPullRequest $record): string => $record->title ?? 'Untitled')
+                    ->modalDescription(fn (OpenPullRequest $record): string => $record->repository->slug.' #'.$record->pull_request_id)
+                    ->modalContent(fn (OpenPullRequest $record): View => view('filament.app.pull-request', self::details($record)))
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Close'),
                 Action::make('start')
                     ->label(fn (OpenPullRequest $record): string => $record->awaiting_approval ? 'Approve and review' : 'Review')
                     ->icon(Heroicon::OutlinedPlay)
@@ -122,6 +145,84 @@ class PullRequestResource extends Resource
                     ->url(fn (OpenPullRequest $record): ?string => filled($record->getAttribute('latest_review')) ? ReviewRunResource::getUrl('view', ['record' => $record->getAttribute('latest_review')]) : null)
                     ->visible(fn (OpenPullRequest $record): bool => filled($record->getAttribute('latest_review'))),
             ]);
+    }
+
+    /**
+     * Who is at turn, what they have to do, and why: the AI's words where they are
+     * written for this state, the fixed rules' where not.
+     */
+    public static function turnCell(OpenPullRequest $record): HtmlString
+    {
+        $turn = PullRequestTurn::of($record);
+        $note = $turn->note($record);
+        $user = auth()->user();
+        $mine = $user instanceof User && $turn->isFor($user);
+
+        return new HtmlString(
+            '<div class="rc-turn">'
+            .'<span class="rc-turn-who">'.e($turn->who()).($mine ? ' <span class="rc-chip rc-chip-primary">You</span>' : '').'</span>'
+            .'<span class="rc-muted">'.e($note === null ? "{$turn->action}: {$turn->reason}" : Str::limit($note['next_step'], 220)).'</span>'
+            .'</div>'
+        );
+    }
+
+    /**
+     * What the details show of a pull request.
+     *
+     * @return array<string, mixed>
+     */
+    public static function details(OpenPullRequest $record): array
+    {
+        $run = $record->latestRun();
+        $turn = PullRequestTurn::of($record, $run);
+        $user = auth()->user();
+
+        $runs = ReviewRun::query()
+            ->where('repository_id', $record->repository_id)
+            ->where('pull_request_id', $record->pull_request_id)
+            ->whereNotIn('status', [ReviewRun::STATUS_SKIPPED, ReviewRun::STATUS_RESTARTED, ReviewRun::STATUS_PENDING])
+            ->oldest('started_at')
+            ->get();
+
+        // What happened, oldest first: the pull request's own history and its AI reviews.
+        $history = collect($record->history ?? [])
+            ->map(fn (array $entry): array => ['at' => Carbon::parse($entry['at']), 'text' => $entry['text'], 'kind' => $entry['kind'], 'url' => null, 'tone' => null])
+            ->merge($runs->map(fn (ReviewRun $sibling): array => [
+                'at' => $sibling->finished_at ?? $sibling->started_at,
+                'text' => 'AI review of '.substr($sibling->commit, 0, 7).': '.Str::lower(RunPresenter::outcome($sibling)['label']),
+                'kind' => 'ai',
+                'url' => ReviewRunResource::getUrl('view', ['record' => $sibling]),
+                'tone' => RunPresenter::outcome($sibling)['tone'],
+            ]))
+            ->sortBy(fn (array $entry): int => $entry['at']->getTimestamp())
+            ->values();
+
+        return [
+            'record' => $record,
+            'turn' => $turn,
+            'note' => $turn->note($record),
+            'mine' => $user instanceof User && $turn->isFor($user),
+            'run' => $run,
+            'standing' => self::standing($record),
+            'history' => $history,
+            'url' => rescue(fn (): string => $record->repository->sourceControl()->pullRequestUrl($record->pull_request_id), null, false),
+        ];
+    }
+
+    /**
+     * The pull requests whose turn is this user's.
+     *
+     * @return array<int, int>
+     */
+    public static function withUser(?User $user): array
+    {
+        if ($user === null) {
+            return [];
+        }
+
+        return self::getEloquentQuery()->with('repository.tenant')->get()
+            ->filter(fn (Model $record): bool => $record instanceof OpenPullRequest && PullRequestTurn::of($record)->isFor($user))
+            ->modelKeys();
     }
 
     /**
