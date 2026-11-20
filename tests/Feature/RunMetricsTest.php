@@ -101,6 +101,8 @@ it('advises the size the sandboxes\' own measurements fit', function () {
     foreach (range(1, 6) as $build) {
         sandboxRun($repository, $build, 'standard-2', ['peak_memory_mb' => 600 + $build * 30, 'steps' => [
             ['name' => 'composer', 'seconds' => 20, 'starved_percent' => 0],
+            // Codex's own review waits on the model as the reviewer does: not the sandbox's to answer for.
+            ['name' => 'reviewer (candidates)', 'seconds' => 150, 'starved_percent' => 90],
             ['name' => 'reviewer', 'seconds' => 200, 'starved_percent' => 90],
         ]]);
     }

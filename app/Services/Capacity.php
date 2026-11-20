@@ -248,7 +248,8 @@ class Capacity
      */
     protected function starvedAroundModel(array $metrics): ?float
     {
-        $steps = array_filter((array) ($metrics['steps'] ?? []), fn (mixed $step): bool => is_array($step) && ($step['name'] ?? null) !== 'reviewer' && ($step['starved_percent'] ?? null) !== null && ($step['seconds'] ?? 0) > 0);
+        // The model's: the reviewer, and Codex's own review before it, which waits on the model as much.
+        $steps = array_filter((array) ($metrics['steps'] ?? []), fn (mixed $step): bool => is_array($step) && ! in_array($step['name'] ?? null, ['reviewer', 'reviewer (candidates)'], true) && ($step['starved_percent'] ?? null) !== null && ($step['seconds'] ?? 0) > 0);
         $seconds = array_sum(array_column($steps, 'seconds'));
 
         return $seconds === 0 ? null : array_sum(array_map(fn (array $step): float => $step['starved_percent'] * $step['seconds'], $steps)) / $seconds;
