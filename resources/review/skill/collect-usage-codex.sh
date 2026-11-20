@@ -73,12 +73,14 @@ echo "Reading usage from $(printf '%s\n' $FILES | wc -l | tr -d ' ') rollout(s).
 # Which of the two it was gets recorded and printed, because otherwise the answer to
 # "did it really run gpt-6-sol?" is the same either way: the rollout saying so, and
 # this script repeating the question back. They are not the same claim.
-# The model the review asked for: the one set for it, else one a custom config names.
-# Neither, and Codex picked its own, which only the rollout can say.
-CONFIGURED_MODEL="${CODEX_REVIEW_MODEL:-}"
-if [ -z "$CONFIGURED_MODEL" ] && [ -n "${REVIEW_AGENT_CONFIG:-}" ] && [ -f "${REVIEW_AGENT_CONFIG}" ]; then
+# The model the review asked for: the one the config Codex ran with names, which
+# is where a trial's own model goes, else the one set for the review. Neither, and
+# Codex picked its own, which only the rollout can say.
+CONFIGURED_MODEL=""
+if [ -n "${REVIEW_AGENT_CONFIG:-}" ] && [ -f "${REVIEW_AGENT_CONFIG}" ]; then
   CONFIGURED_MODEL=$(grep -m1 -E '^ *model *=' "$REVIEW_AGENT_CONFIG" 2>/dev/null | sed -E 's/^[^=]*= *"?([^"]*)"?.*/\1/') || CONFIGURED_MODEL=""
 fi
+CONFIGURED_MODEL="${CONFIGURED_MODEL:-${CODEX_REVIEW_MODEL:-}}"
 
 # Per file, because total_token_usage is cumulative within a session: taking the
 # last entry of each and adding those up counts every token exactly once.
