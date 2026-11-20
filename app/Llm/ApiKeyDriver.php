@@ -9,14 +9,15 @@ use App\Connections\Fields\Secret;
 use App\Connections\LlmDriver;
 use App\Exceptions\ConnectionFailed;
 use App\Exceptions\ReviewerFailed;
+use App\Filament\Components\ReviewSettingsForm;
 use App\Llm\Agents\Decider;
 use App\Llm\Agents\Describer;
 use App\Llm\Agents\DiffReviewer;
 use App\Models\Connection;
 use App\Runners\Diff\Answer;
 use App\Runners\Diff\ReportSchema;
+use App\Services\ReviewSettings;
 use App\Support\SetupGuide;
-use Filament\Forms\Components\TextInput;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Laravel\Ai\Responses\Data\FinishReason;
@@ -95,8 +96,10 @@ abstract class ApiKeyDriver implements ExplainsSetup, LlmDriver
     public function settingFields(): array
     {
         return [
-            TextInput::make('model')->required()->maxLength(120)->rule('regex:/^[A-Za-z0-9._:\/@-]+$/')
-                ->helperText("The model to review with, as {$this->label()} names it. A trial can name another."),
+            ReviewSettingsForm::modelField('model', $this->modelChoices())
+                ->label('Model')
+                ->required()
+                ->helperText("The model to review with: one {$this->label()} names, or its smartest, default or cheapest as the Laravel AI SDK names it when the review runs. A trial can name another."),
         ];
     }
 
@@ -113,7 +116,7 @@ abstract class ApiKeyDriver implements ExplainsSetup, LlmDriver
     {
         return array_filter([
             $this->variable() => $connection->credential('api_key'),
-            'PI_REVIEW_MODEL_'.strtoupper($this->pi()) => $connection->setting('model'),
+            'PI_REVIEW_MODEL_'.strtoupper($this->pi()) => $this->model($connection),
         ]);
     }
 
@@ -129,7 +132,7 @@ abstract class ApiKeyDriver implements ExplainsSetup, LlmDriver
     {
         // The repository's setting names a model of Claude's or Codex's; this
         // provider reviews with its own.
-        $model = (string) $connection->setting('model');
+        $model = $this->model($connection);
 
         // No two of these take a schema the same way, so the report is asked for
         // in words and held to the schema's shape by what reads it.
@@ -163,12 +166,41 @@ abstract class ApiKeyDriver implements ExplainsSetup, LlmDriver
         return new Answer(ReportSchema::withoutNulls($report), $model, $this->usage($response->usage));
     }
 
+    /**
+     * The model the connection names: a tier as the SDK reads it now.
+     */
+    protected function model(Connection $connection): string
+    {
+        return ReviewSettings::model($this->sdk(), (string) $connection->setting('model'));
+    }
+
+    /**
+     * The tiers, as they follow the SDK, then the models each is now.
+     *
+     * @return array<string, string>
+     */
+    protected function modelChoices(): array
+    {
+        $models = ReviewSettings::tierModels($this->sdk());
+        $choices = [];
+
+        foreach ($models as $tier => $model) {
+            $choices[$tier] = "{$tier}: now {$model}";
+        }
+
+        foreach ($models as $tier => $model) {
+            $choices[$model] ??= "{$model} ({$tier})";
+        }
+
+        return $choices;
+    }
+
     public function decides(Connection $connection, string $question, string $text): ?bool
     {
         $answer = (new Decider($question))->prompt(
             $text,
             provider: $this->provider($connection, ['driver' => $this->sdk(), 'key' => (string) $connection->credential('api_key')]),
-            model: (string) $connection->setting('model'),
+            model: $this->model($connection),
             timeout: 30,
         );
 
@@ -180,7 +212,7 @@ abstract class ApiKeyDriver implements ExplainsSetup, LlmDriver
         $answer = (new Describer($instructions))->prompt(
             $text,
             provider: $this->provider($connection, ['driver' => $this->sdk(), 'key' => (string) $connection->credential('api_key')]),
-            model: (string) $connection->setting('model'),
+            model: $this->model($connection),
             timeout: 60,
         );
 

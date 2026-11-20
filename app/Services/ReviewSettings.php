@@ -10,6 +10,8 @@ use App\Models\Repository;
 use App\Models\ReviewSetting;
 use App\Models\Tenant;
 use BackedEnum;
+use Laravel\Ai\Ai;
+use Laravel\Ai\Contracts\Providers\TextProvider;
 
 /**
  * Which reviewer the AI review runs, and at what model and effort, as the server keeps
@@ -21,6 +23,42 @@ use BackedEnum;
  */
 class ReviewSettings
 {
+    /**
+     * A model can be named by what it is for rather than by its ID: the provider's
+     * smartest, default or cheapest, as the Laravel AI SDK names them when the
+     * review runs, so the setting follows the SDK as it moves on.
+     */
+    public const TIERS = ['smartest', 'default', 'cheapest'];
+
+    /** The model settings a tier is read for, with the SDK's driver it is read from. */
+    protected const TIERED = ['claude_model' => 'anthropic', 'claude_advisor' => 'anthropic', 'codex_model' => 'openai'];
+
+    /**
+     * The SDK's smartest, default and cheapest model of a provider, by tier; none
+     * where the SDK has no such provider.
+     *
+     * @return array<string, string>
+     */
+    public static function tierModels(string $driver): array
+    {
+        return once(fn (): array => rescue(function () use ($driver): array {
+            $provider = Ai::build(['name' => "model-tiers-{$driver}", 'driver' => $driver, 'key' => '']);
+
+            return $provider instanceof TextProvider
+                ? ['smartest' => $provider->smartestTextModel(), 'default' => $provider->defaultTextModel(), 'cheapest' => $provider->cheapestTextModel()]
+                : [];
+        }, [], false));
+    }
+
+    /**
+     * The model a setting names: a tier as the SDK reads it now, anything else as
+     * it is.
+     */
+    public static function model(string $driver, string $model): string
+    {
+        return in_array($model, self::TIERS, true) ? (self::tierModels($driver)[$model] ?? $model) : $model;
+    }
+
     /**
      * Each setting under the variable the scripts read it from. REVIEW_PROVIDER is
      * not among them: variables() picks it from the providers list.
@@ -240,7 +278,7 @@ class ReviewSettings
             }
 
             if (is_string($value) && trim($value) !== '') {
-                $variables[$variable] = trim($value);
+                $variables[$variable] = isset(self::TIERED[$field]) ? self::model(self::TIERED[$field], trim($value)) : trim($value);
             }
         }
 

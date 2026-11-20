@@ -5,6 +5,7 @@ namespace App\Filament\Components;
 use App\Enums\ReviewEffort;
 use App\Enums\ReviewProvider;
 use App\Filament\CurrentTenant;
+use App\Models\ModelPrice;
 use App\Models\ReviewSetting;
 use App\Services\Currency;
 use App\Services\ReviewSettings;
@@ -68,7 +69,9 @@ class ReviewSettingsForm
             Fieldset::make('OpenCodeReview')
                 ->columns(2)
                 ->schema([
-                    TextInput::make('ocr_model')->label('Model')->maxLength(255)->placeholder(self::placeholder($defaults, 'ocr_model')),
+                    // No tier and no alias: OpenCodeReview picks its own provider and passes the name on as it is,
+                    // so a tier could be read for the wrong one and an alias names no model at all.
+                    self::model($defaults, 'ocr_model', array_diff_key(self::claudeModels() + self::openAiModels(), array_flip([...ReviewSettings::TIERS, ...self::CLAUDE_ALIASES]))),
                     self::effort($defaults, 'ocr_effort'),
                 ]),
             Select::make('language')
@@ -124,12 +127,10 @@ class ReviewSettingsForm
     public static function claudeFields(?ReviewSetting $defaults = null): array
     {
         return [
-            TextInput::make('claude_model')->label('Model')->maxLength(255)->placeholder(self::placeholder($defaults, 'claude_model')),
+            self::model($defaults, 'claude_model', self::claudeModels()),
             self::effort($defaults, 'claude_effort'),
-            TextInput::make('claude_advisor')
+            self::model($defaults, 'claude_advisor', ['none' => 'none: no advisor', ...self::claudeModels()])
                 ->label('Advisor')
-                ->maxLength(255)
-                ->placeholder(self::placeholder($defaults, 'claude_advisor'))
                 ->helperText('A stronger model Claude consults at the moments that decide a review; none for no advisor.'),
             TextInput::make('claude_max_budget')
                 ->label('Budget per review ($)')
@@ -149,7 +150,7 @@ class ReviewSettingsForm
     public static function codexFields(?ReviewSetting $defaults = null): array
     {
         return [
-            TextInput::make('codex_model')->label('Model')->maxLength(255)->placeholder(self::placeholder($defaults, 'codex_model')),
+            self::model($defaults, 'codex_model', self::openAiModels()),
             self::effort($defaults, 'codex_effort'),
         ];
     }
@@ -164,6 +165,118 @@ class ReviewSettingsForm
             is_string($default) && $default !== '' => 'Default: '.$default,
             default => 'Default: the reviewer decides',
         };
+    }
+
+    /**
+     * A model, picked from the ones known here or typed: a gateway or a new model
+     * has a name no list holds yet.
+     *
+     * @param  array<string, string>  $choices  model => label
+     */
+    protected static function model(?ReviewSetting $defaults, string $field, array $choices): Select
+    {
+        return self::modelField($field, $choices)->placeholder(self::placeholder($defaults, $field));
+    }
+
+    /**
+     * A model field of any form: picked from the choices given, or typed.
+     *
+     * @param  array<string, string>  $choices  model => label
+     */
+    public static function modelField(string $field, array $choices): Select
+    {
+        $search = function (string $term) use ($choices): array {
+            $term = trim($term);
+            $found = collect($choices)->filter(fn (string $label, string $model): bool => str_contains(mb_strtolower($model.' '.$label), mb_strtolower($term)))->take(50)->all();
+
+            // What was typed, as a model of its own, where it is a name a model can have.
+            return preg_match(self::MODEL_NAME, $term) === 1 && ! array_key_exists($term, $found)
+                ? [$term => "{$term} (as typed)"] + $found
+                : $found;
+        };
+
+        return Select::make($field)
+            ->label('Model')
+            ->searchable()
+            ->options($choices)
+            ->getSearchResultsUsing($search)
+            // One saved before, or typed, that no list holds: shown as it is.
+            ->getOptionLabelUsing(fn (?string $value): ?string => $value === null ? null : ($choices[$value] ?? $value))
+            ->rule('regex:'.self::MODEL_NAME);
+    }
+
+    /** The names only Claude Code knows a model by. */
+    protected const CLAUDE_ALIASES = ['opus', 'sonnet', 'haiku'];
+
+    /** What a model's name can be: an ID, an alias, or a gateway's provider/model. */
+    protected const MODEL_NAME = '/^[A-Za-z0-9._:\/@-]{1,255}$/';
+
+    /**
+     * Claude's models: the aliases Claude Code knows, the SDK's smartest, default
+     * and cheapest, then the other IDs the price list has, newest first.
+     *
+     * @return array<string, string>
+     */
+    public static function claudeModels(): array
+    {
+        // A union, not a spread: a model the SDK names keeps its label and its place.
+        return [
+            'opus' => 'opus: the newest Opus',
+            'sonnet' => 'sonnet: the newest Sonnet',
+            'haiku' => 'haiku: the newest Haiku',
+        ] + self::tiers('anthropic') + self::priced('/^claude-[a-z0-9.-]+$/');
+    }
+
+    /**
+     * OpenAI's models: the SDK's smartest, default and cheapest, then the other
+     * IDs the price list has, newest first.
+     *
+     * @return array<string, string>
+     */
+    public static function openAiModels(): array
+    {
+        return self::tiers('openai') + self::priced('/^(gpt-[0-9][a-z0-9.-]*|o[0-9][a-z0-9.-]*|codex-[a-z0-9.-]+)$/');
+    }
+
+    /**
+     * The provider's smartest, default and cheapest: as a tier, which follows the
+     * Laravel AI SDK when the review runs, then as the model each is now. First
+     * in the list, and there before the price list has any.
+     *
+     * @return array<string, string>
+     */
+    protected static function tiers(string $driver): array
+    {
+        $models = ReviewSettings::tierModels($driver);
+        $tiers = [];
+
+        foreach ($models as $tier => $model) {
+            $tiers[$tier] = "{$tier}: now {$model}";
+        }
+
+        foreach ($models as $tier => $model) {
+            $tiers[$model] ??= "{$model} ({$tier})";
+        }
+
+        return $tiers;
+    }
+
+    /**
+     * The models of the price list whose ID matches, without dated snapshots,
+     * newest first.
+     *
+     * @return array<string, string>
+     */
+    protected static function priced(string $pattern): array
+    {
+        $models = once(fn (): array => rescue(fn (): array => ModelPrice::query()->pluck('model')->all(), [], false));
+        $matching = collect($models)
+            ->filter(fn (string $model): bool => preg_match($pattern, $model) === 1 && preg_match('/-\d{8}$|-\d{4}-\d{2}-\d{2}$/', $model) !== 1)
+            ->sort(SORT_NATURAL)
+            ->reverse()
+            ->values();
+
+        return $matching->mapWithKeys(fn (string $model): array => [$model => $model])->all();
     }
 
     protected static function effort(?ReviewSetting $defaults, string $field): Select
