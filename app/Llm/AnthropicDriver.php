@@ -10,6 +10,7 @@ use App\Connections\LlmDriver;
 use App\Enums\ReviewProvider;
 use App\Exceptions\ConnectionFailed;
 use App\Exceptions\ReviewerFailed;
+use App\Llm\Agents\Classifier;
 use App\Llm\Agents\Decider;
 use App\Llm\Agents\Describer;
 use App\Llm\Agents\DiffReviewer;
@@ -21,6 +22,7 @@ use App\Services\ReviewSettings;
 use App\Support\SetupGuide;
 use Filament\Forms\Components\TextInput;
 use Illuminate\Support\Facades\Http;
+use Laravel\Ai\Responses\AgentResponse;
 use Laravel\Ai\Responses\Data\FinishReason;
 use Laravel\Ai\Streaming\Events\Error as StreamError;
 use Laravel\Ai\Streaming\Events\StreamEnd;
@@ -204,6 +206,11 @@ class AnthropicDriver implements ExplainsSetup, LlmDriver
         $answer = (new Describer($instructions))->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: $model === null ? self::smallModel() : ReviewSettings::model('anthropic', $model), timeout: 60);
 
         return Describer::read($answer);
+    }
+
+    public function classifies(Connection $connection, string $text): AgentResponse
+    {
+        return (new Classifier)->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: self::smallModel(), timeout: 30);
     }
 
     /**

@@ -10,6 +10,7 @@ use App\Connections\LlmDriver;
 use App\Exceptions\ConnectionFailed;
 use App\Exceptions\ReviewerFailed;
 use App\Filament\Components\ReviewSettingsForm;
+use App\Llm\Agents\Classifier;
 use App\Llm\Agents\Decider;
 use App\Llm\Agents\Describer;
 use App\Llm\Agents\DiffReviewer;
@@ -20,6 +21,7 @@ use App\Services\ReviewSettings;
 use App\Support\SetupGuide;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Laravel\Ai\Responses\AgentResponse;
 use Laravel\Ai\Responses\Data\FinishReason;
 use Throwable;
 
@@ -217,6 +219,16 @@ abstract class ApiKeyDriver implements ExplainsSetup, LlmDriver
         );
 
         return Describer::read($answer);
+    }
+
+    public function classifies(Connection $connection, string $text): AgentResponse
+    {
+        return (new Classifier)->prompt(
+            $text,
+            provider: $this->provider($connection, ['driver' => $this->sdk(), 'key' => (string) $connection->credential('api_key')]),
+            model: $this->model($connection),
+            timeout: 30,
+        );
     }
 
     /**

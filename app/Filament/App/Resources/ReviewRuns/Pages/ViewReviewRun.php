@@ -10,6 +10,7 @@ use App\Filament\App\Resources\ReviewRuns\ReviewRunResource;
 use App\Filament\Concerns\RefreshesOnBroadcast;
 use App\Filament\CurrentTenant;
 use App\Filament\RunPresenter;
+use App\Models\ReviewClassification;
 use App\Models\ReviewQuestion;
 use App\Models\ReviewRun;
 use App\Models\User;
@@ -221,6 +222,8 @@ class ViewReviewRun extends ViewRecord
             'run' => $run,
             'findings' => $this->findings($run),
             'siblings' => $siblings,
+            // What the commit was classified as before its review, when it was.
+            'classification' => ReviewClassification::query()->where('repository_id', $run->repository_id)->where('commit', $run->commit)->first(),
             'ratings' => $run->ratings()->latest()->get(),
             // What people asked the reviewer on this pull request, newest first.
             'questions' => $run->pull_request_id === null ? collect() : ReviewQuestion::query()

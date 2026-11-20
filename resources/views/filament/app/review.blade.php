@@ -244,6 +244,9 @@
                         <dt>Reviewer</dt><dd>{{ RunPresenter::reviewer($run) ?? '—' }}</dd>
                         <dt>Model</dt><dd>{{ $run->model ?? '—' }}</dd>
                         <dt>Effort</dt><dd>{{ $run->effort ?? 'Default' }}</dd>
+                        @if ($classification !== null)
+                            <dt>Classified</dt><dd>{{ $classification->text() }}<span class="rc-muted">{{ $classification->reason === null ? '' : ": {$classification->reason}" }} · {{ $classification->files_count }} files, +{{ $classification->lines_added }} −{{ $classification->lines_removed }}{{ $classification->cost === null ? '' : ' · about '.Currency::show($classification->cost, null, 4) }}</span></dd>
+                        @endif
                         <dt>Instructions</dt><dd class="rc-mono">{{ $run->instructions_version ?? '—' }}</dd>
                         <dt>Commit</dt><dd class="rc-mono">{{ substr($run->commit, 0, 12) }}</dd>
                         @if (($run->metrics['cpu_average'] ?? null) !== null)

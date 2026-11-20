@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\ReviewComplexity;
 use App\Enums\ReviewEffort;
 use App\Enums\ReviewProvider;
+use App\Enums\ReviewStrategy;
 use App\Models\Repository;
 use App\Models\ReviewSetting;
 use App\Models\Tenant;
@@ -80,6 +82,9 @@ class ReviewSettings
         'extra_passes' => 'REVIEW_EXTRA_PASSES',
     ];
 
+    /** The settings of classifying pull requests, which the server applies and no script reads. */
+    public const STRATEGY_FIELDS = ['strategy' => true, 'strategy_effort' => true, 'strategy_model' => true];
+
     /** The languages a review can write in, by code, as the reviewer is told them. */
     public const LANGUAGES = [
         'en' => 'English', 'nl' => 'Dutch', 'de' => 'German', 'fr' => 'French', 'es' => 'Spanish',
@@ -127,7 +132,7 @@ class ReviewSettings
     {
         $setting = self::defaults($tenant);
         // The notes on whose turn are the team's alone, and no repository's.
-        $setting->fill(array_intersect_key($data, self::VARIABLES + ['providers' => true, 'follow_ups' => true, 'turn_notes' => true, 'turn_model' => true]));
+        $setting->fill(array_intersect_key($data, self::VARIABLES + self::STRATEGY_FIELDS + ['providers' => true, 'follow_ups' => true, 'turn_notes' => true, 'turn_model' => true]));
         $setting->save();
     }
 
@@ -147,7 +152,7 @@ class ReviewSettings
      */
     public static function saveFor(Repository $repository, array $data): void
     {
-        $data = array_intersect_key($data, self::VARIABLES + ['providers' => true, 'follow_ups' => true]);
+        $data = array_intersect_key($data, self::VARIABLES + self::STRATEGY_FIELDS + ['providers' => true, 'follow_ups' => true]);
 
         if (array_filter($data, fn (mixed $value): bool => filled($value)) === []) {
             $repository->reviewSetting()->delete();
@@ -247,10 +252,10 @@ class ReviewSettings
      * @param  array<int, string>|null  $available  the reviewer names the run can run, null when it did not say
      * @param  string|null  $pullRequest  the pull request id, so each one keeps its reviewer
      * @param  string|null  $branch  the branch, for when the run knows no pull request
-     * @param  ReviewEffort|null  $effort  the classified effort, which replaces every reviewer's set one
+     * @param  array{effort: ReviewEffort, tier: string}|null  $pick  what the pull request's classification picked, which replaces every reviewer's effort and Claude Code's and Codex's model
      * @return array<string, string>
      */
-    public static function variables(Repository $repository, ?array $available = null, ?string $pullRequest = null, ?string $branch = null, ?ReviewEffort $effort = null): array
+    public static function variables(Repository $repository, ?array $available = null, ?string $pullRequest = null, ?string $branch = null, ?array $pick = null): array
     {
         $own = $repository->reviewSetting;
         $default = self::defaults($repository->tenant);
@@ -272,7 +277,11 @@ class ReviewSettings
         }
 
         foreach (self::VARIABLES as $field => $variable) {
-            $value = $effort !== null && str_ends_with($field, '_effort') ? $effort : (filled($own?->{$field}) ? $own->{$field} : $default->{$field});
+            $value = match (true) {
+                $pick !== null && str_ends_with($field, '_effort') => $pick['effort'],
+                $pick !== null && in_array($field, self::PICKED_MODELS, true) => $pick['tier'],
+                default => filled($own?->{$field}) ? $own->{$field} : $default->{$field},
+            };
 
             if ($value instanceof BackedEnum) {
                 $value = $value->value;
@@ -291,6 +300,63 @@ class ReviewSettings
         ]);
 
         return $variables;
+    }
+
+    /**
+     * The models a classification picks a tier for: the reviewers the Laravel AI SDK
+     * reads a tier for. OpenCodeReview passes a name on as it is.
+     */
+    public const PICKED_MODELS = ['claude_model', 'codex_model'];
+
+    /** The lowest effort a classified pull request may start from, and where it starts when none is set. */
+    public const STRATEGY_EFFORTS = [ReviewEffort::Low, ReviewEffort::Medium, ReviewEffort::High];
+
+    public const STRATEGY_EFFORT = ReviewEffort::Medium;
+
+    /** The model tiers from the lowest up; a classified pull request starts from default unless set. */
+    public const STRATEGY_TIERS = ['cheapest', 'default', 'smartest'];
+
+    public const STRATEGY_TIER = 'default';
+
+    /**
+     * Whether a repository's pull requests are classified, and from which effort and
+     * model tier up: its own setting where it has one, the team's otherwise.
+     *
+     * @return array{mode: ReviewStrategy, effort: ReviewEffort, tier: string}
+     */
+    public static function strategy(Repository $repository): array
+    {
+        $own = $repository->reviewSetting;
+        $default = self::defaults($repository->tenant);
+        $value = fn (string $field): ?string => filled($own?->{$field}) ? (string) $own->{$field} : (filled($default->{$field}) ? (string) $default->{$field} : null);
+
+        $effort = ReviewEffort::tryFrom((string) $value('strategy_effort'));
+        $tier = $value('strategy_model');
+
+        return [
+            'mode' => ReviewStrategy::tryFrom((string) $value('strategy')) ?? ReviewStrategy::Off,
+            'effort' => in_array($effort, self::STRATEGY_EFFORTS, true) ? $effort : self::STRATEGY_EFFORT,
+            'tier' => in_array($tier, self::STRATEGY_TIERS, true) ? $tier : self::STRATEGY_TIER,
+        ];
+    }
+
+    /**
+     * The effort and model tier for a complexity: the minimum for a simple pull
+     * request, a step up for a normal one, two for a complex one, and no higher
+     * than the top.
+     *
+     * @return array{effort: ReviewEffort, tier: string}
+     */
+    public static function pick(ReviewEffort $effort, string $tier, ReviewComplexity $complexity): array
+    {
+        $efforts = ReviewEffort::cases();
+        $from = (int) array_search($effort, $efforts, true);
+        $tierFrom = (int) array_search($tier, self::STRATEGY_TIERS, true);
+
+        return [
+            'effort' => $efforts[min(count($efforts) - 1, $from + $complexity->steps())],
+            'tier' => self::STRATEGY_TIERS[min(count(self::STRATEGY_TIERS) - 1, $tierFrom + $complexity->steps())],
+        ];
     }
 
     /**

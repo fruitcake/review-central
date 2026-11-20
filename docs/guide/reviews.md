@@ -8,6 +8,26 @@
 - **Pull requests from forks**, on the same page, are not reviewed by themselves unless that is turned on: a fork's code is anyone's, and a review runs it in the sandbox with the tenant's AI key and on its budget. Turned on, a pull request from a fork on GitHub is reviewed on every push and on a comment, as any other; off, it waits under **Pull requests**, and a `/review` comment or a question on one gets a reply saying so. On Bitbucket, which keeps no copy of a fork's branch in the repository, a pull request from a fork is never reviewed by itself; it can be [tried](#trying-a-pull-request) from the diff alone.
 - **Instructions** are what the review is told to look for: a method, the defect lenses and a guide per stack. The administrator keeps the defaults; a tenant can copy one and change it for its own repositories. What is saved is what the next review reads.
 
+### By pull request
+
+Under **Review defaults → By pull request** a team can have each pull request classified before its review. A small model, with the AI provider that writes the notes on whose turn, reads the title, the description, the changed files with their size and the diff of the migrations, and calls the pull request **simple**, **normal** or **complex**. It also notes the kind of change and whether it touches the database, breaks what others rely on, matters for security, or has a migration that cannot be undone. Each commit is classified once, so every build of it runs the same.
+
+| Classify each pull request | What happens |
+|---|---|
+| Off (default) | Nothing is classified. |
+| Classify only | The classification and what it would pick show in the run's log and under Run details; the review runs at what is set. |
+| Classify, and run at what it picks | The review runs at the effort and model the classification picks. |
+
+**From effort** and **From model** are where a simple pull request starts; a normal one runs a step higher, a complex one two, up to Extra high and *smartest*:
+
+| From effort | simple | normal | complex |
+|---|---|---|---|
+| Low | Low | Medium | High |
+| Medium (default) | Medium | High | Extra high |
+| High | High | Extra high | Extra high |
+
+The model works the same along *cheapest*, *default* (the default start) and *smartest*, the Laravel AI SDK's tiers. What it picks replaces every reviewer's effort, and Claude Code's and Codex's model; OpenCodeReview keeps its model. A trial that names its own model or effort runs at those. When the classification fails, the review runs at what is set and the log says why. A repository can set all three for itself under **Review settings**. The summary at the top of Review defaults says what each complexity runs at.
+
 ## What the reviewer reads in the repository
 
 A team writes down how its code works, and what counts as a defect there, in the repository itself. The reviewer reads these files where they exist, and they win over its general rules:
