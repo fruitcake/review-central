@@ -74,9 +74,9 @@ class TenantResource extends Resource
                         ->map(fn (string $label, string $name): string => Integrations::configured($name) ? '' : 'Not set up under Settings → Integrations.')
                         ->all())
                     // Kept as what is off, so an app set up later is there for every tenant; shown as what is on.
+                    // No default: a new tenant's null shows as every app on, which a default would turn round.
                     ->formatStateUsing(fn (?array $state): array => array_values(array_diff(array_keys(Integrations::LABELS), $state ?? [])))
                     ->dehydrateStateUsing(fn (?array $state): ?array => array_values(array_diff(array_keys(Integrations::LABELS), $state ?? [])) ?: null)
-                    ->default(array_keys(Integrations::LABELS))
                     ->helperText('Which of the apps set up under Settings → Integrations this tenant\'s connections may sign in through, instead of a pasted token. Signing in with Google is not one of these: who joins by it goes by the sign-in domains.'),
                 Select::make('currency')
                     ->options(Currency::NAMES)

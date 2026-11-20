@@ -121,3 +121,18 @@ it('turns an app off for a tenant on the tenant, keeping what is off', function 
         ->and($tenant->allowsIntegration('jira'))->toBeFalse()
         ->and($tenant->allowsIntegration('asana'))->toBeTrue();
 });
+
+it('creates a tenant with every app on', function () {
+    $this->actingAs(User::factory()->create(['is_admin' => true]));
+    Filament::setCurrentPanel(Filament::getPanel('admin'));
+
+    livewire(ManageTenants::class)
+        ->callAction('create', data: ['name' => 'Beta', 'slug' => 'beta'])
+        ->assertHasNoFormErrors();
+
+    $tenant = Tenant::query()->where('slug', 'beta')->sole();
+
+    expect($tenant->integrations_off)->toBeNull()
+        ->and($tenant->allowsIntegration('asana'))->toBeTrue()
+        ->and($tenant->allowsIntegration('github_app'))->toBeTrue();
+});
