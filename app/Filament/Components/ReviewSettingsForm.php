@@ -243,7 +243,7 @@ class ReviewSettingsForm
 
         // Left to the reviewer, it is known only once a review ran: the newest says what it took.
         $last = $named === null || $value($effort) === null ? self::lastRun($provider) : null;
-        $own = fn (?string $used): string => 'auto, as '.$provider->text().' picks'.($used === null ? '' : " (the last review with it used {$used})");
+        $own = fn (?string $used): string => 'not set, '.$provider->text().' picks'.($used === null ? '' : " (the last review with it used {$used})");
 
         return 'model '.($named === null ? $own($last?->model) : $named.($tierModel === null ? '' : " (Laravel AI's, now {$tierModel})"))
             .', effort '.(($chosen = $value($effort)) === null ? $own($last?->effort) : (ReviewEffort::tryFrom($chosen)?->text() ?? $chosen));
@@ -267,9 +267,9 @@ class ReviewSettingsForm
     protected static function placeholder(?ReviewSetting $defaults, string $field): string
     {
         $default = $defaults?->{$field};
-        // Left empty: the reviewer's own pick, its "auto", as opposed to the
-        // Laravel AI SDK's default, which is a tier to pick by name.
-        $auto = 'Auto: '.match (true) {
+        // Left empty: not set, so the reviewer picks itself, the same way every
+        // time; as opposed to the Laravel AI SDK's default, a tier picked by name.
+        $auto = 'Not set: '.match (true) {
             str_starts_with($field, 'claude_advisor') => 'no advisor',
             str_starts_with($field, 'claude_') => 'Claude Code picks',
             str_starts_with($field, 'codex_') => 'Codex picks',
