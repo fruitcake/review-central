@@ -17,12 +17,14 @@
         @endif
 
         <div class="rc-compare">
-            @foreach ($columns as $label => $column)
+            {{-- The columns left out last, faded: still there to bring back. --}}
+            @foreach ($columns->sortBy(fn ($column, $label) => $comparison->isExcluded($label) ? 1 : 0) as $label => $column)
                 @php($run = $column['run'])
-                <section class="rc-card rc-pad" aria-labelledby="rc-col-{{ $label }}">
+                @php($excluded = $comparison->isExcluded($label))
+                <section @class(['rc-card', 'rc-pad', 'rc-excluded' => $excluded]) aria-labelledby="rc-col-{{ $label }}">
                     <div class="rc-card-head">
                         <div>
-                            <h2 id="rc-col-{{ $label }}">{{ $label }}{{ $label === 'A' ? ' · the review it started from' : '' }}</h2>
+                            <h2 id="rc-col-{{ $label }}">{{ $label }}{{ $label === 'A' ? ' · the review it started from' : '' }}{{ $excluded ? ' · left out' : '' }}</h2>
                             <span class="rc-muted">
                                 @if ($run !== null)
                                     {{ ReviewComparisons::setup($run) }}
@@ -40,6 +42,8 @@
                             <span class="rc-chip rc-chip-running">Waiting</span>
                         @endif
                     </div>
+
+                    <button type="button" class="rc-link-button" wire:click="toggleColumn(@js($label))">{{ $excluded ? 'Bring back' : 'Leave out' }}</button>
 
                     @if ($run === null)
                         <p class="rc-muted">{{ $column['row']['error'] ?? 'Its review has not started yet.' }}</p>
@@ -88,7 +92,7 @@
             @elseif ($comparison->analysis_status === ReviewComparison::ANALYSIS_FAILED)
                 <p>It failed: {{ $comparison->analysis_error }}</p>
             @elseif ($comparison->analysis === null)
-                <p class="rc-muted">{{ $done ? 'Analyse has one model judge every review\'s findings together: which hold, which are false, and who missed what.' : 'Once every review has ended, Analyse has one model judge their findings together.' }}</p>
+                <p class="rc-muted">{{ $done ? 'Analyse has one model judge the findings of the reviews not left out together: which hold, which are false, and who missed what.' : 'Once every review not left out has ended, Analyse has one model judge their findings together.' }}</p>
             @else
                 @if (filled($comparison->analysis['summary'] ?? null))
                     <p>{{ $comparison->analysis['summary'] }}</p>

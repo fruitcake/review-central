@@ -260,6 +260,8 @@
     .rc-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
     .rc-compare ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
     .rc-compare li { display: flex; flex-direction: column; gap: 2px; border-top: 1px solid var(--rc-border); padding-top: 8px; }
+    .rc-excluded { opacity: .55; }
+    .rc-link-button { align-self: flex-start; background: none; border: 0; padding: 0; font-size: 13px; font-weight: 600; color: var(--rc-ink); text-decoration: underline; text-decoration-color: var(--rc-accent); text-underline-offset: 3px; cursor: pointer; }
     .rc-verdict-valid { color: var(--rc-accent-text); }
     .rc-verdict-false_positive { color: var(--rc-danger-text); }
     .rc-steps { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }

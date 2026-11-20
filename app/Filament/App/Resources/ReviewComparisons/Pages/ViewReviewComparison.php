@@ -70,8 +70,8 @@ class ViewReviewComparison extends ViewRecord
             Action::make('analyze')
                 ->label(fn (): string => $this->record->analysis === null ? 'Analyse' : 'Analyse again')
                 ->icon(Heroicon::OutlinedSparkles)
-                ->disabled(fn (): bool => ! $this->record->done() || $this->record->analysis_status === ReviewComparison::ANALYSIS_RUNNING)
-                ->tooltip(fn (): ?string => $this->record->done() ? null : 'Once every review has ended.')
+                ->disabled(fn (): bool => ! $this->record->done() || $this->record->analysis_status === ReviewComparison::ANALYSIS_RUNNING || $this->record->active()->filter(fn (array $column): bool => $column['run'] !== null)->isEmpty())
+                ->tooltip(fn (): ?string => $this->record->done() ? null : 'Once every review not left out has ended.')
                 ->modalHeading('Analyse the reviews together')
                 ->modalDescription('One model reads the pull request\'s diff and every review\'s findings, groups the same issues, says which hold and which are false, and who missed what. It costs one request with the whole diff.')
                 ->schema([
@@ -93,6 +93,19 @@ class ViewReviewComparison extends ViewRecord
                     Notification::make()->title('The analysis is started')->body('This page shows it when it is done.')->success()->send();
                 }),
         ];
+    }
+
+    /**
+     * Leaves a column out of the comparison, or brings it back: left out, it moves
+     * to the end, faded, and is neither waited for, analysed nor scored.
+     */
+    public function toggleColumn(string $label): void
+    {
+        if (! $this->record->columns()->has($label)) {
+            return;
+        }
+
+        $this->record->toggleExcluded($label);
     }
 
     /**

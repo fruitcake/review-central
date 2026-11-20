@@ -23,6 +23,7 @@ use Illuminate\Support\Collection;
  * @property int|null $review_run_id
  * @property int|null $user_id
  * @property array<int, array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool, ignore_existing?: bool, build?: int|null, repository_id?: int, error?: string|null}> $rows
+ * @property array<int, string>|null $excluded the labels of the columns left out
  * @property string|null $analysis_status running, finished or failed
  * @property string|null $analysis_model
  * @property array{summary?: string, labels?: array<int, string>, findings?: array<int, array{title: string, path: string|null, verdict: string, found_by: array<int, string>, reason: string}>}|null $analysis
@@ -56,6 +57,7 @@ class ReviewComparison extends Model
         return [
             'rows' => 'array',
             'analysis' => 'array',
+            'excluded' => 'array',
             'analysis_cost' => 'float',
         ];
     }
@@ -106,11 +108,38 @@ class ReviewComparison extends Model
     }
 
     /**
+     * The columns not left out: what is analysed, scored and waited for.
+     *
+     * @return Collection<string, array{label: string, run: ReviewRun|null, row: array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool, ignore_existing?: bool, build?: int|null, repository_id?: int, error?: string|null}|null}>
+     */
+    public function active(): Collection
+    {
+        return $this->columns()->reject(fn (array $column, string $label): bool => $this->isExcluded($label));
+    }
+
+    public function isExcluded(string $label): bool
+    {
+        return in_array($label, $this->excluded ?? [], true);
+    }
+
+    /**
+     * Leaves a column out, or brings it back.
+     */
+    public function toggleExcluded(string $label): void
+    {
+        $excluded = $this->excluded ?? [];
+
+        $this->update(['excluded' => $this->isExcluded($label)
+            ? array_values(array_diff($excluded, [$label]))
+            : [...$excluded, $label]]);
+    }
+
+    /**
      * Whether every column's review has ended, so the findings can be judged together.
      */
     public function done(): bool
     {
-        return $this->columns()->every(fn (array $column): bool => $column['run'] === null
+        return $this->active()->every(fn (array $column): bool => $column['run'] === null
             ? ($column['row']['error'] ?? null) !== null
             : ! in_array($column['run']->status, [ReviewRun::STATUS_QUEUED, ReviewRun::STATUS_RUNNING, ReviewRun::STATUS_PENDING], true));
     }

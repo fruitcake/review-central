@@ -275,3 +275,50 @@ it('takes more setups later, and keeps an earlier analysis to the reviews it rea
     // C came after the analysis, so it has no scores from it; no "missed" it never had a chance at.
     expect(array_keys(ReviewComparisons::scores($comparison)))->toBe(['A', 'B']);
 });
+
+it('keeps a member off a comparison\'s page', function () {
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [],
+    ]);
+    $member = User::factory()->create();
+    $member->tenants()->attach($this->repository->tenant, ['role' => 'member']);
+    $this->actingAs($member);
+
+    livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])->assertForbidden();
+});
+
+it('leaves a column out, at the end and out of the analysis, and brings it back', function () {
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570/diff' => Http::response("diff --git a/app/Export.php b/app/Export.php\n+x\n"),
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570' => Http::response(['id' => 570, 'title' => 'Add the export']),
+    ]);
+    $connection = Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    ($this->run)(51, [['id' => 'F1', 'title' => 'Noise from B']]);
+    // C still runs, but is left out, so the others can be analysed already.
+    ($this->run)(52, [], ReviewRun::STATUS_RUNNING);
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [['build' => 51], ['build' => 52]],
+    ]);
+
+    livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])
+        ->assertActionDisabled('analyze')
+        ->call('toggleColumn', 'B')
+        // Left out, B moves behind C.
+        ->assertSeeInOrder(['rc-col-A', 'rc-col-C', 'rc-col-B', 'Bring back'])
+        ->call('toggleColumn', 'C')
+        ->assertActionEnabled('analyze');
+
+    expect($comparison->refresh()->excluded)->toBe(['B', 'C']);
+
+    Comparer::fake([['summary' => 'Only A.', 'findings' => []]]);
+    AnalyzeReviewComparison::dispatchSync($comparison->id, $connection->id);
+
+    Comparer::assertPrompted(fn ($prompt): bool => str_contains($prompt->prompt, 'Review A:') && ! str_contains($prompt->prompt, 'Noise from B'));
+    expect(array_keys(ReviewComparisons::scores($comparison->refresh())))->toBe(['A']);
+
+    livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])->call('toggleColumn', 'B');
+
+    expect($comparison->refresh()->excluded)->toBe(['C']);
+});

@@ -141,7 +141,8 @@ class ReviewComparisons
     {
         $source = $comparison->repository->sourceControl();
         $pullRequest = $source->getPullRequest((string) $comparison->pull_request_id) ?? [];
-        $columns = $comparison->columns()->filter(fn (array $column): bool => $column['run'] !== null);
+        // Only the columns not left out.
+        $columns = $comparison->active()->filter(fn (array $column): bool => $column['run'] !== null);
 
         // The diff read is the open pull request's as it is now. A review of another
         // commit is judged against code it did not read, so it is said with it; when
@@ -212,7 +213,7 @@ Of an older commit, '.substr($column['run']->commit, 0, 12).': a finding about c
         $read = $comparison->analysis['labels'] ?? null;
 
         foreach ($comparison->columns() as $label => $column) {
-            if ($column['run'] === null || ($read !== null && ! in_array($label, $read, true))) {
+            if ($column['run'] === null || $comparison->isExcluded($label) || ($read !== null && ! in_array($label, $read, true))) {
                 continue;
             }
 
