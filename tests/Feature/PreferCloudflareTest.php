@@ -4,13 +4,14 @@ use App\Models\Repository;
 use App\Runners\Runners;
 use App\Services\PlatformSettings;
 use App\Services\SetupCheck;
+use Illuminate\Support\Collection;
 
 beforeEach(function () {
     config(['review.default_runner' => null, 'review.docker.enabled' => true, 'review.diff.enabled' => true, 'review.cloudflare.local' => false]);
 });
 
 /** The checks the setup page lists, by title. */
-function setupChecks(): Illuminate\Support\Collection
+function setupChecks(): Collection
 {
     return collect(app(SetupCheck::class)->groups())->flatMap(fn (array $group): array => $group['checks'])->keyBy('title');
 }
