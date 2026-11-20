@@ -142,6 +142,10 @@ it('runs a step in a Cloudflare sandbox: the checkout up through the bucket, the
         && $request->hasHeader('Authorization', 'Bearer worker-token'));
     // Told to go, whether or not it had gone already.
     Http::assertSent(fn (Request $request): bool => $request->method() === 'DELETE' && str_starts_with($request->url(), 'https://sandbox.example.com/runs/review-7-41-review-'));
+    // The reviewer's home goes up as its session alone, without the CLIs and caches beside it.
+    Process::assertRan(fn ($process): bool => str_contains(implode(' ', (array) $process->command), ',home/reviewer,')
+        && in_array('--exclude=./.local', (array) $process->command, true)
+        && in_array('--exclude=./.npm', (array) $process->command, true));
     // Links in what came back are removed before anything is copied.
     Process::assertRan(fn ($process): bool => ((array) $process->command)[0] === 'find' && in_array('-delete', (array) $process->command, true));
 });
@@ -264,6 +268,8 @@ it('keeps a session on a disk too, for a worker that has not got it', function (
     $sessions->store($repository, 'feature/export');
 
     expect(Storage::disk('r2')->allFiles())->toHaveCount(1);
+    // Kept as the session alone: the CLIs and caches stay on this worker.
+    Process::assertRan(fn ($process): bool => ((array) $process->command)[1] === '-czf' && in_array('--exclude=./.local', (array) $process->command, true));
 
     // Another worker: nothing of the branch on its disk.
     File::deleteDirectory(storage_path('framework/testing/review-sessions'));

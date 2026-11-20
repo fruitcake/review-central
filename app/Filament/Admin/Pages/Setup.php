@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Filament\Admin\Pages;
 
+use App\Jobs\DeployCloudflareWorker;
 use App\Jobs\PrepareCloudflareSandbox;
 use App\Runners\Container\CloudflareSandbox;
+use App\Runners\Container\WorkerDeployment;
 use App\Services\SetupCheck;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -57,6 +59,20 @@ class Setup extends Page
                     $setup->askWorker();
 
                     Notification::make()->title('The worker is asked')->body('Its answer shows here once it has looked: refresh in a moment. No answer within a minute means no worker is listening.')->success()->send();
+                }),
+            // This installation's copy of the Worker, deployed with the account and
+            // token under Settings: the first time, and after an update.
+            Action::make('deployWorker')
+                ->label('Deploy the Worker')
+                ->icon(Heroicon::OutlinedCloudArrowUp)
+                ->color('gray')
+                ->visible(fn (): bool => WorkerDeployment::ready())
+                ->requiresConfirmation()
+                ->modalDescription('Wrangler deploys the Cloudflare Worker from this installation\'s copy, makes the bucket when it is not there, and gives the Worker the token this installation asks it with. On the reviews\' queue, whose worker needs Node 20 or later; a first deploy installs Wrangler and takes a few minutes.')
+                ->action(function (): void {
+                    DeployCloudflareWorker::ask();
+
+                    Notification::make()->title('The Worker is being deployed')->body('On the reviews\' queue. This page says how it went: refresh in a few minutes.')->success()->send();
                 }),
             // The sandbox's tools, installed and kept as a snapshot before the first
             // review needs them, instead of by it.

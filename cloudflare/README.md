@@ -46,6 +46,16 @@ Add two lifecycle rules:
 
 Not under `review/snapshots/`, where the Worker notes its snapshot.
 
+## Or deploy it from review-central
+
+Steps 1 to 3 can also be left to review-central itself, from the machine that runs its reviews' queue (Node 20 or later):
+
+1. In the Cloudflare dashboard, [create an API token](https://dash.cloudflare.com/profile/api-tokens) for the account with **Workers Scripts**, **Containers** and **Workers R2 Storage**: Edit, and **Account Settings**: Read. For the bucket's own keys: R2 → Manage API tokens → Create API token, with Object Read & Write on the bucket.
+2. Under **Admin → Settings → Cloudflare sandboxes**, set the account ID, that token, and the bucket's keys. The Worker's name and the bucket's default to `review-central-sandbox` and `review-central`.
+3. On **Admin → Setup**, press **Deploy the Worker**. On the reviews' queue it installs Wrangler, makes the bucket when it is not there, deploys the Worker with those names, and gives it a token it makes. The Worker's address and that token are kept under Settings; the setup page shows how the deploy went, with what Wrangler printed.
+
+Press it again after an update: the setup page says when the Worker runs an older version. The same from a shell is `php artisan review:deploy-worker`, which also takes `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` from the environment. What `.env` sets always goes before what is under Settings.
+
 ## 2. The Worker
 
 Pick a long random token. It is the only thing between the internet and a machine that runs commands, so treat it as a password.
@@ -135,6 +145,7 @@ Other traffic leaves the sandbox as it did: Composer, npm and the CLIs' own upda
 - **The first review installs the tools**, which takes a few minutes; the ones after it start from the snapshot. The reviewer's own CLI (Claude Code, Codex, OpenCodeReview, Pi) is installed by its script when the image has none.
 - **PHP 8.1 to 8.5**, where the reviewer's Docker image goes back to 5.6. An older repository is reviewed on the newest; Composer runs with `--ignore-platform-reqs`, as it does on Docker.
 - **The Composer cache is the destination branch's `vendor/`**, one per repository, in the bucket under `review/cache/<repository>/`. A review fetches it, and Composer installs only what the pull request's lock changes. It is kept again only by a review whose lock is the destination branch's, written right after the install, so what is kept is never a pull request's own packages. Composer's own download cache does not travel.
+- **The session travels, the caches do not.** A follow-up review takes the reviewer's session along (a few MB), not the CLIs and caches in its home (`.local`, `.npm`, `.tools`, `.cache`, `.composer`, together hundreds of MB): the sandbox installs a newer CLI than its snapshot has itself, in seconds.
 - **No memory figure**: a sandbox does not say what it used.
 - **The reviewer's key is not in the sandbox**, where it is in the Docker container: the Worker puts it in on the way to the provider (above). The sandbox has the internet and no credential for the repository's host.
 

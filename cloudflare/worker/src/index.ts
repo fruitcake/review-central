@@ -40,7 +40,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
  * after one is told apart. tests/Feature/CloudflareWorkerVersionTest.php fails
  * on a change that leaves it as it was.
  */
-const WORKER_VERSION = "2026-11-20.2";
+const WORKER_VERSION = "2026-11-20.4";
 
 interface Env {
   REVIEW_SANDBOX: DurableObjectNamespace<ReviewSandbox>;
@@ -108,6 +108,12 @@ const INTERCEPT_CA = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 
 /** The system's bundle, which the certificate is added to: OpenSSL's and Rust's default. */
 const SYSTEM_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt";
+
+/**
+ * What the reviewer's home holds that is no session: CLIs and caches, hundreds of
+ * megabytes, which are not handed back. As ReviewSessions::CACHES in review-central.
+ */
+const HOME_CACHES = [".local", ".npm", ".tools", ".cache", ".composer"];
 
 /** What a cache may be called: the review's own names, never a path elsewhere. */
 const CACHE_KEY = /^review\/cache\/[A-Za-z0-9_-]+\/vendor-[a-z0-9-]+\.tar$/;
@@ -625,7 +631,7 @@ export class ReviewSandbox extends DurableObject<Env> {
         "sh",
         "-c",
         'cd /work || exit 1; kept=""; for file in "$@"; do if [ -f "$file" ] && [ ! -L "$file" ]; then kept="$kept work/$file"; fi; done; ' +
-          "cd / && tar -czf /tmp/review-output.tar.gz --ignore-failed-read home/reviewer $kept",
+          `cd / && tar -czf /tmp/review-output.tar.gz --ignore-failed-read ${HOME_CACHES.map((cache) => `--exclude=home/reviewer/${cache}`).join(" ")} home/reviewer $kept`,
         "keep",
         ...spec.keep,
       ],

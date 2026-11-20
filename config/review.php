@@ -224,6 +224,16 @@ return [
         // which the Worker swaps for the key in a request to the provider's host.
         // Off only for a reviewer that will not trust the Worker's certificate.
         'proxy_keys' => (bool) env('REVIEW_CLOUDFLARE_PROXY_KEYS', true),
+        // What deploys the Worker from here (`php artisan review:deploy-worker`, or
+        // Deploy on the setup page): the account, an API token that may edit its
+        // Workers, containers and R2, and the Worker's name. The same can be set
+        // under Settings, which fills what is empty here, as for the address,
+        // the token and the bucket's keys.
+        'account' => env('CLOUDFLARE_ACCOUNT_ID'),
+        'api_token' => env('CLOUDFLARE_API_TOKEN'),
+        // Empty here, so the name under Settings can fill it; the deploy falls
+        // back to review-central-sandbox.
+        'worker' => env('REVIEW_CLOUDFLARE_WORKER'),
         // What an instance has, and what Cloudflare charges for it in dollars, to
         // estimate what a review's sandbox cost: memory and disk for the time it
         // ran, and a processor for all of that time, which is the most it can be.

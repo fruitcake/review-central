@@ -10,6 +10,7 @@ use App\Models\CapacitySample;
 use App\Models\ModelPrice;
 use App\Models\ReviewInstruction;
 use App\Runners\Container\CloudflareSandbox;
+use App\Runners\Container\WorkerDeployment;
 use App\Runners\Runners;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
@@ -366,15 +367,20 @@ class SetupCheck
         $bucket = ['R2_ACCESS_KEY_ID' => $disk['key'] ?? null, 'R2_SECRET_ACCESS_KEY' => $disk['secret'] ?? null, 'R2_BUCKET' => $disk['bucket'] ?? null, 'R2_ENDPOINT' => $disk['endpoint'] ?? null];
         $missing = array_keys(array_filter($bucket, fn (mixed $value): bool => blank($value)));
 
+        $deploy = $this->cloudflareDeploy();
+
         if (blank($url) && blank($token) && count($missing) === count($bucket)) {
             return [[
                 'state' => self::NOTE, 'title' => $title,
-                'detail' => 'Not set up; reviewers run in Docker on the worker. To run them in a Cloudflare sandbox instead:',
+                'detail' => WorkerDeployment::ready()
+                    ? 'Not deployed yet; reviewers run in Docker on the worker. The account and API token are set: Deploy the Worker, above, deploys it.'
+                    : 'Not set up; reviewers run in Docker on the worker. To run them in a Cloudflare sandbox instead:',
                 'fix' => $this->cloudflareSteps(),
-            ]];
+            ], ...($deploy === null ? [] : [$deploy])];
         }
 
         $checks = [
+            ...($deploy === null ? [] : [$deploy]),
             $this->check(
                 filled($url) && filled($token),
                 "{$title}: the Worker's address and token",
@@ -404,11 +410,39 @@ class SetupCheck
     }
 
     /**
+     * How the last deploy from here went, while that is worth saying.
+     *
+     * @return array{state: string, title: string, detail: string, fix: string|null}|null
+     */
+    protected function cloudflareDeploy(): ?array
+    {
+        $title = 'Cloudflare sandboxes: the deploy from here';
+
+        if (Cache::has(WorkerDeployment::DEPLOYING)) {
+            return ['state' => self::NOTE, 'title' => $title, 'detail' => 'Being deployed, on the reviews\' queue: refresh in a moment.', 'fix' => null];
+        }
+
+        $last = Cache::get(WorkerDeployment::RESULT);
+
+        if (! is_array($last)) {
+            return null;
+        }
+
+        $when = CarbonImmutable::createFromTimestamp((int) ($last['at'] ?? 0))->diffForHumans();
+
+        return ($last['ok'] ?? false)
+            ? ['state' => self::OK, 'title' => $title, 'detail' => "Version {$last['version']} deployed {$when}, at {$last['url']}.", 'fix' => null]
+            : ['state' => self::WRONG, 'title' => $title, 'detail' => "It failed {$when}: {$last['error']}", 'fix' => "What it printed last:\n\n```\n".implode("\n", array_slice(explode("\n", (string) ($last['log'] ?? '')), -30))."\n```"];
+    }
+
+    /**
      * Every step from nothing, in this installation's own words.
      */
     protected function cloudflareSteps(): string
     {
         return implode("\n", [
+            '**From here**: on a machine whose reviews\' queue has Node 20 or later, set the Cloudflare account, an API token and the bucket\'s keys under Settings → Cloudflare sandboxes, then press Deploy the Worker above. It makes the bucket, deploys the Worker and keeps its address and token. Or by hand:',
+            '',
             '1. **A Cloudflare account on the Workers Paid plan** ($5 a month): sandboxes run on Containers, which the free plan does not have.',
             '2. **The bucket**, from any machine with Node 20 or later and a checkout of review-central, your own laptop as well as this server: the Worker is deployed to Cloudflare, not installed here. `cd cloudflare/worker && npm install && npx wrangler login && npx wrangler r2 bucket create review-central`.',
             '3. **Its keys**: in the Cloudflare dashboard, R2 → Manage API tokens → Create API token, with Object Read & Write on that bucket only. Keep the access key id, the secret access key and the S3 endpoint it shows. Add lifecycle rules on the bucket that delete what is under `review/sandbox/` after a day, and what is under `review/cache/` (the vendor/ of each repository) after 14 days.',
@@ -455,7 +489,9 @@ class SetupCheck
                 $deployed === $expected,
                 'Cloudflare sandboxes: the Worker is up to date',
                 "Version {$expected}, as this installation has it.",
-                'Deploy it again from a checkout of this version: `cd cloudflare/worker && npx wrangler deploy`.',
+                WorkerDeployment::ready()
+                    ? 'Deploy the Worker, above, deploys this version.'
+                    : 'Deploy it again from a checkout of this version: `cd cloudflare/worker && npx wrangler deploy`, or set the account and API token under Settings and deploy it from here.',
                 is_string($deployed) ? "It runs version {$deployed}; this installation has {$expected}." : "It runs code from before it said its version; this installation has {$expected}.",
             );
         }

@@ -262,15 +262,17 @@ class CloudflareSandbox extends Sandbox
 
         // Names are moved under their place in the sandbox; where a link points is
         // left as it was written.
-        $add = fn (string $mode, string $from, string $as) => Process::timeout(600)
-            ->run(['tar', $mode, $archive, '--owner=0', '--group=0', "--transform=flags=rh;s,^\\.,{$as},", '-C', $from, '.'])
+        $add = fn (string $mode, string $from, string $as, array $exclude = []) => Process::timeout(600)
+            ->run(['tar', $mode, $archive, '--owner=0', '--group=0', ...$exclude, "--transform=flags=rh;s,^\\.,{$as},", '-C', $from, '.'])
             ->throw();
 
         $add('-cf', $workDirectory, 'work');
         $add('-rf', resource_path('review/skill'), 'work/.review/skill');
 
         if ($home !== null && is_dir($home)) {
-            $add('-rf', $home, 'home/reviewer');
+            // The session alone: the CLIs and caches beside it are installed again
+            // in the sandbox faster than they travel there and back.
+            $add('-rf', $home, 'home/reviewer', ReviewSessions::excluded());
         }
 
         Process::timeout(600)->run(['gzip', '--fast', $archive])->throw();
