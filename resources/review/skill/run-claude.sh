@@ -168,6 +168,8 @@ printf '\n-------------------- Reviewing --------------------\n'
 # The review's duration starts here, after the CLI update,
 # and only transcripts written from here on are counted (collect-usage.sh).
 touch "${REVIEW_USAGE_SINCE:-.review-started}"
+# On a developer's machine the project's settings are the point; here they are the pull request's.
+[ "${REVIEW_LOCAL:-false}" = "true" ] || reviewer_drop_project_settings
 reviewer_env_report 'ANTHROPIC_API_KEY|ANTHROPIC_BASE_URL|CLAUDE_CODE_[A-Z0-9_]+|CLAUDE_CONFIG_DIR'
 {
   # CLAUDE_REVIEW_MAX_BUDGET caps the review in dollars, 10 by default, so a review

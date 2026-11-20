@@ -12,6 +12,8 @@ Review Central holds credentials for source control, ticket trackers and AI prov
 
 No runner starts a server from the checkout or runs Composer scripts or plugins. The reviewer never gets a credential for the repository's host or for this server.
 
+The reviewer's CLI runs with the review's own settings, not the pull request's: `.claude/settings.json`, `.claude/settings.local.json`, `.codex/` and `.pi/` are removed from the checkout before it starts, and Claude Code runs with every hook off. A pull request's skills and `CLAUDE.md` are still read, as text. The review step gets only the keys of the reviewer that runs; Pi on a trial, which reviews with whichever provider there is, gets them all. Of a cached `vendor/` archive only `vendor/` is unpacked.
+
 ## Running it safely
 
 - **Pick the runner that fits the code.** The diff runner is the safe default. Docker and Cloudflare give a better review, because the reviewer reads the code around a change, and they isolate it.
