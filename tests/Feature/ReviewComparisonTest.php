@@ -1,0 +1,164 @@
+<?php
+
+use App\Exceptions\ReviewTrialRefused;
+use App\Filament\App\Resources\ReviewComparisons\Pages\ListReviewComparisons;
+use App\Filament\App\Resources\ReviewComparisons\Pages\ViewReviewComparison;
+use App\Filament\App\Resources\ReviewRuns\Pages\ViewReviewRun;
+use App\Jobs\AnalyzeReviewComparison;
+use App\Llm\Agents\Comparer;
+use App\Models\Connection;
+use App\Models\Repository;
+use App\Models\ReviewComparison;
+use App\Models\ReviewRun;
+use App\Models\Tenant;
+use App\Models\User;
+use App\Services\ReviewComparisons;
+use App\Services\ReviewTrial;
+use Filament\Facades\Filament;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+
+use function Pest\Livewire\livewire;
+
+beforeEach(function () {
+    $this->repository = Repository::factory()->create(['slug' => 'shop']);
+    $this->user = User::factory()->create();
+    $this->user->tenants()->attach($this->repository->tenant, ['role' => 'admin']);
+    $this->actingAs($this->user);
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+    Filament::setTenant($this->repository->tenant);
+    Filament::bootCurrentPanel();
+
+    $this->run = fn (?int $build, array $findings, string $status = ReviewRun::STATUS_FINISHED, array $attributes = []): ReviewRun => ReviewRun::query()->create($attributes + [
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'feature/export', 'commit' => str_repeat('a', 40), 'pull_request_id' => 570, 'status' => $status, 'started_at' => now(),
+        'build_number' => $build, 'agent' => 'claude-code', 'model' => 'claude-opus-5-5', 'effort' => 'high', 'findings' => $findings,
+    ]);
+
+    $this->base = ($this->run)(41, [['id' => 'F1', 'severity' => 'MEDIUM', 'title' => 'Export leaks invoices', 'path' => 'app/Export.php', 'line' => 12]]);
+});
+
+it('starts a trial for each setup from a review, and shows them side by side with it', function () {
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    Connection::factory()->openai()->create(['tenant_id' => $this->repository->tenant_id]);
+    $this->mock(ReviewTrial::class)->shouldReceive('begin')
+        ->twice()
+        ->andReturn(['repository' => $this->repository, 'build' => 51], ['repository' => $this->repository, 'build' => 52]);
+
+    livewire(ViewReviewRun::class, ['record' => $this->base->uuid])
+        ->callAction('compare', [
+            'ignore_existing' => true,
+            'rows' => [
+                ['provider' => 'codex-cli', 'model' => 'gpt-test', 'effort' => 'xhigh'],
+                ['provider' => 'claude-code', 'effort' => 'low'],
+            ],
+        ])
+        ->assertHasNoActionErrors();
+
+    $comparison = ReviewComparison::query()->sole();
+
+    expect($comparison->review_run_id)->toBe($this->base->id)
+        ->and(array_column($comparison->rows, 'build'))->toBe([51, 52])
+        ->and($comparison->rows[0])->toMatchArray(['provider' => 'codex-cli', 'model' => 'gpt-test', 'effort' => 'xhigh', 'ignore_existing' => true]);
+
+    ($this->run)(51, [['id' => 'F1', 'severity' => 'LOW', 'title' => 'Export is slow']], attributes: ['agent' => 'codex-cli', 'model' => 'gpt-test', 'effort' => 'xhigh']);
+
+    livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])
+        ->assertSee('A · the review it started from')
+        ->assertSee('Export leaks invoices')
+        ->assertSee('codex-cli · gpt-test · effort xhigh')
+        ->assertSee('Export is slow')
+        // C has not started yet, so it cannot be analysed.
+        ->assertSee('Its review has not started yet.')
+        ->assertActionDisabled('analyze');
+});
+
+it('keeps why a setup could not be tried, and starts the others', function () {
+    $this->mock(ReviewTrial::class)->shouldReceive('begin')
+        ->twice()
+        ->andReturnUsing(fn (Tenant $tenant, string $url, array $options): array => $options['runner'] === 'diff'
+            ? throw new ReviewTrialRefused('Reviewing from the diff alone is turned off on this installation.')
+            : ['repository' => $this->repository, 'build' => 52]);
+
+    $comparison = app(ReviewComparisons::class)->start($this->base, [
+        ['runner' => 'diff', 'provider' => null, 'model' => null, 'effort' => null, 'verify' => false],
+        ['runner' => null, 'provider' => 'codex-cli', 'model' => null, 'effort' => null, 'verify' => false],
+    ], true, $this->user);
+
+    expect($comparison->rows[0]['error'])->toBe('Reviewing from the diff alone is turned off on this installation.')
+        ->and($comparison->rows[1]['build'])->toBe(52)
+        ->and($comparison->done())->toBeFalse();
+
+    ($this->run)(52, []);
+
+    expect($comparison->refresh()->done())->toBeTrue();
+});
+
+it('has one model judge the findings together, and scores each setup', function () {
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570/diff' => Http::response("diff --git a/app/Export.php b/app/Export.php\n+return Invoice::all();\n"),
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570' => Http::response(['id' => 570, 'title' => 'Add the export', 'description' => 'Adds it.']),
+    ]);
+    $connection = Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    ($this->run)(51, [['id' => 'F1', 'severity' => 'MEDIUM', 'title' => 'All invoices are exported'], ['id' => 'F2', 'severity' => 'LOW', 'title' => 'No rate limit']]);
+    ($this->run)(52, [['id' => 'F1', 'severity' => 'HIGH', 'title' => 'SQL injection']]);
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [['build' => 51], ['build' => 52]],
+    ]);
+
+    Comparer::fake([[
+        'summary' => 'B found what A found, and more.',
+        'findings' => [
+            ['title' => 'Every company\'s invoices are exported', 'path' => 'app/Export.php', 'verdict' => 'valid', 'found_by' => ['A-F1', 'B-F1'], 'reason' => 'Invoice::all() has no tenant scope.'],
+            ['title' => 'SQL injection', 'path' => null, 'verdict' => 'false_positive', 'found_by' => ['C-F1', 'Z-F9'], 'reason' => 'No raw SQL in the diff.'],
+            ['title' => 'No rate limit', 'path' => null, 'verdict' => 'valid', 'found_by' => ['B-F2'], 'reason' => 'The export is public.'],
+        ],
+    ]]);
+
+    AnalyzeReviewComparison::dispatchSync($comparison->id, $connection->id, 'smartest');
+    $comparison->refresh();
+
+    expect($comparison->analysis_status)->toBe(ReviewComparison::ANALYSIS_FINISHED)
+        // An id no review has is left out.
+        ->and($comparison->analysis['findings'][1]['found_by'])->toBe(['C-F1'])
+        ->and(ReviewComparisons::scores($comparison))->toBe([
+            'A' => ['valid' => 1, 'false_positive' => 0, 'unclear' => 0, 'missed' => 1],
+            'B' => ['valid' => 2, 'false_positive' => 0, 'unclear' => 0, 'missed' => 0],
+            'C' => ['valid' => 0, 'false_positive' => 1, 'unclear' => 0, 'missed' => 2],
+        ]);
+
+    Comparer::assertPrompted(fn ($prompt): bool => str_contains($prompt->prompt, 'A-F1 · MEDIUM · Export leaks invoices')
+        && str_contains($prompt->prompt, '+return Invoice::all();')
+        && str_contains($prompt->prompt, 'Review C: claude-code'));
+
+    livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])
+        ->assertSee('B found what A found, and more.')
+        ->assertSee('False positive')
+        ->assertActionEnabled('analyze');
+});
+
+it('queues the analysis from the page once every review has ended', function () {
+    Queue::fake();
+    $connection = Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [],
+    ]);
+
+    livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])
+        ->callAction('analyze', ['connection' => $connection->id, 'model' => 'default'])
+        ->assertHasNoActionErrors();
+
+    expect($comparison->refresh()->analysis_status)->toBe(ReviewComparison::ANALYSIS_RUNNING);
+    Queue::assertPushed(AnalyzeReviewComparison::class, fn (AnalyzeReviewComparison $job): bool => $job->connectionId === $connection->id && $job->model === 'default');
+});
+
+it('is for the tenant\'s admins only', function () {
+    $member = User::factory()->create();
+    $member->tenants()->attach($this->repository->tenant, ['role' => 'member']);
+    $this->actingAs($member);
+
+    livewire(ViewReviewRun::class, ['record' => $this->base->uuid])->assertActionHidden('compare');
+    livewire(ListReviewComparisons::class)->assertForbidden();
+});

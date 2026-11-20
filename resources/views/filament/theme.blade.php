@@ -257,6 +257,11 @@
     .rc-turn-history ol { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; border-left: 2px solid var(--rc-border); }
     .rc-turn-history li { display: flex; gap: 10px; align-items: baseline; padding-left: 12px; font-size: 13px; }
     .rc-turn-history li .rc-muted { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-size: 12px; }
+    .rc-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+    .rc-compare ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+    .rc-compare li { display: flex; flex-direction: column; gap: 2px; border-top: 1px solid var(--rc-border); padding-top: 8px; }
+    .rc-verdict-valid { color: var(--rc-accent-text); }
+    .rc-verdict-false_positive { color: var(--rc-danger-text); }
     .rc-steps { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
     .rc-steps caption { text-align: left; padding-bottom: 4px; }
     .rc-steps th { text-align: left; font-weight: 500; color: var(--rc-muted); padding: 4px 0; }

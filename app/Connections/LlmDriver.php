@@ -64,4 +64,12 @@ interface LlmDriver extends ConnectionDriver
      * structured output, with the tokens and model it took.
      */
     public function classifies(Connection $connection, string $text): AgentResponse;
+
+    /**
+     * Several reviews of one pull request judged together, by the model asked for:
+     * the Comparer's structured output, with the tokens and model it took.
+     *
+     * @param  string|null  $model  a Laravel AI tier or a model by name; the provider's smartest when none
+     */
+    public function compares(Connection $connection, string $text, ?string $model = null): AgentResponse;
 }
