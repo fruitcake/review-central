@@ -64,15 +64,14 @@ class ReviewDefaults extends Page
 
     public function getSubheading(): string|Htmlable|null
     {
-        return 'For every repository of '.CurrentTenant::get()->name.' that does not set its own. The model and effort of Claude and Codex are set with their AI provider.';
+        return 'For every repository of '.CurrentTenant::get()->name.' that does not set its own: which reviewer runs, and at which model and effort. The AI providers hold only the keys.';
     }
 
     public function form(Schema $schema): Schema
     {
         return $schema
-            // Claude's and Codex's model and effort are set with the AI provider they run on.
             ->components([
-                Section::make()->schema(ReviewSettingsForm::fields(withProviders: false)),
+                Section::make('Who reviews')->schema(ReviewSettingsForm::fields()),
                 Section::make('Trusted accounts')
                     ->description('For every repository of this team. The accounts whose pull requests a repository that reviews only theirs reviews by itself, and who may comment /review when only they may. The others\' pull requests wait under Pull requests for someone here to start them.')
                     ->schema([

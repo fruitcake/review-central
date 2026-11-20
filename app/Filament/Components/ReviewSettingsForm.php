@@ -8,13 +8,16 @@ use App\Filament\CurrentTenant;
 use App\Models\ModelPrice;
 use App\Models\ReviewSetting;
 use App\Services\Currency;
+use App\Services\ReviewCredentials;
 use App\Services\ReviewSettings;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Fieldset;
+use Filament\Schemas\Components\Text;
 use Filament\Schemas\Components\Utilities\Get;
+use Illuminate\Support\HtmlString;
 
 /**
  * Which reviewer runs, and at what model and effort: the tenant's defaults, and a
@@ -30,8 +33,12 @@ class ReviewSettingsForm
     public static function fields(?ReviewSetting $defaults = null, bool $withProviders = true): array
     {
         return [
+            // What runs as the form stands, before anything else: which reviewer,
+            // in which order, at which model and effort.
+            Text::make(fn (Get $get): HtmlString => self::summary($get, $defaults))->key('summary'),
             Repeater::make('providers')
-                ->label('Reviewers')
+                ->label('Reviewers, in order')
+                ->live()
                 ->schema([
                     Select::make('provider')
                         ->label('Reviewer')
@@ -62,11 +69,14 @@ class ReviewSettingsForm
                 ->defaultItems(0)
                 ->reorderable()
                 ->addActionLabel('Add reviewer')
-                ->helperText('Each pull request gets one of these reviewers, picked by share from the ones there is a key for, and keeps it for every push. A share of 0 is only used when nothing else can run. '
-                    .'A reviewer whose reviews have cost its monthly budget, across the tenant, is passed over for the rest of the month. So to use one reviewer until its budget is spent and another after that, give the first a share and a budget, and the second a share of 0. When every reviewer is over its budget the review still runs, as though none were set. '
-                    .($defaults === null ? 'Empty leaves it to the keys: Claude when there is an Anthropic key, Codex otherwise.' : 'Empty uses the defaults.')),
-            ...($withProviders ? [Fieldset::make('Claude')->columns(2)->schema(self::claudeFields($defaults)), Fieldset::make('Codex')->columns(2)->schema(self::codexFields($defaults))] : []),
-            Fieldset::make('OpenCodeReview')
+                ->helperText('Each pull request gets one of these, picked by share among those there is a key for, and keeps it for every push. A share of 0 runs only when nothing above it can. '
+                    .'One whose reviews have cost its monthly budget is passed over for the rest of the month: to use one until its budget is spent and another after, give the first a share and a budget and the second a share of 0. '
+                    .($defaults === null ? 'Empty leaves it to the keys: Claude Code with an Anthropic key, else Codex.' : 'Empty uses the defaults.')),
+            ...($withProviders ? [
+                Fieldset::make(ReviewProvider::ClaudeCode->text())->columns(2)->schema(self::claudeFields($defaults)),
+                Fieldset::make(ReviewProvider::CodexCli->text())->columns(2)->schema(self::codexFields($defaults)),
+            ] : []),
+            Fieldset::make(ReviewProvider::Ocr->text())
                 ->columns(2)
                 ->schema([
                     // No tier and no alias: OpenCodeReview picks its own provider and passes the name on as it is,
@@ -155,6 +165,71 @@ class ReviewSettingsForm
         ];
     }
 
+    /**
+     * Which reviewer a pull request gets as the form stands, and at what: the list
+     * in its order with each one's share and budget, or the one the keys decide on,
+     * and the model and effort it runs at.
+     */
+    protected static function summary(Get $get, ?ReviewSetting $defaults): HtmlString
+    {
+        $tenant = CurrentTenant::get();
+        $keys = app(ReviewCredentials::class)->reviewers($tenant);
+        $entries = array_values(array_filter((array) ($get('providers') ?? []), fn (mixed $entry): bool => is_array($entry) && filled($entry['provider'] ?? null)));
+
+        if ($entries === [] && $defaults !== null) {
+            return new HtmlString('<p class="rc-muted">No reviewers of its own: it uses the team\'s, from Review defaults, with the model and effort set below where they are.</p>');
+        }
+
+        if ($entries === []) {
+            $picked = match (true) {
+                in_array(ReviewProvider::ClaudeCode->value, $keys, true) => ReviewProvider::ClaudeCode,
+                in_array(ReviewProvider::CodexCli->value, $keys, true) => ReviewProvider::CodexCli,
+                default => null,
+            };
+
+            return new HtmlString($picked === null
+                ? '<p><strong>No reviewer can run:</strong> add an AI provider first.</p>'
+                : '<p><strong>Every pull request is reviewed by '.e($picked->text()).'</strong>, '.e(self::runsAt($get, $picked, $defaults)).'. None is listed, so the keys decide: Claude Code with an Anthropic key, else Codex.</p>');
+        }
+
+        $items = collect($entries)->map(function (array $entry) use ($get, $keys, $defaults): string {
+            $provider = ReviewProvider::tryFrom((string) $entry['provider']);
+            $share = (int) ($entry['share'] ?? 0);
+            $notes = array_filter([
+                $share === 0 ? 'only when none above can run' : null,
+                filled($entry['budget'] ?? null) ? 'up to '.Currency::showOwn((float) $entry['budget']).' a month' : null,
+                $provider !== null && ! in_array($provider->value, $keys, true) ? 'no key for it, so passed over' : null,
+            ]);
+
+            return '<li><strong>'.e($provider?->text() ?? (string) $entry['provider']).'</strong>'
+                .($share > 0 ? ' · share '.$share : '')
+                .($provider === null ? '' : ', '.e(self::runsAt($get, $provider, $defaults)))
+                .($notes === [] ? '' : ' <span class="rc-muted">('.e(implode('; ', $notes)).')</span>').'</li>';
+        })->implode('');
+
+        return new HtmlString('<p><strong>Each pull request is reviewed by one of these</strong>, by share, and keeps it for every push:</p><ul class="rc-summary-list">'.$items.'</ul>');
+    }
+
+    /**
+     * The model and effort a reviewer runs at, in words: as set, a tier with the
+     * model it is now, or what the defaults or the reviewer itself decide.
+     */
+    protected static function runsAt(Get $get, ReviewProvider $provider, ?ReviewSetting $defaults): string
+    {
+        [$model, $effort, $driver] = match ($provider) {
+            ReviewProvider::ClaudeCode => ['claude_model', 'claude_effort', 'anthropic'],
+            ReviewProvider::CodexCli => ['codex_model', 'codex_effort', 'openai'],
+            default => ['ocr_model', 'ocr_effort', null],
+        };
+
+        $value = fn (string $field): ?string => filled($get($field)) ? (string) $get($field) : (filled($defaults?->{$field}) ? (string) ($defaults->{$field} instanceof ReviewEffort ? $defaults->{$field}->value : $defaults->{$field}) : null);
+        $named = $value($model);
+        $tierModel = $named !== null && $driver !== null && in_array($named, ReviewSettings::TIERS, true) ? (ReviewSettings::tierModels($driver)[$named] ?? null) : null;
+
+        return 'model '.($named === null ? 'as the reviewer decides' : $named.($tierModel === null ? '' : " (now {$tierModel})"))
+            .', effort '.(($effort = $value($effort)) === null ? 'as the reviewer decides' : (ReviewEffort::tryFrom($effort)?->text() ?? $effort));
+    }
+
     protected static function placeholder(?ReviewSetting $defaults, string $field): string
     {
         $default = $defaults?->{$field};
@@ -196,6 +271,7 @@ class ReviewSettingsForm
         };
 
         return Select::make($field)
+            ->live()
             ->label('Model')
             ->searchable()
             ->options($choices)
@@ -282,6 +358,7 @@ class ReviewSettingsForm
     protected static function effort(?ReviewSetting $defaults, string $field): Select
     {
         return Select::make($field)
+            ->live()
             ->label('Effort')
             ->options(collect(ReviewEffort::cases())->mapWithKeys(fn (ReviewEffort $effort): array => [$effort->value => $effort->text()])->all())
             ->placeholder(self::placeholder($defaults, $field));

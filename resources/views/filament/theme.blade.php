@@ -242,6 +242,8 @@
     .rc-details { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 0; font-size: 13px; }
     .rc-details dt { color: var(--rc-muted); }
     .rc-details dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+    /* Which reviewer runs, as the review settings stand. */
+    .rc-summary-list { list-style: disc; padding-left: 20px; margin: 6px 0 0; display: flex; flex-direction: column; gap: 2px; }
     /* Whose turn a pull request is: in the list, and in its details. */
     .rc-turn { display: flex; flex-direction: column; gap: 2px; max-width: 34rem; white-space: normal; }
     .rc-turn-who { font-weight: 700; color: var(--rc-ink); display: inline-flex; align-items: center; gap: 6px; }
