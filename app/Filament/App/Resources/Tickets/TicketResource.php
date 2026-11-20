@@ -8,6 +8,7 @@ use App\Enums\ConnectionKind;
 use App\Enums\TicketStyle;
 use App\Filament\App\Resources\Connections\ConnectionResource;
 use App\Filament\App\Resources\Tickets\Pages\ManageTickets;
+use App\Filament\Concerns\ForTenantAdmins;
 use App\Filament\CurrentTenant;
 use App\Models\Connection;
 use App\Models\TicketSource;
@@ -39,6 +40,8 @@ use LogicException;
  */
 class TicketResource extends Resource
 {
+    use ForTenantAdmins;
+
     protected static ?string $model = TicketSource::class;
 
     protected static ?string $modelLabel = 'ticket source';

@@ -3,8 +3,10 @@
 namespace App\Filament\Admin\Resources\Tenants;
 
 use App\Filament\Admin\Resources\Tenants\Pages\ManageTenants;
+use App\Filament\TenantRole;
 use App\Filament\Themes;
 use App\Models\Tenant;
+use App\Models\User;
 use App\Services\Currency;
 use App\Services\PlatformSettings;
 use BackedEnum;
@@ -58,7 +60,21 @@ class TenantResource extends Resource
                     ->relationship('users', 'name')
                     ->multiple()
                     ->preload()
+                    ->live()
                     ->helperText('Who may open this tenant. An administrator may open every tenant.'),
+                Select::make('admins')
+                    ->label('Its admins')
+                    ->multiple()
+                    ->options(fn (Get $get): array => User::query()->whereKey($get('users') ?? [])->orderBy('name')->pluck('name', 'id')->all())
+                    ->afterStateHydrated(fn (Select $component, ?Tenant $record) => $component->state($record?->users()->wherePivot('role', TenantRole::ADMIN)->pluck('users.id')->all() ?? []))
+                    // Saved after the people above, as their role in it.
+                    ->dehydrated(false)
+                    ->saveRelationshipsUsing(function (Tenant $record, ?array $state): void {
+                        foreach ($record->users()->pluck('users.id') as $id) {
+                            $record->users()->updateExistingPivot($id, ['role' => in_array($id, $state ?? []) ? TenantRole::ADMIN : TenantRole::MEMBER]);
+                        }
+                    })
+                    ->helperText('Of the people above, who manage its connections, keys, apps, settings and members. The others are members: they read, rate and start reviews.'),
                 TagsInput::make('sign_in_domains')
                     ->label('Sign-in domains')
                     ->placeholder('example.com')

@@ -9,6 +9,7 @@ use App\Enums\ReviewsFrom;
 use App\Filament\App\Resources\Repositories\Pages\ManageRepositories;
 use App\Filament\Components\ReviewSettingsForm;
 use App\Filament\CurrentTenant;
+use App\Filament\TenantRole;
 use App\Models\Connection;
 use App\Models\Repository;
 use App\Models\Tenant;
@@ -36,11 +37,28 @@ use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Validation\Rules\Unique;
 
 class RepositoryResource extends Resource
 {
+    /** Members see the repositories and whether they are ready; admins add, change and remove them. */
+    public static function canCreate(): bool
+    {
+        return TenantRole::isAdmin();
+    }
+
+    public static function canEdit(Model $record): bool
+    {
+        return TenantRole::isAdmin();
+    }
+
+    public static function canDelete(Model $record): bool
+    {
+        return TenantRole::isAdmin();
+    }
+
     protected static ?string $model = Repository::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCodeBracketSquare;
@@ -169,6 +187,7 @@ class RepositoryResource extends Resource
                 ActionGroup::make([
                     Action::make('reviewSettings')
                         ->label('Review settings')
+                        ->visible(fn (): bool => TenantRole::isAdmin())
                         ->icon(Heroicon::OutlinedAdjustmentsHorizontal)
                         ->modalDescription('Left empty, a setting follows the defaults.')
                         ->fillForm(fn (Repository $record): array => ReviewSettingsForm::state($record->reviewSetting))

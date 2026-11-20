@@ -104,7 +104,7 @@ describe('in a tenant', function () {
     beforeEach(function () {
         $this->tenant = Tenant::factory()->create(['slug' => 'acme']);
         $user = User::factory()->create();
-        $user->tenants()->attach($this->tenant);
+        $user->tenants()->attach($this->tenant, ['role' => 'admin']);
         $this->actingAs($user);
 
         Filament::setCurrentPanel(Filament::getPanel('app'));

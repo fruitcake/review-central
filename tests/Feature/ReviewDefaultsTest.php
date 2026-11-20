@@ -21,7 +21,7 @@ beforeEach(function () {
     $this->repository = Repository::factory()->create(['tenant_id' => $this->tenant->id, 'connection_id' => $connection->id, 'slug' => 'shop']);
 
     $this->user = User::factory()->create();
-    $this->user->tenants()->attach($this->tenant);
+    $this->user->tenants()->attach($this->tenant, ['role' => 'admin']);
     $this->actingAs($this->user);
 
     Filament::setCurrentPanel(Filament::getPanel('app'));

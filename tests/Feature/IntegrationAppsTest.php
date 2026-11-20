@@ -98,7 +98,7 @@ it('lets an administrator add apps, one of a single type, and keeps a secret lef
 
 it('lets a tenant add its own app, for itself alone', function () {
     $user = User::factory()->create();
-    $user->tenants()->attach($this->tenant);
+    $user->tenants()->attach($this->tenant, ['role' => 'admin']);
     $this->actingAs($user);
     Filament::setTenant($this->tenant);
 
@@ -116,7 +116,7 @@ it('lets a tenant add its own app, for itself alone', function () {
 
 it('signs a connection in through the app picked, and renews it through that one', function () {
     $user = User::factory()->create();
-    $user->tenants()->attach($this->tenant);
+    $user->tenants()->attach($this->tenant, ['role' => 'admin']);
     $this->actingAs($user);
     Filament::setTenant($this->tenant);
     $first = asanaApp(['for_all_tenants' => true]);
@@ -161,7 +161,7 @@ it('says why a connection cannot sign in, and offers the GitHub App only to the 
     expect(Integrations::unavailable($asana, 'Asana', $this->tenant))->toContain('not on for this team');
 
     $user = User::factory()->create();
-    $user->tenants()->attach($this->tenant);
+    $user->tenants()->attach($this->tenant, ['role' => 'admin']);
     $this->actingAs($user);
     Filament::setTenant($this->tenant);
     $github = IntegrationApp::query()->create(['type' => 'github_app', 'name' => 'GitHub App', 'credentials' => [

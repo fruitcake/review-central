@@ -2,7 +2,7 @@
 
 In the admin panel, at `/admin`:
 
-1. Add the tenant, and the users who may open it. A new user is mailed an invitation to choose a password, so the installation needs working mail (`MAIL_*` in `.env`) and a running queue. From the list of users the invitation can be sent again, and a password reset mailed.
+1. Add the tenant, the users who may open it, and which of them are its [admins](#admins-and-members). A new user is mailed an invitation to choose a password, so the installation needs working mail (`MAIL_*` in `.env`) and a running queue. From the list of users the invitation can be sent again, and a password reset mailed.
 
 In the tenant's panel, at `/app/<tenant>`. Every connection form has **How to get this** next to the service you pick: a link to the page where its key or token is made, the steps there, and the scopes it needs with why.
 
@@ -26,6 +26,12 @@ In the tenant's panel, at `/app/<tenant>`. Every connection form has **How to ge
 5. On the source control connection, **Webhook** shows the address and secret. The webhook is what starts a review: for a push to a pull request, a `/review` comment and a draft marked ready. **Add it for me** adds it for you; the screen says how to add it by hand. Nothing is needed in the repository itself.
    - **GitHub**: on the organisation, which covers every repository it has and gets, when the token may manage the organisation's webhooks; otherwise on each repository of the connection, so add the webhook again after adding a repository. By hand: the repository's or organisation's **Settings → Webhooks**, with this URL as the payload URL, content type `application/json`, the secret, and the events **Pull requests**, **Issue comments**, **Pull request review comments** and **Pull request reviews**.
    - **Bitbucket**: on every repository of the workspace, which needs the webhook scope on the token: Bitbucket has no screen for a workspace's webhooks, only an API. Without that scope, add it to each repository under **Repository settings → Webhooks**, with the pull request events Created, Updated, Approved, Approval removed, Changes request created, Changes request removed, Merged, Declined and Comment created.
+
+## Admins and members
+
+Everyone in a tenant is an admin or a member. An admin manages its connections and their keys, its apps, repositories, review settings, instructions and members; a member reads the reviews and pull requests, answers and rates findings, asks the reviewer and starts a review, and sees no key or setting. An administrator of the platform is an admin of every tenant.
+
+The platform's administrator picks a tenant's admins on the tenant, under **Its admins**. A tenant's admins manage the rest under **Members** in its panel: **Invite** adds someone by address, with a role, and mails a way in to someone who has no account yet; **Change role** and **Remove** do what they say. A tenant keeps at least one admin of its own. Someone who joins by signing in with Google joins as a member.
 
 ## GitHub: the account behind the token
 

@@ -7,6 +7,7 @@ namespace App\Filament\App\Resources\IntegrationApps;
 use App\Connections\Integrations;
 use App\Filament\App\Resources\IntegrationApps\Pages\ManageIntegrationApps;
 use App\Filament\Components\IntegrationAppForm;
+use App\Filament\Concerns\ForTenantAdmins;
 use App\Models\IntegrationApp;
 use BackedEnum;
 use Filament\Actions\DeleteAction;
@@ -23,6 +24,8 @@ use Filament\Tables\Table;
  */
 class IntegrationAppResource extends Resource
 {
+    use ForTenantAdmins;
+
     protected static ?string $model = IntegrationApp::class;
 
     protected static ?string $navigationLabel = 'Apps';

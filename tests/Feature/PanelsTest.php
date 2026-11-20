@@ -34,7 +34,7 @@ beforeEach(function () {
 
     $this->tenant = Tenant::factory()->create(['slug' => 'acme']);
     $this->user = User::factory()->create();
-    $this->user->tenants()->attach($this->tenant);
+    $this->user->tenants()->attach($this->tenant, ['role' => 'admin']);
 
     $this->actingAs($this->user);
     Filament::setCurrentPanel(Filament::getPanel('app'));

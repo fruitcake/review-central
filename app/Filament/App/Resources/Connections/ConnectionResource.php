@@ -14,6 +14,7 @@ use App\Enums\ConnectionKind;
 use App\Exceptions\ConnectionFailed;
 use App\Filament\App\Resources\Connections\Pages\ManageConnections;
 use App\Filament\Components\SetupGuideAction;
+use App\Filament\Concerns\ForTenantAdmins;
 use App\Models\Connection;
 use App\Services\Connections;
 use App\Support\SetupGuide;
@@ -48,6 +49,8 @@ use LogicException;
  */
 class ConnectionResource extends Resource
 {
+    use ForTenantAdmins;
+
     protected static ?string $model = Connection::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedLink;

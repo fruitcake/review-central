@@ -7,6 +7,7 @@ namespace App\Filament\App\Pages;
 use App\Enums\ReviewCommandAccess;
 use App\Filament\Components\ReviewSettingsForm;
 use App\Filament\CurrentTenant;
+use App\Filament\TenantRole;
 use App\Services\ReviewSettings;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -33,6 +34,12 @@ use Illuminate\Contracts\Support\Htmlable;
  */
 class ReviewDefaults extends Page
 {
+    /** The tenant's review settings are its admins' to change. */
+    public static function canAccess(): bool
+    {
+        return TenantRole::isAdmin();
+    }
+
     protected static ?string $title = 'Review defaults';
 
     protected static ?string $slug = 'review-settings';
