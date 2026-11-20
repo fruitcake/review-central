@@ -116,7 +116,7 @@ What it shows and what it does not: the whole path through the Worker, the setup
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `REVIEW_CLOUDFLARE_INSTANCE` | `standard-1` | The sandbox's size: `lite`, `basic`, `standard-1` … `standard-4`. A review typically uses 230–550 MB, so `basic` (1 GiB) may do. |
+| `REVIEW_CLOUDFLARE_INSTANCE` | `standard-1` | The sandbox's size: `lite`, `basic`, `standard-1` … `standard-4`. A review typically uses 230–550 MB, so `basic` (1 GiB) may do. Also under Settings → Cloudflare sandboxes. The capacity page advises one from what the reviews measured: their memory at most, and how often the steps around the model were short of processor. |
 | `REVIEW_CLOUDFLARE_SETUP` | `true` | Installs the tools in a fresh sandbox and starts later ones from a snapshot of it. Turn it off with an image of your own (below). |
 | `REVIEW_CLOUDFLARE_PROXY_KEYS` | `true` | Keeps the AI providers' keys in the Worker (see below). Off only for a reviewer that will not trust the Worker's certificate. |
 | `REVIEW_CLOUDFLARE_DISK` | `r2` | The filesystem disk on the bucket the Worker is bound to. |

@@ -28,6 +28,20 @@ class Sandbox
      */
     public ?int $peakMemory = null;
 
+    /**
+     * What the last step was seen to use, every few seconds: when, how many
+     * processors' worth it kept busy, how many megabytes of memory it held, and
+     * the share of the time it waited for a processor it was not given.
+     *
+     * @var list<array{0: int, 1: float, 2: int, 3: float}>
+     */
+    public array $samples = [];
+
+    /** How many processors the last step could use, and how many megabytes of memory. */
+    public ?float $processors = null;
+
+    public ?int $memoryMb = null;
+
     /** How long the last step's sandbox ran, in seconds, where the sandbox is paid for by the second. */
     public ?int $seconds = null;
 
@@ -99,6 +113,9 @@ class Sandbox
         array_push($command, $config['image'], 'sh', '-c', 'mkdir -p "$HOME" && '.$script);
 
         $this->peakMemory = null;
+        $this->samples = [];
+        $this->processors = (float) $config['cpus'] ?: null;
+        $this->memoryMb = self::megabytes((string) $config['memory']);
 
         try {
             // Started and waited for, which hands the output over as it comes.
@@ -127,20 +144,41 @@ class Sandbox
     }
 
     /**
+     * Megabytes in Docker's way of writing a size: "4g", "512m", "2048".
+     */
+    public static function megabytes(string $size): ?int
+    {
+        if (preg_match('/^\s*([\d.]+)\s*([kmgt]?)b?\s*$/i', $size, $match) !== 1) {
+            return null;
+        }
+
+        $factor = match (strtolower($match[2])) {
+            'k' => 1 / 1024,
+            'g' => 1024,
+            't' => 1024 ** 2,
+            'm' => 1,
+            default => 1 / 1024 ** 2,
+        };
+
+        return (int) round((float) $match[1] * $factor) ?: null;
+    }
+
+    /**
      * Notes what the container uses now, when that is more than it was seen to use
      * before. A sample, so a short spike between two looks is missed: the peak is
      * at least this.
      */
     protected function sample(string $docker, string $name): void
     {
-        $stats = rescue(fn (): string => Process::timeout(15)->run([$docker, 'stats', '--no-stream', '--format', '{{.MemUsage}}', $name])->output(), '', false);
+        $stats = rescue(fn (): string => Process::timeout(15)->run([$docker, 'stats', '--no-stream', '--format', '{{.CPUPerc}}|{{.MemUsage}}', $name])->output(), '', false);
 
-        // "512.3MiB / 4GiB": what it uses, and its limit.
-        if (preg_match('/^\s*([\d.]+)\s*([KMGT]?i?B)/i', $stats, $matches) !== 1) {
+        // "143.52%|512.3MiB / 4GiB": a processor's worth in percent, then what it
+        // uses of its memory and the limit.
+        if (preg_match('/^\s*(?<cpu>[\d.]+)%\|\s*(?<amount>[\d.]+)\s*(?<unit>[KMGT]?i?B)/i', $stats, $matches) !== 1) {
             return;
         }
 
-        $bytes = (int) ((float) $matches[1] * match (strtoupper($matches[2][0])) {
+        $bytes = (int) ((float) $matches['amount'] * match (strtoupper($matches['unit'][0])) {
             'K' => 1024,
             'M' => 1024 ** 2,
             'G' => 1024 ** 3,
@@ -152,6 +190,7 @@ class Sandbox
         // not a measurement: a review that "used 0 MB" would mislead.
         if ($bytes > 0) {
             $this->peakMemory = max($this->peakMemory ?? 0, $bytes);
+            $this->samples[] = [now()->getTimestamp(), round((float) $matches['cpu'] / 100, 2), (int) round($bytes / 1024 ** 2), 0.0];
         }
     }
 }

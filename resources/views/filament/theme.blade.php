@@ -236,6 +236,11 @@
     .rc-details { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 0; font-size: 13px; }
     .rc-details dt { color: var(--rc-muted); }
     .rc-details dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+    .rc-steps { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+    .rc-steps caption { text-align: left; padding-bottom: 4px; }
+    .rc-steps th { text-align: left; font-weight: 500; color: var(--rc-muted); padding: 4px 0; }
+    .rc-steps td { padding: 4px 0; border-top: 1px solid var(--rc-border); }
+    .rc-steps th:not(:first-child), .rc-steps td:not(:first-child) { text-align: right; }
     .rc-rate { background: var(--rc-ink); border-color: var(--rc-ink); color: #fff; font-size: 13px; }
     .rc-rate h2 { color: #fff; }
     .rc-stack .rc-rate a { color: #fff; }

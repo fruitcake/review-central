@@ -32,6 +32,15 @@ class Capacity
 
     public const HIGH_DISK_PERCENT = 80;
 
+    /** Reviews with metrics a size is advised on from, at the least. */
+    public const SIZING_RUNS = 5;
+
+    /** Room left above the memory nineteen in twenty reviews used at most. */
+    public const MEMORY_HEADROOM = 1.25;
+
+    /** Share of the time short of processor, over the steps before and after the model, from which a bigger size is advised. */
+    public const STARVED_PERCENT = 25;
+
     /**
      * @return array<string, mixed>
      */
@@ -80,7 +89,82 @@ class Capacity
             'trend' => $this->trend($samples),
         ];
 
-        return $report + ['advice' => $this->advice($report)];
+        $sizing = $this->sizing($since);
+        $advice = $this->advice($report);
+
+        if ($sizing['advice'] !== null) {
+            $advice[] = ['tone' => $sizing['suggested'] === $sizing['instance'] ? 'approved' : 'changes', 'label' => $sizing['suggested'] === $sizing['instance'] ? 'No action' : 'Change size', 'title' => 'Sandbox size', 'body' => $sizing['advice']];
+        }
+
+        return $report + ['sizing' => $sizing, 'advice' => $advice];
+    }
+
+    /**
+     * What Cloudflare sandboxes used since then, and the size that fits it: the
+     * smallest whose memory has a quarter to spare above what nineteen in twenty
+     * reviews used at most, one up when the steps around the model were short of
+     * processor for a quarter of their time or more. The model's own step waits
+     * on the AI provider, and a faster processor does not make that shorter.
+     *
+     * @return array{instance: string, runs: int, peak_memory_mb: int|null, starved_percent: int|null, suggested: string|null, advice: string|null}
+     */
+    public function sizing(?CarbonInterface $since = null): array
+    {
+        $instance = CloudflareSandbox::instance();
+        $metrics = ReviewRun::query()
+            ->where('sandbox', 'cloudflare')
+            ->where('started_at', '>=', $since ?? now()->subDays(30))
+            ->whereNotNull('metrics')
+            ->get(['metrics', 'sandbox_size'])
+            ->filter(fn (ReviewRun $run): bool => ($run->metrics['peak_memory_mb'] ?? null) !== null);
+        $none = ['instance' => $instance, 'runs' => $metrics->count(), 'peak_memory_mb' => null, 'starved_percent' => null, 'suggested' => null, 'advice' => null];
+
+        if ($metrics->count() < self::SIZING_RUNS) {
+            return $none;
+        }
+
+        $memory = $metrics->map(fn (ReviewRun $run): int => (int) $run->metrics['peak_memory_mb'])->sort()->values();
+        $peak = (int) $memory[(int) ceil($memory->count() * 0.95) - 1];
+
+        // Of the reviews on this size: on another, the processor told of that one.
+        $starved = $metrics->where('sandbox_size', $instance)->map(fn (ReviewRun $run): ?float => $this->starvedAroundModel((array) $run->metrics))->filter(fn (?float $share): bool => $share !== null);
+        $starvedPercent = $starved->isEmpty() ? null : (int) round($starved->avg());
+
+        $sizes = array_keys(CloudflareSandbox::INSTANCES);
+        $fits = collect($sizes)->first(fn (string $size): bool => (float) config("review.cloudflare.instances.{$size}.memory_gib") * 1024 >= $peak * self::MEMORY_HEADROOM) ?? end($sizes);
+        $suggested = $fits;
+
+        if ($starvedPercent !== null && $starvedPercent >= self::STARVED_PERCENT) {
+            $up = $sizes[min(count($sizes) - 1, (int) array_search($instance, $sizes, true) + 1)];
+            $suggested = array_search($up, $sizes, true) > array_search($fits, $sizes, true) ? $up : $fits;
+        }
+
+        $memoryGib = fn (string $size): string => rtrim(rtrim(number_format((float) config("review.cloudflare.instances.{$size}.memory_gib"), 2), '0'), '.').' GiB';
+        $used = "{$metrics->count()} reviews in a sandbox used at most ".number_format($peak / 1024, 1).' GB of memory (nineteen in twenty)';
+        $processor = $starvedPercent === null ? '' : ", and around the model were short of processor {$starvedPercent}% of the time";
+        $cost = fn (string $size): float => CloudflareSandbox::estimate($size, 3600) ?? 0.0;
+
+        $advice = match (true) {
+            $suggested === $instance => "{$used}{$processor}. {$instance} ({$memoryGib($instance)}) fits.",
+            array_search($suggested, $sizes, true) < array_search($instance, $sizes, true) => "{$used}{$processor}. {$suggested} ({$memoryGib($suggested)}) fits as well and costs ".(int) round((1 - $cost($suggested) / max(0.0001, $cost($instance))) * 100)."% less per second than {$instance}. Pick it under Settings → Cloudflare sandboxes.",
+            default => "{$used}{$processor}. {$suggested} ({$memoryGib($suggested)}) gives them room; {$instance} is ".($starvedPercent !== null && $starvedPercent >= self::STARVED_PERCENT ? 'short of processor' : 'tight on memory').'. Pick it under Settings → Cloudflare sandboxes.',
+        };
+
+        return ['instance' => $instance, 'runs' => $metrics->count(), 'peak_memory_mb' => $peak, 'starved_percent' => $starvedPercent, 'suggested' => $suggested, 'advice' => $advice];
+    }
+
+    /**
+     * The share of the time short of processor in the steps other than the
+     * model's, weighed by how long each took.
+     *
+     * @param  array<string, mixed>  $metrics
+     */
+    protected function starvedAroundModel(array $metrics): ?float
+    {
+        $steps = array_filter((array) ($metrics['steps'] ?? []), fn (mixed $step): bool => is_array($step) && ($step['name'] ?? null) !== 'reviewer' && ($step['starved_percent'] ?? null) !== null && ($step['seconds'] ?? 0) > 0);
+        $seconds = array_sum(array_column($steps, 'seconds'));
+
+        return $seconds === 0 ? null : array_sum(array_map(fn (array $step): float => $step['starved_percent'] * $step['seconds'], $steps)) / $seconds;
     }
 
     /**

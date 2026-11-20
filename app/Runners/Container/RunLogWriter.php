@@ -15,6 +15,15 @@ use Closure;
  */
 class RunLogWriter
 {
+    /**
+     * The steps of a run, as the runner notes them ("── review ──") and the
+     * scripts mark them ("##[phase] composer"), in the order they come.
+     */
+    public const PHASES = [
+        'clone', 'fetch', 'precheck', 'upload', 'start', 'unpack', 'vendor', 'review', 'prepare', 'scan',
+        'composer', 'tools', 'cli', 'reviewer', 'usage', 'keep', 'download', 'report',
+    ];
+
     protected const TELL_EVERY_SECONDS = 1.0;
 
     protected const COPY_EVERY_SECONDS = 5.0;
@@ -63,6 +72,10 @@ class RunLogWriter
      */
     public function note(string $line): void
     {
+        if (preg_match('/^── ([a-z]+) ──$/u', $line, $match) === 1) {
+            $this->phase($match[1]);
+        }
+
         $this->finishLine();
         $this->append([$line]);
         // A note marks a step's start or end, and is often the last line of a run:
@@ -141,6 +154,12 @@ class RunLogWriter
         $text = '';
 
         foreach ($lines as $line) {
+            // A script's mark of where a step starts, shown as the runner's own.
+            if (preg_match('/^##\[phase\] ([a-z]+)\s*$/', $line, $match) === 1) {
+                $this->phase($match[1]);
+                $line = "── {$match[1]} ──";
+            }
+
             // Colours and cursor movements mean nothing on a page, and a carriage
             // return is a progress line overwriting itself.
             $line = (string) preg_replace('/\e\[[0-9;?]*[A-Za-z]|\e\][^\a]*\a/', '', $line);
@@ -162,6 +181,18 @@ class RunLogWriter
 
         if ($this->clock() - $this->told >= self::TELL_EVERY_SECONDS) {
             $this->tell();
+        }
+    }
+
+    /**
+     * Notes when a step started, beside the log, for the run's metrics. Only the
+     * steps there are: the reviewer prints what a pull request may put in its
+     * mouth, and a step it names is not one.
+     */
+    protected function phase(string $name): void
+    {
+        if (in_array($name, self::PHASES, true)) {
+            @file_put_contents($this->path.'.phases', now()->getTimestamp()." {$name}\n", FILE_APPEND | LOCK_EX);
         }
     }
 

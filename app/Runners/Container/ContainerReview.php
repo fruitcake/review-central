@@ -11,6 +11,7 @@ use App\Runners\ContainerRunner;
 use App\Runners\QueuedRuns;
 use App\Runners\RunConclusion;
 use App\Services\ReviewCredentials;
+use App\Services\RunMetrics;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
@@ -46,6 +47,7 @@ class ContainerReview
         protected Checkout $checkout,
         protected Sandbox $sandbox,
         protected ReviewCredentials $credentials,
+        protected RunMetrics $metrics,
         protected ContainerRunner $runner,
         protected RunLog $log,
         protected ComposerCache $composerCache,
@@ -157,8 +159,12 @@ class ContainerReview
         $this->runner->markRunning($repository, $build);
 
         $reviewing = false;
+        // What the reviewer's step was seen to use, once it ran.
+        $used = null;
 
         try {
+            $this->log->writer((int) $repository->getKey(), $build)?->note($round > 0 ? '── fetch ──' : '── clone ──');
+
             $commit = match (true) {
                 $round > 0 => $this->checkout->update($repository, $directory, $branch, $commit),
                 $trial?->mergeCommit !== null => $this->checkout->cloneMerged($repository, $trial->destination, $trial->mergeCommit, $directory)['head'],
@@ -238,6 +244,8 @@ class ContainerReview
                 composerCache: $this->composerCache->directory($repository),
             );
 
+            $used = ['samples' => $this->sandbox->samples, 'processors' => $this->sandbox->processors, 'memory_mb' => $this->sandbox->memoryMb];
+
             // What the reviewer was seen to use at most, with the limit it had then:
             // the limit is a setting, and may be another one by the time someone reads this.
             if ($this->sandbox->peakMemory !== null) {
@@ -247,7 +255,7 @@ class ContainerReview
                     ->where('build_number', $build)
                     ->update([
                         'peak_memory_mb' => (int) ceil($this->sandbox->peakMemory / 1024 ** 2),
-                        'memory_limit' => (string) config('review.container.memory'),
+                        'memory_limit' => $this->sandbox->memoryMb !== null ? round($this->sandbox->memoryMb / 1024, 2).'g' : (string) config('review.container.memory'),
                     ]);
             }
 
@@ -260,7 +268,7 @@ class ContainerReview
                     ->where('build_number', $build)
                     ->update([
                         'sandbox' => $this->sandbox->name(),
-                        'sandbox_size' => (string) config('review.cloudflare.instance'),
+                        'sandbox_size' => CloudflareSandbox::instance(),
                         'sandbox_seconds' => $this->sandbox->seconds,
                         'sandbox_cost' => $this->sandbox->cost,
                     ]);
@@ -295,6 +303,9 @@ class ContainerReview
 
             return $this->report->run($repository, $branch, $commit, $build, (int) $outcome['REVIEW_PR_ID'], $directory, $trial, $log);
         } finally {
+            // Never in the way of the review: a run without them only has none.
+            rescue(fn () => $this->metrics->store($repository, $build, $used), null, false);
+
             if ($commit !== null) {
                 $this->finish($repository, $branch, $commit, $build, $reviewing, $trial !== null);
             }

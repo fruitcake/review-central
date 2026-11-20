@@ -49,6 +49,9 @@ class PlatformSettings
     /** What the Worker is called on Cloudflare. */
     public const CLOUDFLARE_WORKER = 'cloudflare_worker';
 
+    /** The size a sandbox runs in, as Cloudflare names it. */
+    public const CLOUDFLARE_INSTANCE = 'cloudflare_instance';
+
     /** The bucket the Worker and this installation hand files through. */
     public const CLOUDFLARE_BUCKET = 'cloudflare_bucket';
 
@@ -89,6 +92,7 @@ class PlatformSettings
         self::CLOUDFLARE_API_TOKEN => null,
         self::CLOUDFLARE_WORKER => null,
         self::CLOUDFLARE_BUCKET => null,
+        self::CLOUDFLARE_INSTANCE => null,
         self::R2_ACCESS_KEY_ID => null,
         self::R2_SECRET_ACCESS_KEY => null,
         self::CLOUDFLARE_URL => null,
@@ -170,6 +174,7 @@ class PlatformSettings
             'review.cloudflare.account' => $account,
             'review.cloudflare.api_token' => $this->secret(self::CLOUDFLARE_API_TOKEN),
             'review.cloudflare.worker' => $this->text(self::CLOUDFLARE_WORKER),
+            'review.cloudflare.instance' => $this->text(self::CLOUDFLARE_INSTANCE),
             'review.cloudflare.url' => $this->text(self::CLOUDFLARE_URL),
             'review.cloudflare.token' => $this->secret(self::CLOUDFLARE_TOKEN),
             "filesystems.disks.{$disk}.key" => $this->text(self::R2_ACCESS_KEY_ID),
@@ -209,6 +214,7 @@ class PlatformSettings
             self::CLOUDFLARE_ACCOUNT => ['CLOUDFLARE_ACCOUNT_ID', 'review.cloudflare.account'],
             self::CLOUDFLARE_API_TOKEN => ['CLOUDFLARE_API_TOKEN', 'review.cloudflare.api_token'],
             self::CLOUDFLARE_WORKER => ['REVIEW_CLOUDFLARE_WORKER', 'review.cloudflare.worker'],
+            self::CLOUDFLARE_INSTANCE => ['REVIEW_CLOUDFLARE_INSTANCE', 'review.cloudflare.instance'],
             self::CLOUDFLARE_BUCKET => ['R2_BUCKET', "filesystems.disks.{$disk}.bucket"],
             self::R2_ACCESS_KEY_ID => ['R2_ACCESS_KEY_ID', "filesystems.disks.{$disk}.key"],
             self::R2_SECRET_ACCESS_KEY => ['R2_SECRET_ACCESS_KEY', "filesystems.disks.{$disk}.secret"],

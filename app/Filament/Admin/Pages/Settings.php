@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Filament\Admin\Pages;
 
 use App\Filament\Themes;
+use App\Runners\Container\CloudflareSandbox;
 use App\Runners\Runners;
+use App\Services\Capacity;
 use App\Services\CloudflareTest;
 use App\Services\Currency;
 use App\Services\PlatformSettings;
@@ -13,6 +15,7 @@ use BackedEnum;
 use Closure;
 use Filament\Actions\Action;
 use Filament\Forms\Components\ColorPicker;
+use Filament\Forms\Components\Field;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -61,6 +64,7 @@ class Settings extends Page
             PlatformSettings::CLOUDFLARE_ACCOUNT => $settings->text(PlatformSettings::CLOUDFLARE_ACCOUNT),
             PlatformSettings::CLOUDFLARE_WORKER => $settings->text(PlatformSettings::CLOUDFLARE_WORKER),
             PlatformSettings::CLOUDFLARE_BUCKET => $settings->text(PlatformSettings::CLOUDFLARE_BUCKET),
+            PlatformSettings::CLOUDFLARE_INSTANCE => $settings->text(PlatformSettings::CLOUDFLARE_INSTANCE),
             PlatformSettings::R2_ACCESS_KEY_ID => $settings->text(PlatformSettings::R2_ACCESS_KEY_ID),
             // Secrets are never sent back to the browser.
             PlatformSettings::CLOUDFLARE_API_TOKEN => null,
@@ -191,6 +195,16 @@ class Settings extends Page
                             ->regex('/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/')
                             ->validationMessages(['regex' => 'Lower case letters, digits and dashes, 3 to 63 of them.'])
                             ->helperText('Made by the deploy when it is not there.')),
+                        self::overridable(Select::make(PlatformSettings::CLOUDFLARE_INSTANCE)
+                            ->label('Sandbox size')
+                            ->options(fn (): array => collect(CloudflareSandbox::INSTANCES)->mapWithKeys(function (string $instance): array {
+                                $size = (array) config("review.cloudflare.instances.{$instance}");
+
+                                return [$instance => sprintf('%s: %s vCPU, %s GiB, %s GB disk', $instance, rtrim(rtrim(number_format((float) ($size['vcpu'] ?? 0), 3), '0'), '.'), $size['memory_gib'] ?? '?', $size['disk_gb'] ?? '?')];
+                            })->all())
+                            ->placeholder(fn (): string => 'As configured: '.CloudflareSandbox::instance())
+                            ->helperText(fn (Capacity $capacity): string => 'What each review\'s sandbox runs on, from the next review on. A bigger one costs more per second and only helps a review that is short of memory or processor. '
+                                .($capacity->sizing()['advice'] ?? 'Advice follows from the reviews\' own measurements, on the Capacity page, once there are some.'))),
                         self::overridable(TextInput::make(PlatformSettings::R2_ACCESS_KEY_ID)
                             ->label('Bucket access key ID')
                             ->regex('/^\s*[a-f0-9]{32}\s*$/')
@@ -213,7 +227,7 @@ class Settings extends Page
      * A Cloudflare setting that the environment may set instead: then it says
      * so, as what is saved here is not used.
      */
-    protected static function overridable(TextInput $field): TextInput
+    protected static function overridable(Field $field): Field
     {
         return $field
             ->hint(fn (): ?string => ($variable = app(PlatformSettings::class)->setByEnvironment($field->getName())) === null ? null : "{$variable} in .env is used instead")

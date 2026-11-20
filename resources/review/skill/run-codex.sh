@@ -19,6 +19,7 @@
 # as the developer, and in Codex's read-only sandbox rather than none.
 set -u
 
+echo "##[phase] cli"
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$HERE/reviewer-env.sh"
 CONFIG="${REVIEW_AGENT_CONFIG:-$HERE/codex-config.toml}"
@@ -192,6 +193,7 @@ jq -L "$HERE" 'include "strict-schema"; strict_schema' "$HERE/ai-review.schema.j
   fi
 } > "$PROMPT"
 
+echo "##[phase] reviewer"
 printf '\n-------------------- Reviewing --------------------\n'
 reviewer_env_report "CODEX_HOME|OPENAI_BASE_URL${OWN_KEYS}"
 {

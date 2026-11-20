@@ -90,7 +90,7 @@ it('runs a step in a Cloudflare sandbox: the checkout up through the bucket, the
             ['note', 'Sandbox started (basic).'],
             ['output', "Reviewing\npull "],
             ['output', "request 570\n"],
-            ['exit', ['exitCode' => 0, 'seconds' => 200, 'kept' => true]],
+            ['exit', ['exitCode' => 0, 'seconds' => 200, 'kept' => true, 'metrics' => ['processors' => 1, 'memoryMb' => 1024, 'samples' => [[1_800_000_000, 0.2, 310, 0.0], [1_800_000_005, 0.25, 455, 0.4], 'not a sample']]]],
         ]), 200, ['Content-Type' => 'text/event-stream']);
     }]);
 
@@ -108,7 +108,8 @@ it('runs a step in a Cloudflare sandbox: the checkout up through the bucket, the
     });
 
     expect($result->successful())->toBeTrue()
-        ->and($printed)->toBe("Sandbox started (basic).\nReviewing\npull request 570\n")
+        // The steps on this side are marked for the run's metrics.
+        ->and($printed)->toBe("##[phase] upload\nSandbox started (basic).\nReviewing\npull request 570\n##[phase] download\n")
         ->and($uploaded)->toBe('the checkout, packed')
         ->and($asked['script'])->toBe('mkdir -p "$HOME" && sh .review/skill/run-review.sh')
         // On Cloudflare's own image the review brings what installs its tools, and
@@ -135,6 +136,11 @@ it('runs a step in a Cloudflare sandbox: the checkout up through the bucket, the
         ->and($sandbox->seconds)->toBe(200)
         ->and($sandbox->cost)->toBe(0.0016)
         ->and($sandbox->name())->toBe('cloudflare')
+        // What it used, as the Worker sampled it inside, against what the size gives.
+        ->and($sandbox->samples)->toBe([[1_800_000_000, 0.2, 310, 0.0], [1_800_000_005, 0.25, 455, 0.4]])
+        ->and($sandbox->peakMemory)->toBe(455 * 1024 ** 2)
+        ->and($sandbox->processors)->toBe(0.25)
+        ->and($sandbox->memoryMb)->toBe(1024)
         // Nothing of the review stays in the bucket.
         ->and(Storage::disk('r2')->allFiles())->toBe([]);
 

@@ -15,6 +15,7 @@
 # best-effort, and an empty or missing file simply means no usage was recorded.
 #
 # Always exits 0. Usage is bookkeeping; it must never fail a review that worked.
+echo "##[phase] usage"
 set -u
 
 # Claude Code's transcripts are read here; every other reviewer has a collector of

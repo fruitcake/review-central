@@ -7,6 +7,7 @@ namespace App\Runners\Security;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Runners\Container\Checkout;
+use App\Runners\Container\CloudflareSandbox;
 use App\Runners\Container\RunLog;
 use App\Runners\Container\Sandbox;
 use App\Runners\Container\Sandboxes;
@@ -97,7 +98,7 @@ class SecurityReview
             $log?->flush();
 
             if ($sandbox->seconds !== null) {
-                $run->update(['sandbox' => $sandbox->name(), 'sandbox_size' => (string) config('review.cloudflare.instance'), 'sandbox_seconds' => $sandbox->seconds, 'sandbox_cost' => $sandbox->cost]);
+                $run->update(['sandbox' => $sandbox->name(), 'sandbox_size' => CloudflareSandbox::instance(), 'sandbox_seconds' => $sandbox->seconds, 'sandbox_cost' => $sandbox->cost]);
             }
 
             $report = $result->successful() ? $this->json("{$directory}/ai-review.json") : null;
