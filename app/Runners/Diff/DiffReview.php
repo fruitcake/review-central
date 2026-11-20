@@ -7,6 +7,7 @@ namespace App\Runners\Diff;
 use App\Connections\LlmDriver;
 use App\Enums\BuildState;
 use App\Enums\ConnectionKind;
+use App\Enums\ReviewEffort;
 use App\Enums\ReviewProvider;
 use App\Exceptions\ReviewerFailed;
 use App\Llm\AnthropicDriver;
@@ -19,6 +20,7 @@ use App\Runners\Container\Trial;
 use App\Runners\DiffRunner;
 use App\Runners\QueuedRuns;
 use App\Runners\RunConclusion;
+use App\Services\PullRequestClassifier;
 use App\Services\ReviewFiling;
 use App\Services\ReviewInstructions;
 use App\Services\ReviewOpening;
@@ -54,6 +56,7 @@ class DiffReview
         protected DiffRunner $runner,
         protected RunLog $log,
         protected QueuedRuns $queued,
+        protected PullRequestClassifier $classifier,
     ) {}
 
     /**
@@ -91,7 +94,8 @@ class DiffReview
                 return;
             }
 
-            [$connection, $model, $effort] = $this->reviewer($repository, (string) $pullRequest['id']);
+            $pick = $this->classifier->pick($repository, (string) $pullRequest['id'], $branch, $commit, $trial, fn (string $line) => $log?->note($line));
+            [$connection, $model, $effort] = $this->reviewer($repository, (string) $pullRequest['id'], $pick);
 
             // A trial's own model and effort, where it asked for one.
             $model = filled($trial?->model) ? $trial->model : $model;
@@ -230,13 +234,14 @@ class DiffReview
      * one that was picked is asked through the provider it connected first,
      * whichever that is.
      *
+     * @param  array{effort: ReviewEffort, tier: string}|null  $pick  what the classification picked, in apply mode
      * @return array{Connection, string|null, string|null}
      *
      * @throws ReviewerFailed when the tenant has no AI provider
      */
-    protected function reviewer(Repository $repository, string $pullRequestId): array
+    protected function reviewer(Repository $repository, string $pullRequestId, ?array $pick = null): array
     {
-        $settings = ReviewSettings::variables($repository, null, $pullRequestId);
+        $settings = ReviewSettings::variables($repository, null, $pullRequestId, null, $pick);
         $wantsOpenAi = ($settings['REVIEW_PROVIDER'] ?? null) === ReviewProvider::CodexCli->value;
 
         $connections = $repository->tenant->connections()->where('kind', ConnectionKind::Llm)->oldest('id')->get();

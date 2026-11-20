@@ -5,11 +5,9 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Connections\LlmDriver;
-use App\Enums\ConnectionKind;
-use App\Llm\AnthropicDriver;
-use App\Llm\OpenAiDriver;
 use App\Models\Connection;
 use App\Models\OpenPullRequest;
+use App\Services\LlmConnections;
 use App\Services\PullRequestTurn;
 use App\Services\ReviewSettings;
 use App\SourceControl\Reviewers;
@@ -99,14 +97,7 @@ class DescribePullRequest implements ShouldQueue
      */
     public static function connection(OpenPullRequest $record): ?Connection
     {
-        return $record->repository->tenant->connections()->where('kind', ConnectionKind::Llm)->oldest('id')->get()
-            ->filter(fn (Connection $connection): bool => rescue(fn (): bool => $connection->driver() instanceof LlmDriver, false, false))
-            ->sortBy(fn (Connection $connection): int => match (true) {
-                $connection->driver() instanceof AnthropicDriver => 0,
-                $connection->driver() instanceof OpenAiDriver => 1,
-                default => 2,
-            })
-            ->first();
+        return LlmConnections::small($record->repository->tenant);
     }
 
     public static function instructions(): string

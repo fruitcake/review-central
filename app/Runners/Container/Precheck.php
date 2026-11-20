@@ -8,6 +8,7 @@ use App\Enums\ReviewProvider;
 use App\Exceptions\ReviewStepFailed;
 use App\Models\Repository;
 use App\Runners\ContainerRunner;
+use App\Services\PullRequestClassifier;
 use App\Services\ReviewCredentials;
 use App\Services\ReviewInstructions;
 use App\Services\ReviewOpening;
@@ -43,6 +44,7 @@ class Precheck
     public function __construct(
         protected ReviewOpening $opening,
         protected ReviewCredentials $credentials,
+        protected PullRequestClassifier $classifier,
     ) {}
 
     /**
@@ -60,10 +62,12 @@ class Precheck
         ReviewSettings::recordAvailable($repository, $available);
         $say('Reviewers this tenant has a key for: '.(implode(', ', $available) ?: 'none').'.');
 
+        $pick = $this->classifier->pick($repository, $trial === null ? null : (string) $trial->pullRequestId, $branch, $commit, $trial, $say);
+
         // What the server sets for this repository. A pull request keeps its
         // reviewer: the choice is made from its branch, which never changes.
         $settings = array_filter(
-            ReviewSettings::variables($repository, $available, $trial === null ? null : (string) $trial->pullRequestId, $branch),
+            ReviewSettings::variables($repository, $available, $trial === null ? null : (string) $trial->pullRequestId, $branch, $pick),
             fn (string $value): bool => preg_match(self::SETTING, $value) === 1,
         );
 

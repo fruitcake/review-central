@@ -10,6 +10,7 @@ use App\Connections\LlmDriver;
 use App\Enums\ReviewProvider;
 use App\Exceptions\ConnectionFailed;
 use App\Exceptions\ReviewerFailed;
+use App\Llm\Agents\Classifier;
 use App\Llm\Agents\Describer;
 use App\Llm\Agents\DiffReviewer;
 use App\Models\Connection;
@@ -20,6 +21,7 @@ use App\Support\SetupGuide;
 use Illuminate\Support\Facades\Http;
 use Laravel\Ai\Classification;
 use Laravel\Ai\Classification\Boolean;
+use Laravel\Ai\Responses\AgentResponse;
 use Laravel\Ai\Responses\Data\BooleanAnswer;
 use Laravel\Ai\Responses\Data\FinishReason;
 use Throwable;
@@ -149,6 +151,11 @@ class OpenAiDriver implements ExplainsSetup, LlmDriver
         $answer = (new Describer($instructions))->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: $model !== null ? ReviewSettings::model('openai', $model) : (string) (config('review.turn.openai_model') ?: ReviewSettings::tierModels('openai')['cheapest'] ?? 'gpt-6-luna'), timeout: 60);
 
         return Describer::read($answer);
+    }
+
+    public function classifies(Connection $connection, string $text): AgentResponse
+    {
+        return (new Classifier)->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: (string) (config('review.turn.openai_model') ?: ReviewSettings::tierModels('openai')['cheapest'] ?? 'gpt-6-luna'), timeout: 30);
     }
 
     /**

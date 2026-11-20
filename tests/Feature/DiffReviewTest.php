@@ -2,6 +2,7 @@
 
 use App\Jobs\RunContainerReview;
 use App\Jobs\RunDiffReview;
+use App\Llm\Agents\Classifier;
 use App\Models\Connection;
 use App\Models\Repository;
 use App\Models\ReviewInstruction;
@@ -458,4 +459,22 @@ it('writes in the team\'s language and leaves the ticket ungraded when the team 
     Http::assertSent(fn (Request $request): bool => $request->url() === 'https://api.anthropic.com/v1/messages'
         && str_contains($request['system'][0]['text'], 'in German')
         && str_contains($request['system'][0]['text'], 'Do not grade the change against the ticket'));
+});
+
+it('runs a pull request at the effort and model its classification picks, from the diff too', function () {
+    Process::fake();
+    fakeHost($this->diff);
+    Http::fake(['api.anthropic.com/v1/messages' => Http::response(streamed($this->report), 200, ['Content-Type' => 'text/event-stream'])]);
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    Classifier::fake([['complexity' => 'complex', 'kind' => 'feature', 'database' => false, 'breaking' => false, 'security' => true, 'irreversible' => false, 'reason' => 'It exports every invoice.']]);
+    ReviewSettings::saveDefaults($this->repository->tenant, ['strategy' => 'apply', 'claude_effort' => 'low']);
+
+    app(DiffRunner::class)->markRunning($this->repository, 41);
+    app(DiffReview::class)->run($this->repository, 'feature/export', null, 41);
+
+    $run = ReviewRun::query()->sole();
+
+    expect($run->effort)->toBe('xhigh')
+        ->and($run->model)->toBe(ReviewSettings::tierModels('anthropic')['smartest'])
+        ->and(app(RunLog::class)->tail($run)['text'])->toContain('Classified as Complex · feature · security: It exports every invoice. Runs at effort xhigh and the smartest model.');
 });

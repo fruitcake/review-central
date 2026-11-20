@@ -8,6 +8,7 @@ use App\Enums\ReviewProvider;
 use App\Exceptions\ReviewerFailed;
 use App\Models\Connection;
 use App\Runners\Diff\Answer;
+use Laravel\Ai\Responses\AgentResponse;
 
 /**
  * An AI provider whose key the review runs with.
@@ -57,4 +58,10 @@ interface LlmDriver extends ConnectionDriver
      * @return array{next_step: string, summary: string}|null null when the provider gave no such answer
      */
     public function describes(Connection $connection, string $instructions, string $text, ?string $model = null): ?array;
+
+    /**
+     * What a pull request asks of its review, from a small model: the Classifier's
+     * structured output, with the tokens and model it took.
+     */
+    public function classifies(Connection $connection, string $text): AgentResponse;
 }

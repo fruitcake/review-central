@@ -2,8 +2,10 @@
 
 namespace App\Filament\Components;
 
+use App\Enums\ReviewComplexity;
 use App\Enums\ReviewEffort;
 use App\Enums\ReviewProvider;
+use App\Enums\ReviewStrategy;
 use App\Filament\CurrentTenant;
 use App\Models\ModelPrice;
 use App\Models\ReviewRun;
@@ -73,6 +75,7 @@ class ReviewSettingsForm
                 ->helperText('Each pull request gets one of these, picked by share among those there is a key for, and keeps it for every push. One with a share of 0 is a fallback: it runs only when none with a share can, the first of them in this order. '
                     .'One whose reviews have cost its monthly budget is passed over for the rest of the month: to use one until its budget is spent and another after, give the first a share and a budget and the second a share of 0. '
                     .($defaults === null ? 'Empty leaves it to the keys: Claude Code with an Anthropic key, else Codex.' : 'Empty uses the defaults.')),
+            Fieldset::make('By pull request')->columns(3)->schema(self::strategyFields($defaults)),
             ...($withProviders ? [
                 Fieldset::make(ReviewProvider::ClaudeCode->text())->columns(2)->schema(self::claudeFields($defaults)),
                 Fieldset::make(ReviewProvider::CodexCli->text())->columns(2)->schema(self::codexFields($defaults)),
@@ -145,6 +148,41 @@ class ReviewSettingsForm
     }
 
     /**
+     * Whether pull requests are classified, and the effort and model tier a simple
+     * one runs at; a normal and a complex one a step and two higher.
+     *
+     * @return array<int, Component>
+     */
+    public static function strategyFields(?ReviewSetting $defaults = null): array
+    {
+        $team = fn (string $text, ?string $value, array $options): string => $defaults === null ? $text : 'As the team: '.lcfirst(filled($value) ? ($options[$value] ?? $value) : $text);
+        $efforts = collect(ReviewSettings::STRATEGY_EFFORTS)->mapWithKeys(fn (ReviewEffort $effort): array => [$effort->value => $effort->text()])->all();
+        $tierModels = rescue(fn (): array => ReviewSettings::tierModels('anthropic'), [], false);
+        $tiers = collect(ReviewSettings::STRATEGY_TIERS)->mapWithKeys(fn (string $tier): array => [$tier => $tier.' (Laravel AI)'.(isset($tierModels[$tier]) ? ": now {$tierModels[$tier]} for Claude" : '')])->all();
+
+        return [
+            Select::make('strategy')
+                ->label('Classify each pull request')
+                ->options(ReviewStrategy::options())
+                ->placeholder($team('Off', $defaults?->strategy, ReviewStrategy::options()))
+                ->live(),
+            Select::make('strategy_effort')
+                ->label('From effort')
+                ->options($efforts)
+                ->placeholder($team(ReviewSettings::STRATEGY_EFFORT->text(), $defaults?->strategy_effort, $efforts))
+                ->live(),
+            Select::make('strategy_model')
+                ->label('From model')
+                ->options($tiers)
+                ->placeholder($team(ReviewSettings::STRATEGY_TIER, $defaults?->strategy_model, $tiers))
+                ->live(),
+            Text::make('Before its review, a small model reads a pull request\'s title, description, changed files and migrations, and calls it simple, normal or complex. A simple one runs at the effort and model set here, a normal one a step higher, a complex one two, up to Extra high and smartest. '
+                .'Running at what it picks replaces the effort of every reviewer below, and the model of Claude Code and Codex. Once per commit, with the AI provider that writes the notes on whose turn.')
+                ->columnSpanFull(),
+        ];
+    }
+
+    /**
      * Claude Code's model, effort, advisor and budget per review.
      *
      * @return array<int, Component>
@@ -186,6 +224,42 @@ class ReviewSettingsForm
      * and the model and effort it runs at.
      */
     protected static function summary(Get $get, ?ReviewSetting $defaults): HtmlString
+    {
+        return new HtmlString(self::reviewers($get, $defaults)->toHtml().self::strategySummary($get, $defaults));
+    }
+
+    /**
+     * What classifying pull requests does as the form stands, or nothing when it is off.
+     */
+    protected static function strategySummary(Get $get, ?ReviewSetting $defaults): string
+    {
+        $value = fn (string $field): ?string => filled($get($field)) ? (string) $get($field) : (filled($defaults?->{$field}) ? (string) $defaults->{$field} : null);
+        $mode = ReviewStrategy::tryFrom((string) $value('strategy')) ?? ReviewStrategy::Off;
+
+        if ($mode === ReviewStrategy::Off) {
+            return '';
+        }
+
+        $effort = ReviewEffort::tryFrom((string) $value('strategy_effort'));
+        $effort = in_array($effort, ReviewSettings::STRATEGY_EFFORTS, true) ? $effort : ReviewSettings::STRATEGY_EFFORT;
+        $tier = in_array($value('strategy_model'), ReviewSettings::STRATEGY_TIERS, true) ? (string) $value('strategy_model') : ReviewSettings::STRATEGY_TIER;
+
+        $steps = collect(ReviewComplexity::cases())->map(function (ReviewComplexity $complexity) use ($effort, $tier): string {
+            $pick = ReviewSettings::pick($effort, $tier, $complexity);
+
+            return strtolower($complexity->text()).': '.$pick['effort']->text().', '.$pick['tier'];
+        })->implode('; ');
+
+        return '<p><strong>'.($mode === ReviewStrategy::Apply ? 'By pull request:' : 'By pull request, recorded only:').'</strong> '.e($steps).'.'
+            .($mode === ReviewStrategy::Apply
+                ? ' <span class="rc-muted">That replaces the effort below, and Claude Code\'s and Codex\'s model.</span>'
+                : ' <span class="rc-muted">Each review says what it would have picked, and runs at what is set below.</span>').'</p>';
+    }
+
+    /**
+     * Which reviewer runs, as the form stands.
+     */
+    protected static function reviewers(Get $get, ?ReviewSetting $defaults): HtmlString
     {
         $tenant = CurrentTenant::get();
         $keys = app(ReviewCredentials::class)->reviewers($tenant);
@@ -443,7 +517,7 @@ class ReviewSettingsForm
     public static function state(?ReviewSetting $setting): array
     {
         return $setting === null ? [] : collect($setting->attributesToArray())
-            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'turn_notes', 'turn_model'])
+            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model'])
             ->all();
     }
 }

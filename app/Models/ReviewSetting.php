@@ -32,6 +32,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $extra_passes "true" or "false": whether Claude Code runs the review-toolkit agents and /code-review as well
  * @property string|null $turn_notes "true" or "false": whether a small model writes what the one at turn has to do; the team's alone
  * @property string|null $turn_model The model it writes with: a tier or a name; the provider's cheapest when none
+ * @property string|null $strategy off, record or apply: whether pull requests are classified, and whether that decides their effort and model
+ * @property string|null $strategy_effort the effort a simple pull request runs at; normal and complex ones a step and two higher
+ * @property string|null $strategy_model the model tier a simple pull request runs at: cheapest, default or smartest
  * @property int|null $follow_ups Reviews a container job carries on with after its own; null inherits.
  * @property CarbonInterface|null $created_at
  * @property CarbonInterface|null $updated_at
