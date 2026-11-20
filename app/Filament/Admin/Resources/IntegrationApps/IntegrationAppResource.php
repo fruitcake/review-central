@@ -56,7 +56,8 @@ class IntegrationAppResource extends Resource
     }
 
     /**
-     * The types that can be added: one of a single type only while there is none.
+     * The types that can be added: one of a single type only while there is none,
+     * in the list or in .env.
      *
      * @return array<string, string>
      */
@@ -67,7 +68,10 @@ class IntegrationAppResource extends Resource
             ->pluck('type')
             ->all();
 
-        return collect(Integrations::TYPES)->except($taken)->map(fn (array $type): string => $type['label'])->all();
+        // Nor one .env sets: that one goes first, and a second would never be used.
+        $fromEnv = collect(Integrations::TYPES)->filter(fn (array $type, string $key): bool => $type['single'] && Integrations::fromEnv($key) !== null)->keys()->all();
+
+        return collect(Integrations::TYPES)->except([...$taken, ...$fromEnv])->map(fn (array $type): string => $type['label'])->all();
     }
 
     /**
