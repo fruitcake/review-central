@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -393,7 +394,7 @@ class SetupCheck
                 $missing === [],
                 "{$title}: the bucket's keys",
                 "The disk {$diskName} on the bucket ".($bucket['R2_BUCKET'] ?? '').'.',
-                'Set '.implode(', ', $missing).'. In the Cloudflare dashboard: R2 → Manage API tokens → Create API token, with Object Read & Write on the bucket only. It shows the key id, the secret and the S3 endpoint (`https://<account id>.r2.cloudflarestorage.com`).',
+                'Set the account ID and the bucket\'s keys under Settings → Cloudflare sandboxes (or '.implode(', ', $missing).' in .env). In the Cloudflare dashboard: R2 → Manage API tokens → Create API token, with Object Read & Write on the bucket only. It shows the Access Key ID and the Secret Access Key.',
                 'Missing: '.implode(', ', $missing).'.',
             ),
         ];
@@ -521,20 +522,46 @@ class SetupCheck
      *
      * @return array{state: string, title: string, detail: string, fix: string|null}
      */
-    protected function cloudflareBucket(string $disk, string $bucket): array
+    public function cloudflareBucket(string $disk, string $bucket): array
     {
         $title = 'Cloudflare sandboxes: this installation reaches the bucket';
+        $key = 'review/setup-check';
+        $what = 'write to';
+        // Where each part comes from: the settings, or the environment where it sets one.
+        $from = function (string $setting, string $variable): string {
+            return app(PlatformSettings::class)->setByEnvironment($setting) === null ? 'under Settings' : "in {$variable} in .env";
+        };
+        $fix = 'Check the bucket\'s name '.$from(PlatformSettings::CLOUDFLARE_BUCKET, 'R2_BUCKET')
+            .', the account it is in (the address is `https://<account id>.r2.cloudflarestorage.com`, from the account ID under Settings, or R2_ENDPOINT in .env, without the bucket)'
+            .', and that the bucket\'s keys '.$from(PlatformSettings::R2_ACCESS_KEY_ID, 'R2_ACCESS_KEY_ID').' are of a token with Object Read & Write on this bucket.';
 
+        // What a review does with it: an object written, read back and removed.
+        // Not whether one is there: without the right to list the bucket, R2
+        // answers that with 403 for an object that is not, which reviews never ask.
         try {
-            Storage::disk($disk)->exists('review/setup-check');
+            $storage = Storage::disk($disk);
+            $written = 'setup check '.now()->toIso8601String();
+            $storage->put($key, $written);
+            $what = 'read from';
 
-            return ['state' => self::OK, 'title' => $title, 'detail' => "It can read {$bucket}.", 'fix' => null];
+            if ($storage->get($key) !== $written) {
+                throw new RuntimeException('What it read back is not what it wrote.');
+            }
+
+            $what = 'remove from';
+            $storage->delete($key);
+
+            return ['state' => self::OK, 'title' => $title, 'detail' => "It can write to {$bucket}, read from it and remove from it.", 'fix' => null];
         } catch (Throwable $exception) {
             return [
                 'state' => self::WRONG, 'title' => $title,
-                // The storage wraps what the bucket said in "Unable to check existence".
-                'detail' => 'It cannot: '.mb_substr(($exception->getPrevious() ?? $exception)->getMessage(), 0, 300),
-                'fix' => 'Check R2_ENDPOINT (`https://<account id>.r2.cloudflarestorage.com`, without the bucket), R2_BUCKET, and that the API token has Object Read & Write on this bucket.',
+                // The storage wraps what the bucket said in "Unable to write file".
+                'detail' => "It cannot {$what} {$bucket}: ".mb_substr(($exception->getPrevious() ?? $exception)->getMessage(), 0, 300),
+                'fix' => match (true) {
+                    $what === 'read from' => 'The keys may write but not read: give their token Read as well as Edit on this bucket (Object Read & Write), or make one that has both.',
+                    str_contains($exception->getMessage().($exception->getPrevious()?->getMessage() ?? ''), 'SignatureDoesNotMatch') => 'The secret is not the one of this key ID: take the Secret Access Key (64 characters) that Cloudflare showed with this Access Key ID, not the token value, and both from the same token.',
+                    default => $fix,
+                },
             ];
         }
     }

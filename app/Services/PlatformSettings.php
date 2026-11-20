@@ -202,6 +202,33 @@ class PlatformSettings
     }
 
     /**
+     * The environment variable that sets a Cloudflare setting instead, when it
+     * does: then what is saved here is not used. Told by the configuration
+     * holding a value these settings did not put there, as env() says nothing
+     * once the configuration is cached.
+     */
+    public function setByEnvironment(string $setting): ?string
+    {
+        $disk = (string) config('review.cloudflare.disk');
+        [$variable, $key] = match ($setting) {
+            self::CLOUDFLARE_ACCOUNT => ['CLOUDFLARE_ACCOUNT_ID', 'review.cloudflare.account'],
+            self::CLOUDFLARE_API_TOKEN => ['CLOUDFLARE_API_TOKEN', 'review.cloudflare.api_token'],
+            self::CLOUDFLARE_WORKER => ['REVIEW_CLOUDFLARE_WORKER', 'review.cloudflare.worker'],
+            self::CLOUDFLARE_INSTANCE => ['REVIEW_CLOUDFLARE_INSTANCE', 'review.cloudflare.instance'],
+            self::CLOUDFLARE_BUCKET => ['R2_BUCKET', "filesystems.disks.{$disk}.bucket"],
+            self::R2_ACCESS_KEY_ID => ['R2_ACCESS_KEY_ID', "filesystems.disks.{$disk}.key"],
+            self::R2_SECRET_ACCESS_KEY => ['R2_SECRET_ACCESS_KEY', "filesystems.disks.{$disk}.secret"],
+            default => [null, null],
+        };
+
+        if ($key === null || blank($value = config($key))) {
+            return null;
+        }
+
+        return array_key_exists($key, self::$applied) && self::$applied[$key] === $value ? null : $variable;
+    }
+
+    /**
      * What applyCloudflare() put in the configuration, so a later change to the
      * settings replaces it, and never what the environment set.
      *
@@ -264,7 +291,8 @@ class PlatformSettings
                     continue;
                 }
 
-                $value = Crypt::encryptString((string) $value);
+                // Pasted, often with a space or a line break that would make it another key.
+                $value = Crypt::encryptString(trim((string) $value));
             }
 
             PlatformSetting::query()->updateOrCreate(['key' => $key], ['value' => $value]);

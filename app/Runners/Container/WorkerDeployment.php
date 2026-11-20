@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Runners\Container;
 
 use App\Services\PlatformSettings;
+use App\Services\SetupCheck;
 use Closure;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
@@ -61,6 +62,8 @@ class WorkerDeployment
     {
         $log = [];
         $tell = function (string $line) use (&$log, $say): void {
+            // Colours and cursor movements, should a tool print them anyway.
+            $line = (string) preg_replace('/\e\[[0-9;?]*[A-Za-z]/', '', $line);
             $log[] = $line;
             $say !== null && $say($line);
         };
@@ -138,10 +141,20 @@ class WorkerDeployment
 
         try {
             $tell("── the bucket {$bucket} ──");
-            $this->run(['npx', 'wrangler', 'r2', 'bucket', 'create', $bucket], $tell, 'make the bucket', tolerate: 'already exists');
+            $disk = (string) config('review.cloudflare.disk');
+
+            // One this installation already reaches with its keys is there: no need
+            // for a token that may make buckets.
+            if (filled(config("filesystems.disks.{$disk}.key")) && app(SetupCheck::class)->cloudflareBucket($disk, $bucket)['state'] === SetupCheck::OK) {
+                $tell('It is there, and this installation reaches it with its keys.');
+            } else {
+                $this->run(['npx', 'wrangler', 'r2', 'bucket', 'create', $bucket], $tell, 'make the bucket', tolerate: 'already exists',
+                    refused: "The API token may not make buckets. Give it Workers R2 Storage: Edit, or make the bucket {$bucket} in the dashboard (R2 → Create bucket) and set its keys under Settings: the deploy then leaves it be.");
+            }
 
             $tell("── the Worker {$worker} ──");
-            $deployed = $this->run(['npx', 'wrangler', 'deploy', '--config', self::CONFIG], $tell, 'deploy the Worker');
+            $deployed = $this->run(['npx', 'wrangler', 'deploy', '--config', self::CONFIG], $tell, 'deploy the Worker',
+                refused: 'The API token may not deploy it: give it Workers Scripts: Edit, Containers: Edit, Workers R2 Storage: Edit and Account Settings: Read, for this account.');
 
             $url = preg_match('#https://[A-Za-z0-9.-]+\.workers\.dev#', $deployed, $address) === 1 ? $address[0] : config('review.cloudflare.url');
 
@@ -193,9 +206,10 @@ class WorkerDeployment
      * @param  list<string>  $command
      * @param  Closure(string): void  $tell
      * @param  string|null  $tolerate  output that means it was done before, which is no failure
+     * @param  string|null  $refused  what to do when Cloudflare refuses the token
      * @return string what it printed
      */
-    protected function run(array $command, Closure $tell, string $what, ?string $tolerate = null, ?string $input = null): string
+    protected function run(array $command, Closure $tell, string $what, ?string $tolerate = null, ?string $input = null, ?string $refused = null): string
     {
         $process = Process::path(self::directory())
             ->timeout(self::TIMEOUT)
@@ -205,6 +219,9 @@ class WorkerDeployment
                 'CI' => 'true',
                 'WRANGLER_SEND_METRICS' => 'false',
                 'NO_UPDATE_NOTIFIER' => '1',
+                // Plain text: what it prints is read on a page, not in a terminal.
+                'NO_COLOR' => '1',
+                'FORCE_COLOR' => '0',
             ]);
 
         if ($input !== null) {
@@ -237,7 +254,10 @@ class WorkerDeployment
         }
 
         if ($result->failed() && ($tolerate === null || ! str_contains($printed, $tolerate))) {
-            throw new RuntimeException("Could not {$what} (exit {$result->exitCode()}).");
+            // Cloudflare's answer to a token without the permission for it.
+            $permission = $refused !== null && (str_contains($printed, 'code: 10000') || str_contains($printed, 'Authentication error'));
+
+            throw new RuntimeException("Could not {$what} (exit {$result->exitCode()}).".($permission ? " {$refused}" : ''));
         }
 
         return $printed;
