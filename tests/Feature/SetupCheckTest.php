@@ -17,7 +17,8 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
-use League\Flysystem\UnableToCheckFileExistence;
+use League\Flysystem\UnableToReadFile;
+use League\Flysystem\UnableToWriteFile;
 
 use function Pest\Livewire\livewire;
 
@@ -163,11 +164,32 @@ it('says when the Worker has no bucket, and when this installation cannot reach 
         'filesystems.disks.r2.key' => 'key', 'filesystems.disks.r2.secret' => 'secret', 'filesystems.disks.r2.bucket' => 'review-central', 'filesystems.disks.r2.endpoint' => 'https://account.r2.cloudflarestorage.com',
     ]);
     Http::fake(['sandbox.example.com/health*' => Http::response(['ok' => true, 'bucket' => false])]);
-    Storage::shouldReceive('disk')->with('r2')->andReturnSelf()->getMock()->shouldReceive('exists')->andThrow(UnableToCheckFileExistence::forLocation('review/setup-check', new RuntimeException('403 Forbidden')));
+    Storage::shouldReceive('disk')->with('r2')->andReturnSelf()->getMock()->shouldReceive('put')->andThrow(UnableToWriteFile::atLocation('review/setup-check', '', new RuntimeException('403 Forbidden')));
 
     expect(($this->find)('the Worker answers'))->toMatchArray(['state' => SetupCheck::WRONG, 'detail' => 'It answers, but has no bucket.'])
-        ->and(($this->find)('reaches the bucket'))->toMatchArray(['state' => SetupCheck::WRONG, 'detail' => 'It cannot: 403 Forbidden'])
+        ->and(($this->find)('reaches the bucket'))->toMatchArray(['state' => SetupCheck::WRONG, 'detail' => 'It cannot write to review-central: 403 Forbidden'])
         ->and(($this->find)('reaches the bucket')['fix'])->toContain('R2_ENDPOINT');
+});
+
+it('reaches the bucket as a review does, and says when its keys may write but not read', function () {
+    config([
+        'review.cloudflare.url' => 'https://sandbox.example.com', 'review.cloudflare.token' => 'worker-token',
+        'filesystems.disks.r2.key' => 'key', 'filesystems.disks.r2.secret' => 'secret', 'filesystems.disks.r2.bucket' => 'review-central', 'filesystems.disks.r2.endpoint' => 'https://account.r2.cloudflarestorage.com',
+    ]);
+    Http::fake(['sandbox.example.com/health*' => Http::response(['ok' => true, 'bucket' => true])]);
+    Storage::fake('r2');
+
+    // Whether an object that is not there exists is never asked: without the right
+    // to list the bucket, R2 answers that with 403.
+    expect(($this->find)('reaches the bucket'))->toMatchArray(['state' => SetupCheck::OK, 'detail' => 'It can write to review-central, read from it and remove from it.'])
+        ->and(Storage::disk('r2')->allFiles())->toBe([]);
+
+    Storage::shouldReceive('disk')->with('r2')->andReturnSelf()->getMock()
+        ->shouldReceive('put')->andReturnTrue()->getMock()
+        ->shouldReceive('get')->andThrow(UnableToReadFile::fromLocation('review/setup-check', '403 Forbidden'));
+
+    expect(($this->find)('reaches the bucket')['detail'])->toStartWith('It cannot read from review-central')
+        ->and(($this->find)('reaches the bucket')['fix'])->toContain('Read as well as Edit');
 });
 
 it('shows the checks to an administrator, with a count of what is to fix in the menu', function () {

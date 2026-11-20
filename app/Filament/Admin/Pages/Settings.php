@@ -6,6 +6,7 @@ namespace App\Filament\Admin\Pages;
 
 use App\Filament\Themes;
 use App\Runners\Runners;
+use App\Services\CloudflareTest;
 use App\Services\Currency;
 use App\Services\PlatformSettings;
 use BackedEnum;
@@ -143,46 +144,77 @@ class Settings extends Page
                             ->helperText('A small credit at the foot of the sidebar.'),
                     ]),
                 Section::make('Cloudflare sandboxes')
+                    ->key('cloudflare')
                     ->description(new HtmlString('To run reviewers in a Cloudflare sandbox, deployed from here: <strong>Deploy the Worker</strong> on the Setup page then makes the bucket, deploys the Worker and keeps its address and token. The account needs the Workers Paid plan. What the environment sets (CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, R2_*, REVIEW_CLOUDFLARE_*) goes before these.'))
                     ->columns(2)
                     ->collapsible()
                     ->collapsed(fn (): bool => app(PlatformSettings::class)->text(PlatformSettings::CLOUDFLARE_ACCOUNT) === null)
+                    ->headerActions([
+                        Action::make('testCloudflare')
+                            ->label('Test')
+                            ->icon(Heroicon::OutlinedSignal)
+                            ->color('gray')
+                            ->action(function (CloudflareTest $test): void {
+                                $lines = $test->run();
+
+                                Notification::make()
+                                    ->title($lines === [] ? 'Nothing to test yet' : (collect($lines)->every('ok') ? 'Cloudflare answers' : 'Not everything works'))
+                                    ->body($lines === []
+                                        ? 'Save an API token, the bucket\'s keys or a deployed Worker first.'
+                                        : collect($lines)->map(fn (array $line): string => ($line['ok'] ? '✓ ' : '✗ ').'<strong>'.e($line['title']).'</strong>: '.e($line['detail']))->implode('<br>'))
+                                    ->status($lines !== [] && collect($lines)->every('ok') ? 'success' : 'danger')
+                                    ->persistent()
+                                    ->send();
+                            }),
+                    ])
                     ->schema([
-                        TextInput::make(PlatformSettings::CLOUDFLARE_ACCOUNT)
+                        self::overridable(TextInput::make(PlatformSettings::CLOUDFLARE_ACCOUNT)
                             ->label('Account ID')
                             ->regex('/^[a-f0-9]{32}$/')
                             ->validationMessages(['regex' => 'The 32 characters shown on the account\'s overview in the Cloudflare dashboard.'])
-                            ->helperText('On the account\'s overview in the dashboard, under API.'),
-                        TextInput::make(PlatformSettings::CLOUDFLARE_API_TOKEN)
+                            ->helperText('On the account\'s overview in the dashboard, under API.')),
+                        self::overridable(TextInput::make(PlatformSettings::CLOUDFLARE_API_TOKEN)
                             ->label('API token')
                             ->password()
                             ->revealable()
                             ->autocomplete('off')
                             ->placeholder(fn (): ?string => app(PlatformSettings::class)->secret(PlatformSettings::CLOUDFLARE_API_TOKEN) !== null ? 'Saved; type to replace' : null)
-                            ->helperText(new HtmlString('<a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener" class="underline">Create one</a> for this account with Workers Scripts, Containers and Workers R2 Storage: Edit, and Account Settings: Read. Used only to deploy.')),
-                        TextInput::make(PlatformSettings::CLOUDFLARE_WORKER)
+                            ->helperText(new HtmlString('<a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener" class="underline">Create one</a> for this account with Workers Scripts, Containers and Workers R2 Storage: Edit, and Account Settings: Read. Used only to deploy.'))),
+                        self::overridable(TextInput::make(PlatformSettings::CLOUDFLARE_WORKER)
                             ->label('Worker name')
                             ->placeholder(PlatformSettings::DEFAULT_WORKER)
                             ->regex('/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/')
-                            ->validationMessages(['regex' => 'Lower case letters, digits and dashes.']),
-                        TextInput::make(PlatformSettings::CLOUDFLARE_BUCKET)
+                            ->validationMessages(['regex' => 'Lower case letters, digits and dashes.'])),
+                        self::overridable(TextInput::make(PlatformSettings::CLOUDFLARE_BUCKET)
                             ->label('Bucket')
                             ->placeholder(PlatformSettings::DEFAULT_BUCKET)
                             ->regex('/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/')
                             ->validationMessages(['regex' => 'Lower case letters, digits and dashes, 3 to 63 of them.'])
-                            ->helperText('Made by the deploy when it is not there.'),
-                        TextInput::make(PlatformSettings::R2_ACCESS_KEY_ID)
+                            ->helperText('Made by the deploy when it is not there.')),
+                        self::overridable(TextInput::make(PlatformSettings::R2_ACCESS_KEY_ID)
                             ->label('Bucket access key ID')
-                            ->helperText('R2 → Manage API tokens → Create API token, with Object Read & Write on the bucket only.'),
-                        TextInput::make(PlatformSettings::R2_SECRET_ACCESS_KEY)
+                            ->helperText('R2 → Manage API tokens → Create API token, with Object Read & Write on the bucket only: in a custom token, Workers R2 Storage Bucket Item with Read and Edit both.')),
+                        self::overridable(TextInput::make(PlatformSettings::R2_SECRET_ACCESS_KEY)
                             ->label('Bucket secret access key')
                             ->password()
                             ->revealable()
                             ->autocomplete('off')
-                            ->placeholder(fn (): ?string => app(PlatformSettings::class)->secret(PlatformSettings::R2_SECRET_ACCESS_KEY) !== null ? 'Saved; type to replace' : null),
+                            ->placeholder(fn (): ?string => app(PlatformSettings::class)->secret(PlatformSettings::R2_SECRET_ACCESS_KEY) !== null ? 'Saved; type to replace' : null)),
                     ]),
             ])
             ->statePath('data');
+    }
+
+    /**
+     * A Cloudflare setting that the environment may set instead: then it says
+     * so, as what is saved here is not used.
+     */
+    protected static function overridable(TextInput $field): TextInput
+    {
+        return $field
+            ->hint(fn (): ?string => ($variable = app(PlatformSettings::class)->setByEnvironment($field->getName())) === null ? null : "{$variable} in .env is used instead")
+            ->hintIcon(fn (): ?Heroicon => app(PlatformSettings::class)->setByEnvironment($field->getName()) === null ? null : Heroicon::OutlinedExclamationTriangle)
+            ->hintColor('warning');
     }
 
     public function content(Schema $schema): Schema
