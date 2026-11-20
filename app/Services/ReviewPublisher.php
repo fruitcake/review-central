@@ -390,7 +390,7 @@ class ReviewPublisher
      *
      * @param  array<int, array<string, mixed>>  $findings
      * @param  array<int, array<string, mixed>>  $comments
-     * @param  array<string, int>  $counts
+     * @param  array<string, int|string>  $counts
      * @param  array<string, mixed>  $notes
      * @return array<string, mixed>
      */
@@ -595,7 +595,7 @@ class ReviewPublisher
      * @param  array<int, array<string, mixed>>  $findings
      * @param  array<string, array<string, mixed>>  $previous
      * @param  array{created: int, updated: int, replied: int, resolved: int, reopened: int}  $counts
-     * @return array{created: int, updated: int, replied: int, resolved: int, reopened: int}
+     * @return array{created: int, updated: int, replied: int, resolved: int, reopened: int, not_resolved?: int, resolve_error?: string}
      */
     protected function publishFindings(
         Repository $repository,
@@ -679,6 +679,7 @@ class ReviewPublisher
                         $counts[$settledNow ? 'resolved' : 'reopened']++;
                     } catch (Throwable $exception) {
                         report($exception);
+                        $counts = self::unresolved($counts, $exception);
                     }
                 }
 
@@ -757,8 +758,25 @@ class ReviewPublisher
                 $counts['resolved']++;
             } catch (Throwable $exception) {
                 report($exception);
+                $counts = self::unresolved($counts, $exception);
             }
         }
+
+        return $counts;
+    }
+
+    /**
+     * Counts a thread that would not resolve, with the host's first word on why,
+     * for the run's log: the reply under it is posted either way, so on the pull
+     * request it reads as fixed and still open.
+     *
+     * @param  array{created: int, updated: int, replied: int, resolved: int, reopened: int, not_resolved?: int, resolve_error?: string}  $counts
+     * @return array{created: int, updated: int, replied: int, resolved: int, reopened: int, not_resolved?: int, resolve_error?: string}
+     */
+    protected static function unresolved(array $counts, Throwable $exception): array
+    {
+        $counts['not_resolved'] = ($counts['not_resolved'] ?? 0) + 1;
+        $counts['resolve_error'] ??= mb_substr($exception->getMessage(), 0, 300);
 
         return $counts;
     }

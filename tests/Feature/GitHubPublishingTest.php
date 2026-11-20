@@ -331,7 +331,10 @@ it('still says a finding was fixed when GitHub will not resolve its thread', fun
     $this->fileReview($report(7, 'new', 'FAILED'))->assertOk();
 
     $this->github->graphqlFails = true;
-    $this->fileReview($report(8, 'fixed', 'PASSED'))->assertOk();
+    // Counted, with GitHub's reason, for the run's log to say.
+    $this->fileReview($report(8, 'fixed', 'PASSED'))->assertOk()
+        ->assertJsonPath('publish.comments.not_resolved', 1)
+        ->assertJsonPath('publish.comments.resolve_error', fn (string $error): bool => $error !== '');
 
     expect(collect($this->github->threads)->first()['resolved'])->toBeFalse()
         ->and(collect($this->github->reviewComments)->last()['body'])->toStartWith('Fixed in');

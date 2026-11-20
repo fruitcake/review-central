@@ -51,7 +51,7 @@ To register it, as the installation's administrator: on GitHub, under the organi
 
 - **Callback URL**: `<APP_URL>/connections/oauth/callback`. Leave *Request user authorization (OAuth) during installation* off.
 - **Webhook URL**: `<APP_URL>/api/webhooks/github-app`, with a secret of your own.
-- **Repository permissions**: Contents and Metadata read; Pull requests, Issues, Commit statuses and Checks read and write. **Organization permissions**: Members read, to check who owns an organisation.
+- **Repository permissions**: Metadata read; Contents, Pull requests, Issues, Commit statuses and Checks read and write. Contents write is only there because GitHub asks it of an app that resolves a review thread, as the review does for a fixed finding; nothing is pushed. Without it the review still says "Fixed in …" under the finding, and its log says the thread could not be resolved. **Organization permissions**: Members read, to check who owns an organisation.
 - **Events**: Pull request, Issue comment, Pull request review comment, Pull request review, Check run.
 - **Where can this GitHub App be installed**: *Any account*, for tenants outside your own organisation. That needs no verification by GitHub; it asks for one only for a paid listing in the Marketplace.
 

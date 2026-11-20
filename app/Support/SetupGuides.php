@@ -189,7 +189,7 @@ class SetupGuides
                 'Create it, then **Generate a private key** and generate a client secret. Fill in the app ID, the name in its address, the client ID and secret, the webhook secret and the contents of the private key under **Settings → Integrations**; or set `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY` (the PEM file\'s path, or its contents) and `GITHUB_APP_WEBHOOK_SECRET` in `.env`, which goes first.',
             ],
             permissions: [
-                'Repository → Contents: Read' => 'clones the repository and reads its files.',
+                'Repository → Contents: Read and write' => 'clones the repository and reads its files; write only because GitHub asks it of an app that resolves the thread of a fixed finding. Nothing is pushed.',
                 'Repository → Metadata: Read' => 'GitHub requires it.',
                 'Repository → Pull requests: Read and write' => 'reads the pull request, comments on its lines, approves or requests changes.',
                 'Repository → Issues: Read and write' => 'comments on the pull request\'s conversation.',
