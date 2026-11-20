@@ -18,6 +18,7 @@ use App\Services\ReviewComparisons;
 use App\Services\ReviewSettings;
 use App\Services\ReviewTrial;
 use Filament\Facades\Filament;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 
@@ -324,7 +325,7 @@ it('leaves a column out, at the end and out of the analysis, and brings it back'
     expect($comparison->refresh()->excluded)->toBe(['C']);
 });
 
-it('clears a tier or alias the reviewer or runner picked next has no use for, and keeps a model by name', function () {
+it('clears a tier or alias when the reviewer or runner changes, and keeps a model by name', function () {
     Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
     Connection::factory()->openai()->create(['tenant_id' => $this->repository->tenant_id]);
 
@@ -334,11 +335,12 @@ it('clears a tier or alias the reviewer or runner picked next has no use for, an
         // Codex has no Claude alias.
         ->fillForm(['provider' => 'codex-cli'])
         ->assertSchemaStateSet(['model' => null])
+        // A tier names another model for Codex than for Claude Code.
         ->fillForm(['provider' => 'claude-code', 'model' => 'smartest'])
-        // A tier still means something for Codex.
         ->fillForm(['provider' => 'codex-cli'])
-        ->assertSchemaStateSet(['model' => 'smartest'])
+        ->assertSchemaStateSet(['model' => null])
         // The diff alone takes models by name only.
+        ->fillForm(['model' => 'default'])
         ->fillForm(['runner' => 'diff'])
         ->assertSchemaStateSet(['model' => null])
         ->fillForm(['model' => 'claude-opus-5-5', 'runner' => null])
@@ -436,4 +438,23 @@ it('applies two changes to which columns are left out that overlap', function ()
     $stale->toggleExcluded('C');
 
     expect($comparison->refresh()->excluded)->toBe(['B', 'C']);
+});
+
+it('saves a setup\'s place before its trial starts, so its job never waits on a transaction', function () {
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [],
+    ]);
+    $level = DB::transactionLevel();
+    $this->mock(ReviewTrial::class)->shouldReceive('begin')->once()->andReturnUsing(function () use ($comparison, $level): array {
+        // Outside any transaction of its own, with its place already saved.
+        expect(DB::transactionLevel())->toBe($level)
+            ->and(ReviewComparison::query()->find($comparison->id)->rows)->toHaveCount(1);
+
+        return ['repository' => $this->repository, 'build' => 53];
+    });
+
+    app(ReviewComparisons::class)->add($comparison, [['runner' => null, 'provider' => 'claude-code', 'model' => null, 'effort' => null, 'verify' => false]], true);
+
+    expect($comparison->rows[0]['build'])->toBe(53);
 });

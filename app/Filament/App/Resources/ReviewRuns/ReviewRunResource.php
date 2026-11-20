@@ -188,15 +188,13 @@ class ReviewRunResource extends Resource
     }
 
     /**
-     * Clears a tier or an alias the reviewer or runner now picked has no use for: one
-     * that is not in its list. A model by name stays.
+     * Clears a tier or an alias when the reviewer or runner changes: what a tier
+     * means hangs on the provider that reads it, and an alias is Claude Code's. A
+     * model by name stays.
      */
     protected static function keepModel(Get $get, Set $set): void
     {
-        $model = $get('model');
-
-        if (in_array($model, [...ReviewSettings::TIERS, ...ReviewSettingsForm::CLAUDE_ALIASES], true)
-            && ! array_key_exists($model, self::trialModels($get('runner') === DiffRunner::NAME ? null : $get('provider')))) {
+        if (in_array($get('model'), [...ReviewSettings::TIERS, ...ReviewSettingsForm::CLAUDE_ALIASES], true)) {
             $set('model', null);
         }
     }

@@ -55,15 +55,14 @@ class ReviewComparisons
      */
     public function add(ReviewComparison $comparison, array $rows, bool $ignoreExisting): int
     {
-        // Under a lock on the comparison: two additions at once each see the other's
-        // rows, so neither overwrites a paid trial, and the most holds.
-        return DB::transaction(function () use ($comparison, $rows, $ignoreExisting): int {
+        // First the places, under a lock on the comparison: two additions at once
+        // each see the other's, and the most holds.
+        $reserved = DB::transaction(function () use ($comparison, $rows): array {
             $locked = ReviewComparison::query()->whereKey($comparison->getKey())->lockForUpdate()->firstOrFail();
             $room = ReviewComparison::MAX_ROWS - count($locked->rows);
-            $run = $locked->reviewRun;
 
-            if ($room <= 0 || $run === null) {
-                return 0;
+            if ($room <= 0 || $locked->reviewRun === null) {
+                return [];
             }
 
             $analysis = $locked->analysis;
@@ -73,12 +72,37 @@ class ReviewComparisons
                 $analysis['labels'] = array_map('strval', $locked->columns()->filter(fn (array $column): bool => $column['run'] !== null)->keys()->all());
             }
 
-            $added = $this->trials($run, array_slice(array_values($rows), 0, $room), $ignoreExisting);
-            $locked->update(['rows' => [...array_values($locked->rows), ...$added], 'analysis' => $analysis]);
-            $comparison->setRawAttributes($locked->getAttributes(), true);
+            $existing = array_values($locked->rows);
+            $new = array_slice(array_values($rows), 0, $room);
+            $locked->update(['rows' => [...$existing, ...$new], 'analysis' => $analysis]);
 
-            return count($added);
+            return array_combine(range(count($existing), count($existing) + count($new) - 1), $new);
         });
+
+        $run = $comparison->reviewRun;
+
+        if ($reserved === [] || $run === null) {
+            $comparison->refresh();
+
+            return 0;
+        }
+
+        // Then the trials, once the places are saved: a trial's job is on the queue
+        // the moment it starts, and its worker finds its row.
+        foreach ($reserved as $index => $row) {
+            $started = $this->trials($run, [$row], $ignoreExisting)[0];
+
+            DB::transaction(function () use ($comparison, $index, $started): void {
+                $locked = ReviewComparison::query()->whereKey($comparison->getKey())->lockForUpdate()->firstOrFail();
+                $saved = array_values($locked->rows);
+                $saved[$index] = $started;
+                $locked->update(['rows' => $saved]);
+            });
+        }
+
+        $comparison->refresh();
+
+        return count($reserved);
     }
 
     /**
