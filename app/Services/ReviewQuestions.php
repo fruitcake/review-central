@@ -372,6 +372,11 @@ class ReviewQuestions
      */
     public function reply(Repository $repository, int $pullRequestId, int $commentId, string $text): ?int
     {
+        // A connection that posts nothing: the answer is on the review's page alone.
+        if (! $repository->sourceControl()->publishes()) {
+            return null;
+        }
+
         try {
             $posted = $repository->sourceControl()->addPullRequestComment((string) $pullRequestId, $text."\n\n".ReviewPublisher::REPLY_MARKER, parentId: $commentId);
 

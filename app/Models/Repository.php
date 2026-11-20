@@ -9,6 +9,7 @@ use App\Enums\ReviewsFrom;
 use App\Runners\ReviewRunner;
 use App\Runners\Runners;
 use App\SourceControl\FiltersSecrets;
+use App\SourceControl\ReadOnlyClient;
 use App\SourceControl\SourceControl;
 use App\Support\SecretFilter;
 use Carbon\CarbonInterface;
@@ -144,6 +145,8 @@ class Repository extends Model
             $client->keepingOut($this->secretFilter);
         }
 
-        return $client;
+        // A connection set to keep its reviews here reads through its client and
+        // writes nothing, whatever its token may do.
+        return $this->integration?->setting(ReadOnlyClient::SETTING) === ReadOnlyClient::READ ? new ReadOnlyClient($client) : $client;
     }
 }

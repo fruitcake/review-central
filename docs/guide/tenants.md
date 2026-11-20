@@ -9,7 +9,7 @@ In the tenant's panel, at `/app/<tenant>`. Every connection form has **How to ge
 2. **Source control**: add the host.
    - **GitHub**: a fine-grained personal access token for the repositories, with read access to Contents and Metadata, read and write access to Pull requests, Issues and Commit statuses, and Webhooks to have the webhook added for you. The review comments, approves and requests changes as the account that owns the token, so give it an account of its own, a machine user: GitHub does not let an account approve its own pull request. The owner is the user or organisation from the address. Without a token, a public repository is only read, and its pull requests can be tried.
    - **GitHub App**, where the installation has [one set up](#github-as-an-app): install the app on the organisation, add the connection with the organisation as its owner, and use **Connect** in the list. No token, and no webhook to add.
-   - **Bitbucket Cloud**: a workspace access token that may write pull requests.
+   - **Bitbucket Cloud**: a workspace access token that may write pull requests. Under **Reviews**, a Bitbucket or GitHub connection can keep its reviews in Review Central and post nothing on the host: no comment, status, task or approval, whatever its token may do, so a token that may only read is enough. Each review is then on its own page only, and a question asked on the pull request is answered there.
    - **Git**: clones any other host over HTTPS, and posts nothing.
 
    **AI providers**: add a key, with the model and effort Claude Code or Codex reviews at on it. "Test" checks the credentials.
