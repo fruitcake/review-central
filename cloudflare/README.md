@@ -136,7 +136,7 @@ Other traffic leaves the sandbox as it did: Composer, npm and the CLIs' own upda
 - **PHP 8.1 to 8.5**, where the reviewer's Docker image goes back to 5.6. An older repository is reviewed on the newest; Composer runs with `--ignore-platform-reqs`, as it does on Docker.
 - **The Composer cache is the destination branch's `vendor/`**, one per repository, in the bucket under `review/cache/<repository>/`. A review fetches it, and Composer installs only what the pull request's lock changes. It is kept again only by a review whose lock is the destination branch's, written right after the install, so what is kept is never a pull request's own packages. Composer's own download cache does not travel.
 - **No memory figure**: a sandbox does not say what it used.
-- **The reviewer's key is in the sandbox**, as it is in the Docker container. The sandbox has the internet and no credential for the repository's host.
+- **The reviewer's key is not in the sandbox**, where it is in the Docker container: the Worker puts it in on the way to the provider (above). The sandbox has the internet and no credential for the repository's host.
 
 ## The image
 
