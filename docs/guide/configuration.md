@@ -53,7 +53,7 @@ See [`cloudflare/README.md`](https://github.com/fruitcake/review-central/blob/ma
 | Setting | Default | What it does |
 |---|---|---|
 | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` | — | What deploys the Worker from here (`php artisan review:deploy-worker`, or Deploy the Worker on the setup page). Also under Settings. |
-| `REVIEW_CLOUDFLARE_WORKER` | `review-central-sandbox` | The Worker's name, for that deploy. |
+| `REVIEW_CLOUDFLARE_WORKER` | — | The Worker's name, for that deploy. Also under Settings; `review-central-sandbox` when neither names one. |
 | `REVIEW_CLOUDFLARE_URL` | — | The deployed Worker's address. A deploy from here keeps it under Settings instead. |
 | `REVIEW_CLOUDFLARE_TOKEN` | — | The token the Worker was deployed with. |
 | `REVIEW_CLOUDFLARE_LOCAL` | `false` | Use the Worker on this machine (`npx wrangler dev`) while no deployed one is named. |

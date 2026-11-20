@@ -20,7 +20,8 @@ const ACCOUNT = '0123456789abcdef0123456789abcdef';
 
 beforeEach(function () {
     config([
-        'review.cloudflare.account' => null, 'review.cloudflare.api_token' => null, 'review.cloudflare.worker' => null,
+        // The Worker's name as config/review.php has it without REVIEW_CLOUDFLARE_WORKER.
+        'review.cloudflare.account' => null, 'review.cloudflare.api_token' => null,
         'review.cloudflare.url' => null, 'review.cloudflare.token' => null,
         'filesystems.disks.r2.key' => null, 'filesystems.disks.r2.secret' => null, 'filesystems.disks.r2.bucket' => null, 'filesystems.disks.r2.endpoint' => null,
     ]);
@@ -73,12 +74,19 @@ it('keeps the secrets encrypted, keeps one left empty, and fills only what the e
 });
 
 it('deploys the Worker with Wrangler, and keeps its address and a new token', function () {
+    expect(config('review.cloudflare.worker'))->toBeNull();
+
     cloudflareSettings();
+    $deployed = null;
     Process::fake([
         "'node' '--version'" => Process::result('v22.11.0'),
         "'npm' 'ci'*" => Process::result('added 80 packages'),
         "'npx' 'wrangler' 'r2'*" => Process::result(errorOutput: 'The bucket you tried to create already exists, and you own it.', exitCode: 1),
-        "'npx' 'wrangler' 'deploy'*" => Process::result("Uploaded acme-sandbox\nDeployed acme-sandbox triggers\n  https://acme-sandbox.acme.workers.dev\n"),
+        "'npx' 'wrangler' 'deploy'*" => function () use (&$deployed) {
+            $deployed = json_decode(File::get(WorkerDeployment::directory().'/'.WorkerDeployment::CONFIG), true);
+
+            return Process::result("Uploaded acme-sandbox\nDeployed acme-sandbox triggers\n  https://acme-sandbox.acme.workers.dev\n");
+        },
         "'npx' 'wrangler' 'secret'*" => Process::result('Success! Uploaded secret API_TOKEN'),
     ]);
 
@@ -96,6 +104,9 @@ it('deploys the Worker with Wrangler, and keeps its address and a new token', fu
         ->and(config('review.cloudflare.token'))->toBe($token)
         ->and($lines)->toContain('Deployed: https://acme-sandbox.acme.workers.dev')
         ->and(Cache::get(WorkerDeployment::RESULT)['ok'])->toBeTrue()
+        // With the names under Settings, never another installation's default.
+        ->and($deployed['name'])->toBe('acme-sandbox')
+        ->and($deployed['r2_buckets'][0]['bucket_name'])->toBe('acme-reviews')
         // The configuration with this installation's names is gone again.
         ->and(File::exists(WorkerDeployment::directory().'/'.WorkerDeployment::CONFIG))->toBeFalse();
 
@@ -151,4 +162,22 @@ it('is set up under Settings and deployed from the setup page', function () {
     livewire(Setup::class)->assertActionVisible('deployWorker')->callAction('deployWorker');
 
     Queue::assertPushed(DeployCloudflareWorker::class);
+});
+
+it('keeps the settings out of a configuration cache, where a later change would not take', function () {
+    $argv = $_SERVER['argv'];
+    $_SERVER['argv'] = ['artisan', 'config:cache'];
+
+    try {
+        cloudflareSettings();
+    } finally {
+        $_SERVER['argv'] = $argv;
+    }
+
+    expect(config('review.cloudflare.account'))->toBeNull()
+        ->and(config('review.cloudflare.api_token'))->toBeNull();
+
+    app(PlatformSettings::class)->applyCloudflare();
+
+    expect(config('review.cloudflare.account'))->toBe(ACCOUNT);
 });

@@ -157,6 +157,13 @@ class PlatformSettings
      */
     public function applyCloudflare(): void
     {
+        // Not into a configuration cache: that would keep these values as if the
+        // environment had set them, so a later change here would not take, and
+        // write the secrets out in plain text.
+        if (app()->runningConsoleCommand('config:cache', 'optimize')) {
+            return;
+        }
+
         $account = $this->text(self::CLOUDFLARE_ACCOUNT);
         $disk = (string) config('review.cloudflare.disk');
         $values = [

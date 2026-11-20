@@ -227,7 +227,9 @@ return [
         // the token and the bucket's keys.
         'account' => env('CLOUDFLARE_ACCOUNT_ID'),
         'api_token' => env('CLOUDFLARE_API_TOKEN'),
-        'worker' => env('REVIEW_CLOUDFLARE_WORKER', 'review-central-sandbox'),
+        // Empty here, so the name under Settings can fill it; the deploy falls
+        // back to review-central-sandbox.
+        'worker' => env('REVIEW_CLOUDFLARE_WORKER'),
         // What an instance has, and what Cloudflare charges for it in dollars, to
         // estimate what a review's sandbox cost: memory and disk for the time it
         // ran, and a processor for all of that time, which is the most it can be.
