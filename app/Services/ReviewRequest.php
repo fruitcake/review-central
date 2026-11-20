@@ -220,6 +220,11 @@ class ReviewRequest
         if (($data['state'] ?? null) !== 'OPEN') {
             OpenPullRequest::query()->where($key)->delete();
 
+            // Merged with findings still open: they go on the repository's backlog.
+            if (($data['state'] ?? null) === 'MERGED') {
+                app(OpenFindings::class)->record($repository, (int) $data['id'], is_string($data['merge_commit']['hash'] ?? null) ? $data['merge_commit']['hash'] : null);
+            }
+
             // Merged or declined: what the reviewer kept of it has no further use.
             if (is_string($data['source']['branch']['name'] ?? null)) {
                 app(ReviewSessions::class)->forget($repository, $data['source']['branch']['name']);
@@ -313,6 +318,10 @@ class ReviewRequest
     {
         if ($data === null || ($data['state'] ?? null) !== 'OPEN') {
             OpenPullRequest::query()->where(['repository_id' => $repository->getKey(), 'pull_request_id' => $pullRequestId])->delete();
+
+            if (($data['state'] ?? null) === 'MERGED') {
+                app(OpenFindings::class)->record($repository, $pullRequestId, is_string($data['merge_commit']['hash'] ?? null) ? $data['merge_commit']['hash'] : null);
+            }
 
             return;
         }

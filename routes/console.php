@@ -11,6 +11,7 @@ Schedule::command('review:prune-caches')->dailyAt('04:45');
 Schedule::command('review:refresh-sandbox')->hourly();
 // Whose turn the open pull requests are, where a delivery was missed.
 Schedule::command('review:sync-pull-requests')->dailyAt('04:50');
+Schedule::command('review:check-open-findings')->dailyAt('05:00');
 // The numbers behind Horizon's metrics page.
 Schedule::command('horizon:snapshot')->everyFiveMinutes();
 // What the installation is doing, for the admin panel's capacity figures.
