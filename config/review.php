@@ -68,11 +68,12 @@ return [
     ],
 
     /*
-    | The platform's runner until an administrator picks one under Settings: the
-    | diff, which needs nothing but an AI provider's key. When it is not set up,
-    | the first runner that is.
+    | The platform's runner until an administrator picks one under Settings. Left
+    | unset: a Cloudflare sandbox once it is set up, the safest runner that reads
+    | the code, else the diff, which needs nothing but an AI provider's key. Docker
+    | runs only when it is picked. When the one named is not set up, as unset.
     */
-    'default_runner' => env('REVIEW_DEFAULT_RUNNER', 'diff'),
+    'default_runner' => env('REVIEW_DEFAULT_RUNNER'),
 
     /*
     | Docker on this installation's worker, with gVisor as its runtime: on once

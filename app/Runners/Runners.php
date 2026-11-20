@@ -15,11 +15,20 @@ class Runners
     public const DEFAULT = ContainerRunner::NAME;
 
     /**
+     * Without a choice, the runners in the order they are taken: a Cloudflare
+     * sandbox first, where the pull request's code runs away from this server and
+     * the AI provider's key never enters it; then the diff, which runs nothing.
+     * Docker only when someone picks it: its container holds the key, next to
+     * this server.
+     */
+    public const PREFERRED = [CloudflareRunner::NAME, DiffRunner::NAME];
+
+    /**
      * The platform's runner: the one an administrator picked under Settings, kept
      * also when it is not set up, so the repositories say so in their readiness
      * rather than run on a runner nobody chose. Without a pick, the configured one
-     * when it is set up, else the first that is: a fresh installation reviews from
-     * the diff, which needs only a key.
+     * when it is set up, else the first of PREFERRED that is, else the first that
+     * is at all: a fresh installation reviews from the diff, which needs only a key.
      */
     public function default(): string
     {
@@ -30,12 +39,21 @@ class Runners
         }
 
         $configured = config('review.default_runner');
+        $known = is_string($configured) && is_string(config("review.runners.{$configured}"));
 
-        if (is_string($configured) && is_string(config("review.runners.{$configured}")) && $this->get($configured)->available()) {
+        if ($known && $this->get($configured)->available()) {
             return $configured;
         }
 
-        return array_key_first($this->options()) ?? (is_string($configured) && is_string(config("review.runners.{$configured}")) ? $configured : self::DEFAULT);
+        $options = $this->options();
+
+        foreach (self::PREFERRED as $name) {
+            if (array_key_exists($name, $options)) {
+                return $name;
+            }
+        }
+
+        return array_key_first($options) ?? ($known ? $configured : self::DEFAULT);
     }
 
     /**
