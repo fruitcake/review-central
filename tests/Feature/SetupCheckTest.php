@@ -7,6 +7,7 @@ use App\Models\CapacitySample;
 use App\Models\ReviewInstruction;
 use App\Models\User;
 use App\Runners\Container\CloudflareSandbox;
+use App\Services\PlatformSettings;
 use App\Services\ReviewInstructions;
 use App\Services\SetupCheck;
 use Filament\Facades\Filament;
@@ -237,7 +238,7 @@ it('says whether the sandbox\'s tools are prepared, and has the Worker prepare t
         ->and(($this->find)('the tools are prepared')['fix'])->toContain('Prepare the sandbox');
 
     PrepareCloudflareSandbox::ask();
-    (new PrepareCloudflareSandbox)->handle(app(CloudflareSandbox::class));
+    (new PrepareCloudflareSandbox)->handle(app(CloudflareSandbox::class), app(PlatformSettings::class));
 
     // Done, so no longer said to be going.
     expect(Cache::has(PrepareCloudflareSandbox::PREPARING))->toBeFalse();

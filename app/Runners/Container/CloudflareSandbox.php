@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Runners\Container;
 
 use App\Llm\ProviderKeys;
+use App\Services\PlatformSettings;
 use Closure;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Http\Client\PendingRequest;
@@ -187,10 +188,68 @@ class CloudflareSandbox extends Sandbox
     /**
      * What installs the reviewers' tools on Cloudflare's own image, or null for an
      * image of one's own that has them.
+     *
+     * @param  array<string, string>|null  $versions  the CLIs' versions to install; those of the newest snapshot when left out
      */
-    public static function setupScript(): ?string
+    public static function setupScript(?array $versions = null): ?string
     {
-        return config('review.cloudflare.setup') ? (string) File::get(resource_path('review/skill/sandbox-setup.sh')) : null;
+        if (! config('review.cloudflare.setup')) {
+            return null;
+        }
+
+        $script = (string) File::get(resource_path('review/skill/sandbox-setup.sh'));
+        $versions ??= self::pinnedClis();
+
+        // Each CLI at the version its snapshot has: a new release is a new setup,
+        // made into a snapshot before any review starts from it.
+        foreach (self::CLIS as $package) {
+            $version = $versions[$package] ?? null;
+
+            if (is_string($version) && preg_match('/^[0-9A-Za-z.+-]+$/', $version) === 1) {
+                $script = (string) preg_replace('/(?<=\s)'.preg_quote($package, '/').'(?=\s)/', "\"{$package}@{$version}\"", $script);
+            }
+        }
+
+        return $script;
+    }
+
+    /**
+     * The reviewers' CLIs the setup installs at their newest release, by npm
+     * package. The others it names keep the range written there.
+     */
+    public const CLIS = ['@anthropic-ai/claude-code', '@openai/codex'];
+
+    /**
+     * The versions the setup installs now: those of the newest snapshot.
+     *
+     * @return array<string, string>
+     */
+    public static function pinnedClis(): array
+    {
+        $pinned = app(PlatformSettings::class)->get(PlatformSettings::CLOUDFLARE_CLIS);
+
+        return is_array($pinned) ? array_filter($pinned, 'is_string') : [];
+    }
+
+    /**
+     * The newest release of each CLI, as npm names it; one npm does not answer
+     * for is left out.
+     *
+     * @return array<string, string>
+     */
+    public static function latestClis(): array
+    {
+        $latest = [];
+
+        foreach (self::CLIS as $package) {
+            $version = rescue(fn (): mixed => Http::timeout(10)->connectTimeout(4)->acceptJson()->get('https://registry.npmjs.org/'.str_replace('/', '%2F', $package).'/latest')->throw()->json('version'), null, false);
+
+            if (is_string($version) && preg_match('/^[0-9A-Za-z.+-]+$/', $version) === 1) {
+                $latest[$package] = $version;
+            }
+        }
+
+        return $latest;
     }
 
     /**
@@ -215,11 +274,12 @@ class CloudflareSandbox extends Sandbox
      * review: a sandbox of its own installs them and keeps a snapshot. Nothing is
      * done when the snapshot is there. Takes a few minutes the first time.
      *
+     * @param  array<string, string>|null  $versions  the CLIs' versions to prepare; those of the newest snapshot when left out
      * @return array{ok: bool, made?: bool, seconds?: int, error?: string}
      */
-    public function prepare(): array
+    public function prepare(?array $versions = null): array
     {
-        $setup = self::setupScript();
+        $setup = self::setupScript($versions);
 
         if ($setup === null) {
             return ['ok' => true, 'made' => false, 'seconds' => 0];
