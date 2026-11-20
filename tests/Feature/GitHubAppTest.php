@@ -274,6 +274,33 @@ it('shows a running review\'s log in its check, only while the check runs', func
     File::deleteDirectory(storage_path('framework/testing/check-logs'));
 });
 
+it('leaves the check to the pull request\'s own review, not a trial or a security review on its commit', function (array $run) {
+    config(['review.container.log.enabled' => true, 'review.container.log.directory' => storage_path('framework/testing/check-logs')]);
+    Http::fake(fn (Request $request) => match (true) {
+        str_contains($request->url(), '/access_tokens') => Http::response(['token' => 'ghs_installation']),
+        str_contains($request->url(), '/users/') => Http::response(['id' => 555]),
+        str_contains($request->url(), '/check-runs?') || str_contains($request->url(), '/commits/') => Http::response(['check_runs' => [['id' => 3, 'status' => 'in_progress']]]),
+        default => Http::response(['private' => true]),
+    });
+    ReviewRun::query()->create($run + [
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'feature/export', 'pull_request_id' => 12, 'commit' => 'abc1234def', 'build_number' => 9,
+        'status' => ReviewRun::STATUS_RUNNING, 'started_at' => now()->subSeconds(65),
+    ]);
+    $log = app(RunLog::class);
+    File::ensureDirectoryExists(dirname($log->path($this->repository->id, 9)));
+    File::put($log->path($this->repository->id, 9), "12:00:00  ── review ──\n");
+
+    app(CheckProgress::class)->show($this->repository->id, 9);
+
+    Http::assertNotSent(fn (Request $request): bool => $request->method() === 'PATCH');
+
+    File::deleteDirectory(storage_path('framework/testing/check-logs'));
+})->with([
+    'a trial' => [['custom' => true]],
+    'a security review' => [['custom' => true, 'kind' => 'security']],
+]);
+
 it('shows progress at most every twenty seconds, and never in the way of the review', function () {
     $path = storage_path('framework/testing/progress.log');
     $shown = 0;
