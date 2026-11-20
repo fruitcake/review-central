@@ -251,8 +251,14 @@
                         @endif
                     </dl>
                     @if (! empty($run->metrics['steps']))
+                        @php($slowest = collect($run->metrics['steps'])->sortByDesc(fn ($step) => (int) ($step['seconds'] ?? 0))->first())
+                        {{-- Closed: what each step took is for whoever looks into a slow or heavy review. --}}
+                        <details class="rc-collapse">
+                            <summary>
+                                <span>Steps</span>
+                                <span class="rc-muted">{{ count($run->metrics['steps']) }} · longest {{ $slowest['name'] }}, {{ RunPresenter::duration((int) $slowest['seconds']) }}</span>
+                            </summary>
                         <table class="rc-steps">
-                            <caption class="rc-muted">Steps</caption>
                             <thead><tr><th scope="col">Step</th><th scope="col">Took</th><th scope="col">Memory</th><th scope="col">Processor</th></tr></thead>
                             <tbody>
                                 @foreach ($run->metrics['steps'] as $step)
@@ -265,6 +271,7 @@
                                 @endforeach
                             </tbody>
                         </table>
+                        </details>
                     @endif
                 </section>
 
