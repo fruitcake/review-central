@@ -20,7 +20,6 @@ use Filament\Forms\Components\ColorPicker;
 use Filament\Forms\Components\Field;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -73,10 +72,6 @@ class Settings extends Page
             PlatformSettings::CLOUDFLARE_API_TOKEN => null,
             PlatformSettings::R2_SECRET_ACCESS_KEY => null,
             'remove_logo' => false,
-            // The apps' IDs; their secrets, like the others, never go back to the browser.
-            ...collect(PlatformSettings::INTEGRATIONS)->keys()
-                ->mapWithKeys(fn (string $key): array => [$key => in_array($key, PlatformSettings::SECRETS, true) ? null : $settings->text($key)])
-                ->all(),
         ]);
     }
 
@@ -228,74 +223,8 @@ class Settings extends Page
                             ->autocomplete('off')
                             ->placeholder(fn (): ?string => app(PlatformSettings::class)->secret(PlatformSettings::R2_SECRET_ACCESS_KEY) !== null ? 'Saved; type to replace' : null)),
                     ]),
-                Section::make('Integrations')->id('integrations')
-                    ->key('integrations')
-                    ->description('The apps this installation is registered as at Google, Asana, Atlassian and GitHub, for signing in there instead of pasting a token. Each tenant can be given the ones it may use, on the tenant. What .env sets goes before these.')
-                    ->collapsible()
-                    ->schema([
-                        self::app('Signing in with Google', SetupGuides::GOOGLE, 'For everyone, before a tenant is known: who joins which tenant goes by its sign-in domains.', [
-                            self::overridable(TextInput::make(PlatformSettings::GOOGLE_CLIENT_ID)->label('Client ID')->maxLength(255)),
-                            self::secret(PlatformSettings::GOOGLE_CLIENT_SECRET, 'Client secret'),
-                        ]),
-                        self::app('Connecting Asana by signing in', SetupGuides::ASANA, 'A ticket connection then signs in at Asana instead of taking a pasted token.', [
-                            self::overridable(TextInput::make(PlatformSettings::ASANA_CLIENT_ID)->label('Client ID')->maxLength(255)),
-                            self::secret(PlatformSettings::ASANA_CLIENT_SECRET, 'Client secret'),
-                        ]),
-                        self::app('Connecting Jira by signing in', SetupGuides::ATLASSIAN, 'A ticket connection then signs in at Atlassian instead of taking a pasted token.', [
-                            self::overridable(TextInput::make(PlatformSettings::ATLASSIAN_CLIENT_ID)->label('Client ID')->maxLength(255)),
-                            self::secret(PlatformSettings::ATLASSIAN_CLIENT_SECRET, 'Client secret'),
-                        ]),
-                        self::app('Reviewing as a GitHub App', SetupGuides::GITHUB_APP, 'A tenant installs the app on its organisation and connects it, without a token.', [
-                            self::overridable(TextInput::make(PlatformSettings::GITHUB_APP_ID)->label('App ID')->regex('/^\d+$/')->maxLength(20)),
-                            self::overridable(TextInput::make(PlatformSettings::GITHUB_APP_SLUG)->label('Name in its address')->regex('/^[a-z0-9-]+$/')->maxLength(100)->helperText('github.com/apps/<this>')),
-                            self::overridable(TextInput::make(PlatformSettings::GITHUB_APP_CLIENT_ID)->label('Client ID')->maxLength(255)),
-                            self::secret(PlatformSettings::GITHUB_APP_CLIENT_SECRET, 'Client secret'),
-                            self::secret(PlatformSettings::GITHUB_APP_WEBHOOK_SECRET, 'Webhook secret'),
-                            self::overridable(Textarea::make(PlatformSettings::GITHUB_APP_PRIVATE_KEY)
-                                ->label('Private key')
-                                ->rows(3)
-                                ->rule('nullable')
-                                ->rule(fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
-                                    if (filled($value) && ! str_contains((string) $value, '-----BEGIN')) {
-                                        $fail('The contents of the .pem file GitHub made, from -----BEGIN to the end.');
-                                    }
-                                })
-                                ->placeholder(fn (): string => app(PlatformSettings::class)->secret(PlatformSettings::GITHUB_APP_PRIVATE_KEY) !== null ? 'Saved; paste to replace' : '-----BEGIN RSA PRIVATE KEY-----')
-                                ->helperText('The contents of the .pem file. Stored encrypted, and never shown again.')
-                                ->columnSpanFull()),
-                        ], columns: 2),
-                    ]),
             ])
             ->statePath('data');
-    }
-
-    /**
-     * One app: what it is for, with the guide that says where it is made.
-     *
-     * @param  array<int, Field>  $fields
-     */
-    protected static function app(string $title, string $guide, string $description, array $fields, int $columns = 2): Section
-    {
-        return Section::make($title)
-            ->description($description)
-            ->compact()
-            ->headerActions([SetupGuideAction::make(fn (SetupGuides $guides) => $guides->named($guide), str_replace('-', '', $guide).'Guide')])
-            ->schema($fields)
-            ->columns($columns);
-    }
-
-    /**
-     * A secret of an app: kept encrypted, never sent back, and replaced only when typed.
-     */
-    protected static function secret(string $key, string $label): Field
-    {
-        return self::overridable(TextInput::make($key)
-            ->label($label)
-            ->password()
-            ->revealable()
-            ->autocomplete('off')
-            ->maxLength(1000)
-            ->placeholder(fn (): ?string => app(PlatformSettings::class)->secret($key) !== null ? 'Saved; type to replace' : null));
     }
 
     /**

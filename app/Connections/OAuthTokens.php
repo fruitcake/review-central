@@ -61,20 +61,22 @@ class OAuthTokens
 
         $driver = $connection->driver();
         $refresh = $connection->credential('oauth_refresh_token');
+        // Renewed through the app it was connected with: another app's would not take its token.
+        $app = $driver instanceof ConnectsWithOAuth ? Integrations::forConnection($connection, $driver) : null;
 
-        if (! $driver instanceof ConnectsWithOAuth || $refresh === null) {
+        if (! $driver instanceof ConnectsWithOAuth || $refresh === null || $app === null) {
             throw new ConnectionFailed("{$connection->name} has to be connected again: its access ran out and cannot be renewed.");
         }
 
         // One at a time: a refresh token that rotates is spent by whoever uses it first.
-        return Cache::lock("connection-oauth:{$connection->getKey()}", 30)->block(20, function () use ($connection, $driver): string {
+        return Cache::lock("connection-oauth:{$connection->getKey()}", 30)->block(20, function () use ($connection, $driver, $app): string {
             $connection->refresh();
 
             if (! $this->expiring($connection)) {
                 return (string) $connection->credential('oauth_access_token');
             }
 
-            $this->store($connection, $driver->oauthRefresh((string) $connection->credential('oauth_refresh_token')));
+            $this->store($connection, $driver->oauthRefresh($app, (string) $connection->credential('oauth_refresh_token')));
 
             return (string) $connection->credential('oauth_access_token');
         });

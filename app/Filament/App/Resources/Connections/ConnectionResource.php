@@ -7,6 +7,7 @@ use App\Connections\ConnectsWithOAuth;
 use App\Connections\Drivers;
 use App\Connections\ExplainsSetup;
 use App\Connections\Integrations;
+use App\Connections\OAuthApp;
 use App\Connections\OAuthTokens;
 use App\Connections\SourceControlDriver;
 use App\Enums\ConnectionKind;
@@ -193,8 +194,29 @@ class ConnectionResource extends Resource
                 ->label(fn (Model $record): string => OAuthTokens::has($of($record)) ? 'Connect again' : 'Connect')
                 ->icon(Heroicon::OutlinedArrowTopRightOnSquare)
                 ->visible(fn (Model $record): bool => rescue(fn (): bool => ($driver = $of($record)->driver()) instanceof ConnectsWithOAuth && Integrations::offered($driver, $of($record)->tenant), false, false))
-                ->url(fn (Model $record): string => route('connections.oauth.redirect', ['connection' => $of($record)])),
+                // With several apps for this team, which one to sign in through.
+                ->schema(fn (Model $record): ?array => count($apps = self::appsFor($of($record))) > 1 ? [
+                    Select::make('app')
+                        ->label('Sign in through')
+                        ->options(collect($apps)->map(fn (OAuthApp $app): string => $app->name)->all())
+                        ->default((string) ($of($record)->setting('oauth_app') ?? array_key_first($apps)))
+                        ->required(),
+                ] : null)
+                ->modalSubmitActionLabel('Continue')
+                ->action(fn (Model $record, array $data, $livewire) => $livewire->redirect(route('connections.oauth.redirect', array_filter(['connection' => $of($record), 'app' => $data['app'] ?? null])))),
         ];
+    }
+
+    /**
+     * The apps a connection can sign in through, for its tenant.
+     *
+     * @return array<string, OAuthApp>
+     */
+    protected static function appsFor(Connection $connection): array
+    {
+        $driver = rescue(fn () => $connection->driver(), null, false);
+
+        return $driver instanceof ConnectsWithOAuth ? Integrations::available(Integrations::TYPE_OF[$driver->oauthIntegration()], $connection->tenant) : [];
     }
 
     public static function table(Table $table): Table

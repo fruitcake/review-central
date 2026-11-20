@@ -7,6 +7,7 @@ namespace App\SourceControl;
 use App\Connections\ConnectsWithOAuth;
 use App\Connections\Integrations;
 use App\Connections\NeedsSetup;
+use App\Connections\OAuthApp;
 use App\Exceptions\ConnectionFailed;
 use App\Models\Connection;
 use App\Models\Repository;
@@ -153,20 +154,20 @@ class GitHubAppDriver extends GitHubDriver implements ConnectsWithOAuth, NeedsSe
         return $this->oauthConfigured();
     }
 
-    public function oauthAuthorizeUrl(string $redirect, string $state): string
+    public function oauthAuthorizeUrl(OAuthApp $app, string $redirect, string $state): string
     {
         return 'https://github.com/login/oauth/authorize?'.http_build_query([
-            'client_id' => config('services.github_app.client_id'),
+            'client_id' => $app->clientId(),
             'redirect_uri' => $redirect,
             'state' => $state,
         ]);
     }
 
-    public function oauthExchange(string $code, string $redirect): array
+    public function oauthExchange(OAuthApp $app, string $code, string $redirect): array
     {
         $response = Http::timeout(15)->acceptJson()->withUserAgent('review-central')->post('https://github.com/login/oauth/access_token', [
-            'client_id' => config('services.github_app.client_id'),
-            'client_secret' => config('services.github_app.client_secret'),
+            'client_id' => $app->clientId(),
+            'client_secret' => $app->clientSecret(),
             'code' => $code,
             'redirect_uri' => $redirect,
         ]);
@@ -180,7 +181,7 @@ class GitHubAppDriver extends GitHubDriver implements ConnectsWithOAuth, NeedsSe
         return ['access_token' => $token, 'refresh_token' => null, 'expires_in' => null];
     }
 
-    public function oauthRefresh(string $refreshToken): array
+    public function oauthRefresh(OAuthApp $app, string $refreshToken): array
     {
         throw new ConnectionFailed('The connection acts as the app, and has no token of a person to refresh.');
     }
