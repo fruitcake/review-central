@@ -6,6 +6,7 @@ use App\Filament\App\Resources\ReviewInstructions\Pages\CreateReviewInstruction;
 use App\Filament\App\Resources\ReviewInstructions\Pages\EditReviewInstruction;
 use App\Filament\App\Resources\ReviewInstructions\Pages\ListReviewInstructions;
 use App\Filament\Components\ReviewInstructionSchema;
+use App\Filament\Concerns\ForTenantAdmins;
 use App\Filament\CurrentTenant;
 use App\Models\ReviewInstruction;
 use BackedEnum;
@@ -20,6 +21,8 @@ use Filament\Tables\Table;
  */
 class ReviewInstructionResource extends Resource
 {
+    use ForTenantAdmins;
+
     protected static ?string $model = ReviewInstruction::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedDocumentText;

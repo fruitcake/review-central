@@ -47,6 +47,7 @@ Docker is for your own repositories on a machine you give it alone; the diff run
 - A gateway or tracker address a tenant enters must be HTTPS on the public internet, and a redirect from it is not followed.
 - Signing in with Google needs an address Google has verified, and joins a tenant only on the organisation Google names.
 - Tenants are kept apart in every page, action and live update; an administrator can open every tenant.
+- Within a tenant, only its admins manage connections and their keys, apps, repositories, review settings, instructions and members. A member reads the reviews, rates their findings, asks the reviewer and starts a review.
 
 ## What it does not do
 
@@ -55,7 +56,6 @@ These are known limits. Plan around them, and see [Running it safely](#running-i
 - **It does not stop prompt injection.** The reviewer reads text anyone can write: the change, and on a public repository every comment on the pull request. It can be talked into writing something misleading in its review, or, in Docker, into reading its key. The secret filter is a last check and no boundary: a key cut in pieces or encoded otherwise still passes.
 - **It does not limit the Docker container's network.** The reviewer's container is on Docker's `bridge` network by default (`REVIEW_CONTAINER_NETWORK`): it reaches the internet, and also this machine and what it can reach, such as a cloud provider's metadata address. gVisor isolates the kernel, not the network. The Cloudflare sandbox has neither problem.
 - **It does not tell trusted accounts by ID alone.** A trusted account is matched by its account ID or by the name it signs in with. A GitHub login can be made of digits, so list a GitHub account by its login rather than its numeric ID; Bitbucket nicknames are not guaranteed to be unique.
-- **It does not separate roles within a tenant.** Every member can add and change connections and their credentials, see the webhook secret and change the review settings.
 - **It does not check an address again when it is used.** A gateway or tracker address is checked to be public when it is saved; a name that later points elsewhere is not checked again.
 - **It does not keep code from your AI provider.** Every runner sends the pull request, and with a container runner whatever the reviewer reads, to the provider you chose.
 
@@ -68,6 +68,6 @@ These are known limits. Plan around them, and see [Running it safely](#running-i
 - **Give tokens the narrowest scopes** the connection asks for: **How to get this** next to each field lists them.
 - **Decide who may comment `/review`.** Every review spends the tenant's AI budget, and by default anyone who can comment on a pull request can start one. On a repository that outside contributors can comment on, list the team's accounts under **Review settings → Trusted accounts** and let only them, or turn the command off. On a public repository, set *Whose pull requests are reviewed by themselves* to the trusted accounts: anyone else's pull request then waits under **Pull requests** for a member to start it.
 - **Leave pull requests from forks off** on a public repository unless you mean it. Turned on, anyone who opens a pull request from a fork has their code run in the sandbox with the tenant's AI key, on every push. Off (the default), a member starts such a review on purpose.
-- **Invite only people you would trust with the tenant's credentials**: every member can manage them.
+- **Make admin only who should manage the tenant's credentials.** Everyone else can be a member: they see no key, and change no setting.
 - **Back up `APP_KEY`** apart from the database: it encrypts every stored token and key, and without it they cannot be read again.
 - **Serve over HTTPS** with `APP_DEBUG=false`. **Admin → Setup** checks both.

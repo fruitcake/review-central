@@ -11,6 +11,7 @@ use App\Filament\App\Resources\ReviewRuns\ReviewRunResource;
 use App\Filament\App\Resources\SourceControl\SourceControlResource;
 use App\Filament\Concerns\RefreshesOnBroadcast;
 use App\Filament\CurrentTenant;
+use App\Filament\TenantRole;
 use App\Services\TenantOverview;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -54,6 +55,7 @@ class Overview extends Dashboard
             Action::make('addRepository')
                 ->label('Add repository')
                 ->icon(Heroicon::OutlinedPlus)
+                ->visible(fn (): bool => TenantRole::isAdmin())
                 ->url(RepositoryResource::getUrl()),
         ];
     }
@@ -73,6 +75,8 @@ class Overview extends Dashboard
     {
         return [
             'overview' => app(TenantOverview::class)->for(CurrentTenant::get(), $this->period()),
+            // Where a member may not go: the card says who can, rather than link there.
+            'adminOnly' => TenantRole::isAdmin() ? [] : ['source-control', 'ai-providers', 'instructions'],
             'targets' => [
                 'source-control' => SourceControlResource::getUrl(),
                 'ai-providers' => AiProviderResource::getUrl(),

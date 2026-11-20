@@ -19,7 +19,11 @@
                             <span class="rc-chip rc-chip-{{ $item['tone'] }}">{{ $item['tag'] }}</span>
                             <strong>{{ $item['title'] }}</strong>
                             <span class="rc-muted">{{ $item['body'] }}</span>
-                            <a href="{{ $targets[$item['target']] }}">{{ $item['action'] }} →</a>
+                            @if (in_array($item['target'], $adminOnly, true))
+                                <span class="rc-muted">An admin of this team sets this up.</span>
+                            @else
+                                <a href="{{ $targets[$item['target']] }}">{{ $item['action'] }} →</a>
+                            @endif
                         </div>
                     @endforeach
                 </div>
