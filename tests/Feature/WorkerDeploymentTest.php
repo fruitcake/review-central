@@ -7,12 +7,16 @@ use App\Models\PlatformSetting;
 use App\Models\User;
 use App\Runners\Container\WorkerDeployment;
 use App\Services\PlatformSettings;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
+use Illuminate\Http\Client\Request;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 
 use function Pest\Livewire\livewire;
 
@@ -180,4 +184,37 @@ it('keeps the settings out of a configuration cache, where a later change would 
     app(PlatformSettings::class)->applyCloudflare();
 
     expect(config('review.cloudflare.account'))->toBe(ACCOUNT);
+});
+
+it('tests the Cloudflare setup as it is in use, and says which settings the environment sets instead', function () {
+    $this->actingAs(User::factory()->create(['is_admin' => true]));
+    Filament::setCurrentPanel(Filament::getPanel('admin'));
+    cloudflareSettings([PlatformSettings::R2_ACCESS_KEY_ID => 'r2-key', PlatformSettings::R2_SECRET_ACCESS_KEY => 'r2-secret']);
+    config(['review.cloudflare.url' => 'https://sandbox.example.com', 'review.cloudflare.token' => 'worker-token']);
+    Storage::fake('r2');
+    $broken = false;
+    Http::fake(function (Request $request) use (&$broken) {
+        return match (true) {
+            $broken => Http::response(['success' => false], 401),
+            str_contains($request->url(), '/tokens/verify') => Http::response(['result' => ['status' => 'active']]),
+            default => Http::response(['ok' => true]),
+        };
+    });
+
+    livewire(Settings::class)
+        ->assertDontSee('in .env is used instead')
+        ->callAction(TestAction::make('testCloudflare')->schemaComponent('cloudflare'))
+        ->assertNotified('Cloudflare answers');
+
+    // A key the environment sets is the one in use, whatever is saved here.
+    config(['filesystems.disks.r2.key' => 'from-env']);
+
+    livewire(Settings::class)->assertSee('R2_ACCESS_KEY_ID in .env is used instead');
+
+    // A token that was rolled, and a Worker deployed with another one.
+    $broken = true;
+
+    livewire(Settings::class)
+        ->callAction(TestAction::make('testCloudflare')->schemaComponent('cloudflare'))
+        ->assertNotified('Not everything works');
 });

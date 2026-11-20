@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -521,20 +522,38 @@ class SetupCheck
      *
      * @return array{state: string, title: string, detail: string, fix: string|null}
      */
-    protected function cloudflareBucket(string $disk, string $bucket): array
+    public function cloudflareBucket(string $disk, string $bucket): array
     {
         $title = 'Cloudflare sandboxes: this installation reaches the bucket';
+        $key = 'review/setup-check';
+        $what = 'write to';
+        $fix = 'Check R2_ENDPOINT (`https://<account id>.r2.cloudflarestorage.com`, without the bucket), R2_BUCKET, and that the bucket\'s keys are of a token with Object Read & Write on this bucket. Keys in .env go before those under Settings.';
 
+        // What a review does with it: an object written, read back and removed.
+        // Not whether one is there: without the right to list the bucket, R2
+        // answers that with 403 for an object that is not, which reviews never ask.
         try {
-            Storage::disk($disk)->exists('review/setup-check');
+            $storage = Storage::disk($disk);
+            $written = 'setup check '.now()->toIso8601String();
+            $storage->put($key, $written);
+            $what = 'read from';
 
-            return ['state' => self::OK, 'title' => $title, 'detail' => "It can read {$bucket}.", 'fix' => null];
+            if ($storage->get($key) !== $written) {
+                throw new RuntimeException('What it read back is not what it wrote.');
+            }
+
+            $what = 'remove from';
+            $storage->delete($key);
+
+            return ['state' => self::OK, 'title' => $title, 'detail' => "It can write to {$bucket}, read from it and remove from it.", 'fix' => null];
         } catch (Throwable $exception) {
             return [
                 'state' => self::WRONG, 'title' => $title,
-                // The storage wraps what the bucket said in "Unable to check existence".
-                'detail' => 'It cannot: '.mb_substr(($exception->getPrevious() ?? $exception)->getMessage(), 0, 300),
-                'fix' => 'Check R2_ENDPOINT (`https://<account id>.r2.cloudflarestorage.com`, without the bucket), R2_BUCKET, and that the API token has Object Read & Write on this bucket.',
+                // The storage wraps what the bucket said in "Unable to write file".
+                'detail' => "It cannot {$what} {$bucket}: ".mb_substr(($exception->getPrevious() ?? $exception)->getMessage(), 0, 300),
+                'fix' => $what === 'read from'
+                    ? 'The keys may write but not read: give their token Read as well as Edit on this bucket (Object Read & Write), or make one that has both.'
+                    : $fix,
             ];
         }
     }
