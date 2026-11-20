@@ -8,6 +8,8 @@ How a review runs is its **runner**. There are three, from the lightest to the s
 | `docker` | The whole checkout, in a throwaway container under gVisor on your own server. | Docker, gVisor and a worker of its own. |
 | `cloudflare` | The whole checkout, in a Cloudflare sandbox. **Experimental.** | A Cloudflare account on the Workers Paid plan, and the Worker deployed: from **Admin → Setup**, or by hand. |
 
+For a review that reads the code, the Cloudflare sandbox is the one to use: the code runs in a microVM of its own away from your server, and the AI provider's key never enters it. Docker is for your own repositories on a machine of its own. [Security](./security#which-runner) compares the three.
+
 The platform's runner is picked under **Admin → Settings**, from the ones that are set up, and a repository can pick its own under **Runs on**. **Admin → Setup** says which runners are set up and what the others still need.
 
 ![The setup page](/screenshots/setup.png)
