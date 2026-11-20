@@ -24,6 +24,15 @@ use Illuminate\Support\Facades\Storage;
  */
 class ReviewSessions
 {
+    /**
+     * What a reviewer's home holds that is no session: the CLIs it installed and
+     * the caches of npm, Composer and the review's own tools, hundreds of
+     * megabytes beside a session of a few. Kept where the home is, on the worker,
+     * as a cache; never carried along to a disk or a sandbox, which only costs
+     * time each review: a sandbox installs what it misses in a few seconds.
+     */
+    public const CACHES = ['.local', '.npm', '.tools', '.cache', '.composer'];
+
     /** Where run-claude.sh notes the session a review ended in. */
     protected const SESSION = '.review-session';
 
@@ -68,7 +77,7 @@ class ReviewSessions
         // that starts fresh.
         rescue(function () use ($disk, $directory, $archive, $repository, $branch): void {
             try {
-                Process::timeout(300)->run(['tar', '-czf', $archive, '-C', $directory, '.'])->throw();
+                Process::timeout(300)->run(['tar', '-czf', $archive, ...self::excluded(), '-C', $directory, '.'])->throw();
                 $stream = fopen($archive, 'r');
 
                 if ($stream !== false) {
@@ -123,6 +132,17 @@ class ReviewSessions
                 File::delete($archive);
             }
         }, null, false);
+    }
+
+    /**
+     * tar's arguments that leave the caches out of an archive of a home made from
+     * inside it (`-C <home> .`).
+     *
+     * @return list<string>
+     */
+    public static function excluded(): array
+    {
+        return array_map(fn (string $cache): string => "--exclude=./{$cache}", self::CACHES);
     }
 
     protected function disk(): ?Filesystem
