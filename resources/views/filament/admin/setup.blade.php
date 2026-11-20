@@ -20,6 +20,9 @@
                                 @if ($check['fix'] !== null)
                                     <div class="rc-setup-fix">{!! Str::markdown($check['fix'], ['html_input' => 'strip', 'allow_unsafe_links' => false]) !!}</div>
                                 @endif
+                                @if (isset($check['guide']))
+                                    <div class="rc-setup-fix">{{ ($this->guideAction)(['guide' => $check['guide']]) }}</div>
+                                @endif
                             </div>
                         </div>
                     @endforeach

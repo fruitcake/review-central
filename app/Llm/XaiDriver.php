@@ -29,6 +29,18 @@ class XaiDriver extends ApiKeyDriver
         return 'XAI_API_KEY';
     }
 
+    protected function keyPage(): string
+    {
+        return 'https://console.x.ai/team/default/api-keys';
+    }
+
+    protected function keyNotes(): array
+    {
+        return [
+            'A key can be limited to some endpoints and models: it needs the chat endpoint and the list of models, and the model set under Settings.',
+        ];
+    }
+
     protected function ask(Connection $connection): Response
     {
         return $this->bearer($connection, 'https://api.x.ai/v1/models');

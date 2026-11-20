@@ -215,6 +215,12 @@
     .rc-pairs strong { font-family: var(--rc-display); font-size: 20px; color: var(--rc-ink); }
     .rc-legend-stacked { flex-direction: column; align-items: flex-start; gap: 6px; }
     .rc-note { background: var(--rc-ground); border-radius: 0; padding: 10px 12px; font-size: 13px; }
+    /* How to get a key or token, in its modal: the link to where it is made first, and plain to see. */
+    .rc-guide h3 { margin: 4px 0 0; font-size: 13px; font-weight: 700; color: var(--rc-ink); }
+    .rc-guide a { color: var(--rc-ink); font-weight: 600; text-decoration: underline; text-decoration-color: var(--rc-accent); }
+    .rc-guide > p:first-child { display: flex; flex-direction: column; gap: 2px; }
+    .rc-guide > p:first-child .rc-muted { word-break: break-all; }
+    .rc-guide li + li { margin-top: 4px; }
     /* What to do about a check that is not right: set apart, with its commands readable. */
     .rc-updates { display: flex; flex-direction: column; gap: 8px; }
     .rc-update summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline; }

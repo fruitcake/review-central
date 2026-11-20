@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tickets;
 
 use App\Connections\ConnectsWithOAuth;
+use App\Connections\ExplainsSetup;
 use App\Connections\Fields\Secret;
 use App\Connections\OAuthTokens;
 use App\Connections\TicketDriver;
@@ -12,6 +13,7 @@ use App\Exceptions\ConnectionFailed;
 use App\Exceptions\TicketNotFound;
 use App\Models\Connection;
 use App\Models\Repository;
+use App\Support\SetupGuide;
 use Filament\Forms\Components\TextInput;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
@@ -21,7 +23,7 @@ use Illuminate\Support\Facades\Http;
  * a task's custom ID (`PROJ-123`), its id, or the number its name starts with
  * (`#1234 - Export the orders`), for a workspace that numbers its tasks by hand.
  */
-class AsanaDriver implements ConnectsWithOAuth, TicketDriver
+class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
 {
     protected const API = 'https://app.asana.com/api/1.0';
 
@@ -50,6 +52,33 @@ class AsanaDriver implements ConnectsWithOAuth, TicketDriver
             TextInput::make('workspace')->label('Workspace ID')->required()->rule('regex:/^\d+$/')
                 ->helperText('The number of the Asana workspace the custom IDs are looked up in.'),
         ];
+    }
+
+    /**
+     * A personal access token has no scopes to pick: it can do what its account
+     * can. The review only reads: a task, its subtasks and comments, and the
+     * workspace's search for a task's number.
+     */
+    public function setupGuide(): SetupGuide
+    {
+        return new SetupGuide(
+            title: 'An Asana personal access token',
+            url: 'https://app.asana.com/0/my-apps',
+            linkLabel: 'Asana developer console',
+            steps: [
+                'Sign in at Asana as an account that can see the projects whose tasks the pull requests name, and open the developer console.',
+                'Under **Personal access tokens**, choose **Create new token**, name it, agree to the API terms and create it.',
+                'Copy the token, which Asana shows once, and paste it here.',
+                'Under Settings, fill in the workspace ID: the `gid` next to the workspace\'s name at `https://app.asana.com/api/1.0/workspaces`, opened while signed in.',
+            ],
+            permissions: [
+                'The account\'s own access' => 'the token reads what its account can see: tasks, their subtasks and comments, and the workspace\'s search for a task\'s number. Nothing is written.',
+            ],
+            notes: [
+                'On Asana Enterprise, a service account\'s token, from the admin console under **Apps → Service accounts**, works too and belongs to no person.',
+                ...($this->oauthConfigured() ? ['Or leave the token empty, save, and use **Connect** in the list to sign in at Asana instead.'] : []),
+            ],
+        );
     }
 
     public function test(Connection $connection): void

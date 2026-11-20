@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\SourceControl;
 
+use App\Connections\ExplainsSetup;
 use App\Connections\Fields\Secret;
 use App\Connections\SourceControlDriver;
 use App\Exceptions\ConnectionFailed;
 use App\Models\Connection;
 use App\Models\Repository;
+use App\Support\SetupGuide;
 use Filament\Forms\Components\TextInput;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Request;
@@ -21,7 +23,7 @@ use Illuminate\Support\Facades\Http;
  * Without a token and without an owner the connection is for any public
  * repository, which it only reads: all a trial of a public pull request needs.
  */
-class GitHubDriver implements SourceControlDriver
+class GitHubDriver implements ExplainsSetup, SourceControlDriver
 {
     /**
      * What the webhook has to deliver: every change to a pull request, and the
@@ -51,6 +53,40 @@ class GitHubDriver implements SourceControlDriver
             TextInput::make('workspace')->label('Owner')->rule('regex:/^[\w.-]+$/')
                 ->helperText('The user or organisation from the address: github.com/<owner>. Leave it empty, with no token, for any public repository.'),
         ];
+    }
+
+    /**
+     * The permissions are what GitHubClient calls: the pull request, its diff and
+     * its files, a comment on its conversation (an issue to GitHub), a status on
+     * the commit, and the webhook where it is added for you.
+     */
+    public function setupGuide(): SetupGuide
+    {
+        return new SetupGuide(
+            title: 'A GitHub token for reviews',
+            url: 'https://github.com/settings/personal-access-tokens/new',
+            linkLabel: 'New fine-grained personal access token on GitHub',
+            steps: [
+                'Sign in at GitHub as the account the review acts as: an account of its own, a machine user such as `acme-review`, invited to the organisation with **Write** access to the repositories. GitHub does not let an account approve its own pull request.',
+                'Open the link, name the token and give it an expiry date. As **Resource owner**, pick the organisation (or the user) whose repositories are reviewed.',
+                'Under **Repository access**, pick **Only select repositories** with the ones to review, or **All repositories**.',
+                'Under **Repository permissions**, set the permissions below. For a webhook on the whole organisation, also set **Webhooks: Read and write** under **Organization permissions**.',
+                'Generate the token, copy it and paste it here. Under Settings, fill in the organisation or user as **Owner**.',
+                'If the organisation approves fine-grained tokens, an owner approves it under the organisation\'s **Settings → Personal access tokens → Pending requests**.',
+            ],
+            permissions: [
+                'Contents: Read' => 'clones the repository and reads its commits and files.',
+                'Metadata: Read' => 'GitHub adds it to every token; finds the repositories by name.',
+                'Pull requests: Read and write' => 'reads the pull request and its diff, writes its description, comments on its lines, and approves or requests changes.',
+                'Issues: Read and write' => 'comments on the pull request\'s conversation, which GitHub keeps as an issue.',
+                'Commit statuses: Read and write' => 'sets the "AI Review" status on the commit.',
+                'Webhooks: Read and write' => 'only to have "Add it for me" add the webhook: on each repository, or as an organisation permission on the organisation.',
+            ],
+            notes: [
+                'Leave the token and the owner empty for public repositories: they are then only read, and their pull requests can be tried.',
+                'A token expires: note the date and replace it here before then. **Test** in the list says whether it still works.',
+            ],
+        );
     }
 
     public function test(Connection $connection): void

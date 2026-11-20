@@ -9,6 +9,7 @@ use App\Connections\NeedsSetup;
 use App\Exceptions\ConnectionFailed;
 use App\Models\Connection;
 use App\Models\Repository;
+use App\Support\SetupGuide;
 use Filament\Forms\Components\TextInput;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\HtmlString;
@@ -63,6 +64,38 @@ class GitHubAppDriver extends GitHubDriver implements ConnectsWithOAuth, NeedsSe
                     .'</ol>'
                 )),
         ];
+    }
+
+    /**
+     * Nothing to paste: the app is installed on the owner and connected by
+     * signing in. The permissions are the ones the app asks for when it is
+     * installed, as the administrator registered it.
+     */
+    public function setupGuide(): SetupGuide
+    {
+        $app = app(GitHubApp::class);
+
+        return new SetupGuide(
+            title: 'Connect the GitHub App',
+            url: $app->configured() ? $app->installUrl() : 'https://github.com/settings/installations',
+            linkLabel: $app->configured() ? 'Install the app on GitHub' : 'Your GitHub App installations',
+            steps: [
+                'Open the link and install the app on the organisation or user whose repositories are reviewed, for all repositories or the ones to review. An organisation owner may have to approve it.',
+                'Fill in that organisation or user as **Owner** here and save.',
+                'Use **Connect** in the list and sign in at GitHub: that checks you own that organisation or account. Your own token is revoked straight after.',
+                'Add the repositories under **Repositories**. No webhook to add: the app brings its own.',
+            ],
+            permissions: [
+                'Contents, Metadata: Read' => 'clones the repository and finds it by name.',
+                'Pull requests, Issues: Read and write' => 'reads the pull request, comments on it and approves or requests changes, as `<app>[bot]`.',
+                'Commit statuses, Checks: Read and write' => 'the "AI Review" check, with the findings as annotations on their lines.',
+                'Members (organisation): Read' => 'checks that whoever connects the installation owns the organisation.',
+            ],
+            notes: [
+                'GitHub shows these permissions when the app is installed; accept them all. No token to paste, and none that expires.',
+                'Only an owner of the organisation, or the user account itself, can connect it: a member with access to some of its repositories cannot.',
+            ],
+        );
     }
 
     public function test(Connection $connection): void

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Llm;
 
+use App\Connections\ExplainsSetup;
 use App\Connections\Fields\Secret;
 use App\Connections\LlmDriver;
 use App\Exceptions\ConnectionFailed;
@@ -13,6 +14,7 @@ use App\Llm\Agents\DiffReviewer;
 use App\Models\Connection;
 use App\Runners\Diff\Answer;
 use App\Runners\Diff\ReportSchema;
+use App\Support\SetupGuide;
 use Filament\Forms\Components\TextInput;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
@@ -28,7 +30,7 @@ use Throwable;
  * Claude Code, Codex and OpenCodeReview do not review with these; Pi does, and so
  * does the review from the diff.
  */
-abstract class ApiKeyDriver implements LlmDriver
+abstract class ApiKeyDriver implements ExplainsSetup, LlmDriver
 {
     use AsksProviders;
 
@@ -43,6 +45,44 @@ abstract class ApiKeyDriver implements LlmDriver
 
     /** A cheap request that only a working key gets an answer to. */
     abstract protected function ask(Connection $connection): Response;
+
+    /** The page of the provider's console where a key is made. */
+    abstract protected function keyPage(): string;
+
+    /**
+     * What is worth knowing about this provider's keys besides the steps, such
+     * as a key that can be limited to some endpoints.
+     *
+     * @return list<string>
+     */
+    protected function keyNotes(): array
+    {
+        return [];
+    }
+
+    /**
+     * The same few steps for each: a key is all these providers ask for, and
+     * none of them has scopes beyond the ones keyNotes() names. The key lists
+     * the models, which is what "Test" asks, and asks one for an answer.
+     */
+    public function setupGuide(): SetupGuide
+    {
+        return new SetupGuide(
+            title: "A {$this->label()} API key",
+            url: $this->keyPage(),
+            linkLabel: "API keys in the {$this->label()} console",
+            steps: [
+                "Sign in at {$this->label()} and open the link. A new account may first need a payment method or credits before its keys work.",
+                'Create a key and name it after this installation, so it can be told apart and revoked later.',
+                'Copy the key, which is shown once, and paste it here.',
+                "Under Settings, fill in the model to review with, as {$this->label()} names it.",
+            ],
+            notes: [
+                ...$this->keyNotes(),
+                "The review from the diff runs on this server with the key, and Pi in a container gets it as `{$this->variable()}`.",
+            ],
+        );
+    }
 
     public function credentialFields(): array
     {

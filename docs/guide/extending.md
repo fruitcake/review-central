@@ -8,7 +8,7 @@ A provider is a driver class, registered in `config/review.php`:
 - tickets: implement `App\Connections\TicketDriver`, which reads one ticket by its reference and returns it as markdown.
 - AI providers: implement `App\Connections\LlmDriver`, which names the environment variables the reviewer reads the key from.
 
-A driver declares its own credential and setting fields, so a new one shows up in the Connections form without further work.
+A driver declares its own credential and setting fields, so a new one shows up in the Connections form without further work. To say where its key or token is made, implement `App\Connections\ExplainsSetup` too: its `App\Support\SetupGuide` (the page's link, the steps and the scopes it needs) is offered as **How to get this** next to the service.
 
 ## Adding a runner
 

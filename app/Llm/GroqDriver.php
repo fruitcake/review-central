@@ -29,6 +29,11 @@ class GroqDriver extends ApiKeyDriver
         return 'GROQ_API_KEY';
     }
 
+    protected function keyPage(): string
+    {
+        return 'https://console.groq.com/keys';
+    }
+
     protected function ask(Connection $connection): Response
     {
         return $this->bearer($connection, 'https://api.groq.com/openai/v1/models');
