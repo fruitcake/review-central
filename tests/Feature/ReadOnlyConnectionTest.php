@@ -4,6 +4,7 @@ use App\Enums\BuildState;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Services\ReviewFiling;
+use App\Services\ReviewOpening;
 use App\Services\ReviewQuestions;
 use App\SourceControl\ReadOnlyClient;
 use Illuminate\Http\Client\Request;
@@ -54,4 +55,21 @@ it('files the review of a connection that keeps them here as the answer for its 
         ->and($filed['publish']['reason'])->toBe('the connection keeps its reviews here');
 
     Http::assertNotSent(fn (Request $request): bool => in_array($request->method(), ['POST', 'PUT', 'DELETE'], true));
+});
+
+it('hands no review over to the next commit where nothing was posted to carry forward', function () {
+    ReviewRun::query()->forceCreate([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'feature/export', 'pull_request_id' => 7, 'commit' => str_repeat('a', 40), 'superseded_by' => str_repeat('b', 40),
+        'status' => ReviewRun::STATUS_FINISHED, 'started_at' => now(), 'finished_at' => now(),
+    ]);
+    $handover = fn (): ?array => (new ReflectionMethod(ReviewOpening::class, 'handover'))->invoke(app(ReviewOpening::class), $this->repository->refresh(), str_repeat('b', 40));
+
+    // Posted: the next review starts from it.
+    expect($handover())->toMatchArray(['reviewed_up_to' => str_repeat('a', 40)]);
+
+    $this->repository->integration->update(['settings' => ['workspace' => 'acme', ReadOnlyClient::SETTING => ReadOnlyClient::READ]]);
+
+    // Kept here: the next review reviews the whole change again.
+    expect($handover())->toBeNull();
 });
