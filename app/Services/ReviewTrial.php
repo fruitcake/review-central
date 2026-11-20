@@ -195,9 +195,10 @@ class ReviewTrial
             ->where('slug', $link->slug)
             ->first();
 
+        // Not saved yet: start() saves it once the trial is accepted, so one that
+        // is refused leaves it removed.
         if ($repository?->trashed()) {
-            $repository->restore();
-            $repository->update(['reviews_enabled' => false]);
+            $repository->forceFill(['deleted_at' => null, 'reviews_enabled' => false]);
         }
 
         if ($repository !== null) {

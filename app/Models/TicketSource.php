@@ -64,6 +64,7 @@ class TicketSource extends Model
      */
     public function repository(): BelongsTo
     {
-        return $this->belongsTo(Repository::class);
+        // A removed one too: the source is still only for that one, not for every repository.
+        return $this->belongsTo(Repository::class)->withTrashed();
     }
 }

@@ -85,6 +85,17 @@ class Connection extends Model
             && self::host($this->driver) === self::host($other->driver);
     }
 
+    /**
+     * Whether a repository of this owner can be on this connection: one set up
+     * for an owner, as a GitHub App's installation is, reaches only theirs.
+     */
+    public function reachesOwner(string $workspace): bool
+    {
+        $owner = $this->setting('workspace');
+
+        return blank($owner) || mb_strtolower((string) $owner) === mb_strtolower($workspace);
+    }
+
     protected static function host(string $driver): string
     {
         return $driver === 'github-app' ? 'github' : $driver;

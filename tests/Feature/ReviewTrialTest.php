@@ -122,6 +122,17 @@ it('refuses what it cannot try, and leaves no repository behind', function (stri
     'fast-forward' => ['https://bitbucket.org/acme/shop/pull-requests/12', ['state' => 'MERGED', 'merge_commit' => ['hash' => str_repeat('a', 12)]], 'merged by fast-forward'],
 ]);
 
+it('leaves a removed repository removed when its trial is refused', function () {
+    $repository = Repository::factory()->create(['tenant_id' => $this->tenant->id, 'connection_id' => $this->connection->id, 'workspace' => 'acme', 'slug' => 'shop']);
+    $repository->delete();
+    fakePullRequest(['state' => 'DECLINED']);
+
+    expect(fn () => app(ReviewTrial::class)->start($this->tenant, 'https://bitbucket.org/acme/shop/pull-requests/12'))->toThrow(ReviewTrialRefused::class);
+
+    expect($repository->refresh()->trashed())->toBeTrue()
+        ->and($repository->reviews_enabled)->toBeTrue();
+});
+
 it('needs a runner that runs a reviewer for a reviewer', function () {
     config(['review.docker.enabled' => false]);
     fakePullRequest();
