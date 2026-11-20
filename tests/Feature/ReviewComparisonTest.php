@@ -249,3 +249,29 @@ it('picks a trial\'s model from the reviewer\'s list, and gives the reviewer the
         ->and(ReviewRunResource::trialOptions(['provider' => 'codex-cli', 'model' => 'default'])['model'])->toBe(ReviewSettings::tierModels('openai')['default'])
         ->and(ReviewRunResource::trialOptions(['provider' => 'pi', 'model' => 'google/gemini-3-pro'])['model'])->toBe('google/gemini-3-pro');
 });
+
+it('takes more setups later, and keeps an earlier analysis to the reviews it read', function () {
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    ($this->run)(51, [['id' => 'F1', 'title' => 'All invoices are exported']]);
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [['build' => 51]],
+        'analysis_status' => ReviewComparison::ANALYSIS_FINISHED,
+        'analysis' => ['summary' => 'B did well.', 'labels' => ['A', 'B'], 'findings' => [
+            ['title' => 'Leak', 'path' => null, 'verdict' => 'valid', 'found_by' => ['A-F1', 'B-F1'], 'reason' => 'It leaks.'],
+        ]],
+    ]);
+    $this->mock(ReviewTrial::class)->shouldReceive('begin')->once()->andReturn(['repository' => $this->repository, 'build' => 52]);
+
+    livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])
+        ->callAction('add', ['ignore_existing' => true, 'rows' => [['provider' => 'claude-code', 'effort' => 'low']]])
+        ->assertHasNoActionErrors()
+        ->assertNotified('One setup added');
+
+    expect(array_column($comparison->refresh()->rows, 'build'))->toBe([51, 52]);
+
+    ($this->run)(52, []);
+
+    // C came after the analysis, so it has no scores from it; no "missed" it never had a chance at.
+    expect(array_keys(ReviewComparisons::scores($comparison)))->toBe(['A', 'B']);
+});

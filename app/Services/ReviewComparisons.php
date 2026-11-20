@@ -35,9 +35,50 @@ class ReviewComparisons
      */
     public function start(ReviewRun $run, array $rows, bool $ignoreExisting, ?User $user): ReviewComparison
     {
+        return ReviewComparison::query()->create([
+            'tenant_id' => $run->tenant_id,
+            'repository_id' => $run->repository_id,
+            'pull_request_id' => $run->pull_request_id,
+            'review_run_id' => $run->getKey(),
+            'user_id' => $user?->getKey(),
+            'rows' => $this->trials($run, array_slice(array_values($rows), 0, ReviewComparison::MAX_ROWS), $ignoreExisting),
+        ]);
+    }
+
+    /**
+     * More setups for a comparison, up to its most, each a trial of the pull request
+     * as it is now. An analysis made before keeps to the reviews it read.
+     *
+     * @param  array<int, array{runner: string|null, provider: string|null, model: string|null, effort: string|null, verify: bool, ignore_existing?: bool}>  $rows
+     * @return int how many were added
+     */
+    public function add(ReviewComparison $comparison, array $rows, bool $ignoreExisting): int
+    {
+        $room = ReviewComparison::MAX_ROWS - count($comparison->rows);
+        $run = $comparison->reviewRun;
+
+        if ($room <= 0 || $run === null) {
+            return 0;
+        }
+
+        $added = $this->trials($run, array_slice(array_values($rows), 0, $room), $ignoreExisting);
+        $comparison->update(['rows' => [...array_values($comparison->rows), ...$added]]);
+
+        return count($added);
+    }
+
+    /**
+     * Starts a trial for each setup on the pull request the run reviewed. A setup
+     * that cannot be tried keeps why, and the others still start.
+     *
+     * @param  array<int, array{runner: string|null, provider: string|null, model: string|null, effort: string|null, verify: bool, ignore_existing?: bool}>  $rows
+     * @return array<int, array<string, mixed>>
+     */
+    protected function trials(ReviewRun $run, array $rows, bool $ignoreExisting): array
+    {
         $url = $run->repository->sourceControl()->pullRequestUrl((int) $run->pull_request_id);
 
-        $started = array_map(function (array $row) use ($run, $url, $ignoreExisting): array {
+        return array_map(function (array $row) use ($run, $url, $ignoreExisting): array {
             try {
                 $row = ['ignore_existing' => $ignoreExisting] + $row;
 
@@ -49,16 +90,7 @@ class ReviewComparisons
             } catch (ReviewTrialRefused $exception) {
                 return $row + ['error' => $exception->getMessage()];
             }
-        }, array_slice(array_values($rows), 0, ReviewComparison::MAX_ROWS));
-
-        return ReviewComparison::query()->create([
-            'tenant_id' => $run->tenant_id,
-            'repository_id' => $run->repository_id,
-            'pull_request_id' => $run->pull_request_id,
-            'review_run_id' => $run->getKey(),
-            'user_id' => $user?->getKey(),
-            'rows' => $started,
-        ]);
+        }, $rows);
     }
 
     /**
@@ -76,7 +108,7 @@ class ReviewComparisons
         }
 
         try {
-            [$text, $ids] = $this->material($comparison);
+            [$text, $ids, $labels] = $this->material($comparison);
             $response = $driver->compares($connection, $text, $model);
             $analysis = Comparer::read($response, $ids);
 
@@ -88,7 +120,8 @@ class ReviewComparisons
 
             $comparison->update([
                 'analysis_status' => ReviewComparison::ANALYSIS_FINISHED,
-                'analysis' => $analysis,
+                // The reviews it read: one added after has no scores from it.
+                'analysis' => $analysis + ['labels' => $labels],
                 'analysis_model' => $used,
                 'analysis_error' => null,
                 'analysis_cost' => $used === null ? null : ModelPrice::estimate([$used => ['input' => $response->usage->inputTokens, 'output' => $response->usage->outputTokens]]),
@@ -102,7 +135,7 @@ class ReviewComparisons
     /**
      * What the judging model reads, and the ids of the findings in it.
      *
-     * @return array{0: string, 1: array<int, string>}
+     * @return array{0: string, 1: array<int, string>, 2: array<int, string>} the text, the ids of the findings in it, and the reviews' labels
      */
     protected function material(ReviewComparison $comparison): array
     {
@@ -153,7 +186,7 @@ Of an older commit, '.substr($column['run']->commit, 0, 12).': a finding about c
             "# The reviews\n".implode("\n\n", $reviews),
         ]);
 
-        return [$text, $ids];
+        return [$text, $ids, array_map('strval', $columns->keys()->all())];
     }
 
     /**
@@ -176,8 +209,10 @@ Of an older commit, '.substr($column['run']->commit, 0, 12).': a finding about c
         $scores = [];
         $issues = $comparison->analysis['findings'] ?? [];
 
+        $read = $comparison->analysis['labels'] ?? null;
+
         foreach ($comparison->columns() as $label => $column) {
-            if ($column['run'] === null) {
+            if ($column['run'] === null || ($read !== null && ! in_array($label, $read, true))) {
                 continue;
             }
 

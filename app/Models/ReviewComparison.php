@@ -25,7 +25,7 @@ use Illuminate\Support\Collection;
  * @property array<int, array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool, ignore_existing?: bool, build?: int|null, repository_id?: int, error?: string|null}> $rows
  * @property string|null $analysis_status running, finished or failed
  * @property string|null $analysis_model
- * @property array{summary?: string, findings?: array<int, array{title: string, path: string|null, verdict: string, found_by: array<int, string>, reason: string}>}|null $analysis
+ * @property array{summary?: string, labels?: array<int, string>, findings?: array<int, array{title: string, path: string|null, verdict: string, found_by: array<int, string>, reason: string}>}|null $analysis
  * @property string|null $analysis_error
  * @property float|null $analysis_cost dollars
  * @property CarbonInterface|null $created_at
@@ -44,7 +44,7 @@ class ReviewComparison extends Model
     public const ANALYSIS_FAILED = 'failed';
 
     /** The setups one comparison tries at most, besides the review it started from. */
-    public const MAX_ROWS = 5;
+    public const MAX_ROWS = 10;
 
     protected $guarded = [];
 

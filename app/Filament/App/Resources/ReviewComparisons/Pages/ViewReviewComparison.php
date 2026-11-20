@@ -7,6 +7,7 @@ namespace App\Filament\App\Resources\ReviewComparisons\Pages;
 use App\Connections\LlmDriver;
 use App\Enums\ConnectionKind;
 use App\Filament\App\Resources\ReviewComparisons\ReviewComparisonResource;
+use App\Filament\App\Resources\ReviewRuns\ReviewRunResource;
 use App\Filament\Components\ReviewSettingsForm;
 use App\Filament\Concerns\RefreshesOnBroadcast;
 use App\Filament\CurrentTenant;
@@ -15,6 +16,7 @@ use App\Models\Connection;
 use App\Models\ReviewComparison;
 use App\Services\ReviewComparisons;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
@@ -40,6 +42,31 @@ class ViewReviewComparison extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('add')
+                ->label('Add setups')
+                ->icon(Heroicon::OutlinedPlus)
+                ->color('gray')
+                ->visible(fn (): bool => $this->record->reviewRun !== null && count($this->record->rows) < ReviewComparison::MAX_ROWS)
+                ->modalHeading('Add setups to this comparison')
+                ->modalDescription(fn (): string => 'Each row reviews the pull request as it is now, as a trial, and shows as a column of its own. Up to '.(ReviewComparison::MAX_ROWS - count($this->record->rows)).' more. An analysis made before keeps to the reviews it read: analyse again to judge the new ones too.')
+                ->schema([
+                    ReviewRunResource::ignoreExistingField(),
+                    Repeater::make('rows')
+                        ->label('Setups')
+                        ->schema(ReviewRunResource::trialFields(withExisting: false))
+                        ->columns(2)
+                        ->default(fn (): array => [[]])
+                        ->minItems(1)
+                        ->maxItems(fn (): int => max(1, ReviewComparison::MAX_ROWS - count($this->record->rows)))
+                        ->addActionLabel('Add a setup'),
+                ])
+                ->modalSubmitActionLabel('Start')
+                ->action(function (array $data, ReviewComparisons $comparisons): void {
+                    $added = $comparisons->add($this->record, array_map(ReviewRunResource::trialOptions(...), array_values($data['rows'] ?? [])), (bool) ($data['ignore_existing'] ?? true));
+                    $this->record->refresh();
+
+                    Notification::make()->title($added === 1 ? 'One setup added' : "{$added} setups added")->success()->send();
+                }),
             Action::make('analyze')
                 ->label(fn (): string => $this->record->analysis === null ? 'Analyse' : 'Analyse again')
                 ->icon(Heroicon::OutlinedSparkles)
