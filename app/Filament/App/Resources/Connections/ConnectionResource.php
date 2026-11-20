@@ -6,6 +6,7 @@ use App\Connections\ConnectionDriver;
 use App\Connections\ConnectsWithOAuth;
 use App\Connections\Drivers;
 use App\Connections\ExplainsSetup;
+use App\Connections\Integrations;
 use App\Connections\OAuthTokens;
 use App\Connections\SourceControlDriver;
 use App\Enums\ConnectionKind;
@@ -191,7 +192,7 @@ class ConnectionResource extends Resource
             Action::make('connect')
                 ->label(fn (Model $record): string => OAuthTokens::has($of($record)) ? 'Connect again' : 'Connect')
                 ->icon(Heroicon::OutlinedArrowTopRightOnSquare)
-                ->visible(fn (Model $record): bool => rescue(fn (): bool => ($driver = $of($record)->driver()) instanceof ConnectsWithOAuth && $driver->oauthConfigured(), false, false))
+                ->visible(fn (Model $record): bool => rescue(fn (): bool => ($driver = $of($record)->driver()) instanceof ConnectsWithOAuth && Integrations::offered($driver, $of($record)->tenant), false, false))
                 ->url(fn (Model $record): string => route('connections.oauth.redirect', ['connection' => $of($record)])),
         ];
     }

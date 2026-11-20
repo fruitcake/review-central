@@ -2,6 +2,7 @@
 
 namespace App\Filament\Admin\Resources\Tenants;
 
+use App\Connections\Integrations;
 use App\Filament\Admin\Resources\Tenants\Pages\ManageTenants;
 use App\Filament\Themes;
 use App\Models\Tenant;
@@ -12,6 +13,7 @@ use Closure;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\ColorPicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
@@ -65,6 +67,17 @@ class TenantResource extends Resource
                     ->nestedRecursiveRules(['regex:/^(?!-)[a-z0-9-]+(\\.[a-z0-9-]+)+$/'])
                     ->dehydrateStateUsing(fn (?array $state): ?array => $state === null || $state === [] ? null : array_values(array_unique(array_map(fn (string $domain): string => strtolower(trim($domain)), $state))))
                     ->helperText('Anyone who signs in with a Google account that one of these organisations manages gets an account and joins this tenant, without an invitation. Leave empty to let in only who is listed above.'),
+                CheckboxList::make('integrations_off')
+                    ->label('Sign in through the installation\'s apps')
+                    ->options(Integrations::LABELS)
+                    ->descriptions(fn (): array => collect(Integrations::LABELS)
+                        ->map(fn (string $label, string $name): string => Integrations::configured($name) ? '' : 'Not set up under Settings → Integrations.')
+                        ->all())
+                    // Kept as what is off, so an app set up later is there for every tenant; shown as what is on.
+                    ->formatStateUsing(fn (?array $state): array => array_values(array_diff(array_keys(Integrations::LABELS), $state ?? [])))
+                    ->dehydrateStateUsing(fn (?array $state): ?array => array_values(array_diff(array_keys(Integrations::LABELS), $state ?? [])) ?: null)
+                    ->default(array_keys(Integrations::LABELS))
+                    ->helperText('Which of the apps set up under Settings → Integrations this tenant\'s connections may sign in through, instead of a pasted token. Signing in with Google is not one of these: who joins by it goes by the sign-in domains.'),
                 Select::make('currency')
                     ->options(Currency::NAMES)
                     ->default(fn (): string => app(PlatformSettings::class)->currency())

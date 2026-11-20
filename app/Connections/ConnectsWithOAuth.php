@@ -23,6 +23,12 @@ interface ConnectsWithOAuth
     public function oauthConfigured(): bool;
 
     /**
+     * Which of the installation's apps this is, as Integrations names it: what a
+     * tenant can have turned off.
+     */
+    public function oauthIntegration(): string;
+
+    /**
      * Where the person is sent to say yes.
      */
     public function oauthAuthorizeUrl(string $redirect, string $state): string;

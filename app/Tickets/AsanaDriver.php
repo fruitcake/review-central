@@ -7,6 +7,7 @@ namespace App\Tickets;
 use App\Connections\ConnectsWithOAuth;
 use App\Connections\ExplainsSetup;
 use App\Connections\Fields\Secret;
+use App\Connections\Integrations;
 use App\Connections\OAuthTokens;
 use App\Connections\TicketDriver;
 use App\Exceptions\ConnectionFailed;
@@ -39,10 +40,10 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
         return [
             Secret::make('access_token')->label('Access token')
                 // With this installation registered at Asana, signing in there does instead.
-                ->required(fn (string $operation): bool => $operation === 'create' && ! $this->oauthConfigured())
-                ->helperText($this->oauthConfigured()
+                ->required(fn (string $operation): bool => $operation === 'create' && ! Integrations::offered($this))
+                ->helperText(fn (): string => Integrations::offered($this)
                     ? 'A personal access token, or a service account token. Or leave it empty, save, and use "Connect" in the list to sign in at Asana instead.'
-                    : 'A personal access token, or a service account token.'),
+                    : 'A personal access token, or a service account token. '.Integrations::unavailable($this, 'Asana')),
         ];
     }
 
@@ -76,7 +77,7 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
             ],
             notes: [
                 'On Asana Enterprise, a service account\'s token, from the admin console under **Apps → Service accounts**, works too and belongs to no person.',
-                ...($this->oauthConfigured() ? ['Or leave the token empty, save, and use **Connect** in the list to sign in at Asana instead.'] : []),
+                ...(Integrations::offered($this) ? ['Or leave the token empty, save, and use **Connect** in the list to sign in at Asana instead.'] : []),
             ],
         );
     }
@@ -262,6 +263,11 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
         $token = OAuthTokens::has($connection) ? app(OAuthTokens::class)->token($connection) : (string) $connection->credential('access_token');
 
         return Http::withToken($token)->acceptJson()->timeout(20)->connectTimeout(4);
+    }
+
+    public function oauthIntegration(): string
+    {
+        return Integrations::ASANA;
     }
 
     public function oauthConfigured(): bool

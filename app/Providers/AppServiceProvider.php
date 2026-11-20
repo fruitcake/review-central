@@ -54,12 +54,12 @@ class AppServiceProvider extends ServiceProvider
         $this->app->booted($name);
         Queue::before($name);
 
-        // Cloudflare as it was set up under Settings, where the environment leaves
-        // it open: the environment's own holds. Again for every job, as a worker
-        // outlives a deploy.
-        $cloudflare = fn () => app(PlatformSettings::class)->applyCloudflare();
-        $this->app->booted($cloudflare);
-        Queue::before($cloudflare);
+        // Cloudflare and the apps at Google, Asana, Atlassian and GitHub as they were
+        // set up under Settings, where the environment leaves them open: the
+        // environment's own holds. Again for every job, as a worker outlives a deploy.
+        $settings = fn () => app(PlatformSettings::class)->apply();
+        $this->app->booted($settings);
+        Queue::before($settings);
 
         // A streamed answer is otherwise given up on after a minute without a byte,
         // and a model thinks for longer than that before it writes. Only a streamed

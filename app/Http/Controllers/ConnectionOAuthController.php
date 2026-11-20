@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Connections\ConnectsWithOAuth;
+use App\Connections\Integrations;
 use App\Connections\OAuthTokens;
 use App\Enums\ConnectionKind;
 use App\Exceptions\ConnectionFailed;
@@ -94,7 +95,8 @@ class ConnectionOAuthController extends Controller
 
         $driver = $connection->driver();
 
-        abort_unless($driver instanceof ConnectsWithOAuth && $driver->oauthConfigured(), 404);
+        // Set up here, and on for this tenant.
+        abort_unless($driver instanceof ConnectsWithOAuth && Integrations::offered($driver, $connection->tenant), 404);
 
         return $driver;
     }
