@@ -26,8 +26,13 @@
  * Every run starts from the snapshot with the tools in place. Only when no
  * snapshot can be had does a run install in its own sandbox, its output
  * streamed with the rest. Nothing is built or pushed to deploy this.
+ *
+ * The AI providers' keys never enter the sandbox. The reviewer gets a placeholder
+ * in their place, and its HTTPS requests to the provider's host are handed to
+ * KeyProxy here, which puts the key in for the placeholder on the way out. What
+ * the reviewer reads, or is talked into, cannot reach a key it does not have.
  */
-import { DurableObject } from "cloudflare:workers";
+import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 
 /**
  * Which code this is, for review-central's setup page to compare with its own
@@ -35,7 +40,7 @@ import { DurableObject } from "cloudflare:workers";
  * after one is told apart. tests/Feature/CloudflareWorkerVersionTest.php fails
  * on a change that leaves it as it was.
  */
-const WORKER_VERSION = "2026-11-20.3";
+const WORKER_VERSION = "2026-11-20.4";
 
 interface Env {
   REVIEW_SANDBOX: DurableObjectNamespace<ReviewSandbox>;
@@ -62,8 +67,10 @@ interface RunSpec {
   setupVersion: string | null;
   /** Run by `sh -c` in /work, as the reviewer. */
   script: string;
-  /** The only variables the script gets, besides PATH. */
+  /** The only variables the script gets, besides PATH. A key is in it as its placeholder. */
   env: Record<string, string>;
+  /** The keys the sandbox does not get: each put in for its placeholder in a request to its host. */
+  credentials: Credential[];
   /** Files in /work to hand back, where the reviewer wrote them. */
   keep: string[];
   /** Seconds the script may take. */
@@ -76,6 +83,31 @@ interface RunSpec {
    */
   cache?: { key: string; file: string } | null;
 }
+
+/** A key, the host it is for, and what the sandbox has in its place. */
+interface Credential {
+  host: string;
+  placeholder: string;
+  value: string;
+}
+
+/** What KeyProxy is started with, for one host. */
+interface KeyProxyProps {
+  host: string;
+  keys: Array<[placeholder: string, value: string]>;
+}
+
+/** The headers a provider reads its key from, lower case: the placeholder is swapped in these alone. */
+const KEY_HEADERS = ["authorization", "x-api-key", "x-goog-api-key", "api-key"];
+
+/** The query parameter a provider reads its key from, as Gemini's API may. */
+const KEY_PARAMETERS = ["key"];
+
+/** Where the runtime puts the certificate its HTTPS interception signs with. */
+const INTERCEPT_CA = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
+
+/** The system's bundle, which the certificate is added to: OpenSSL's and Rust's default. */
+const SYSTEM_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt";
 
 /**
  * What the reviewer's home holds that is no session: CLIs and caches, hundreds of
@@ -183,6 +215,50 @@ export default {
     return sandbox.run(spec);
   },
 } satisfies ExportedHandler<Env>;
+
+/**
+ * The way out of a sandbox to an AI provider: a request to the host it was
+ * started for, with a placeholder replaced by its key where a provider reads a
+ * key from (KEY_HEADERS, as itself or after "Bearer ", and KEY_PARAMETERS),
+ * and only when it is exactly that placeholder. The container names the host it asks for itself, in its Host header, so
+ * that is checked: a key goes to its own host over HTTPS, and nowhere else.
+ */
+export class KeyProxy extends WorkerEntrypoint<Env, KeyProxyProps> {
+  async fetch(request: Request): Promise<Response> {
+    const { host, keys } = this.ctx.props;
+    const url = new URL(request.url);
+
+    if (url.protocol !== "https:" || url.hostname !== host || (url.port !== "" && url.port !== "443")) {
+      return new Response(`Only https://${host} is reached this way.`, { status: 403 });
+    }
+
+    const real = new Map(keys);
+    const swap = (value: string): string => {
+      const bearer = /^Bearer (\S+)$/i.exec(value);
+
+      return bearer !== null ? (real.has(bearer[1]) ? `Bearer ${real.get(bearer[1])}` : value) : (real.get(value) ?? value);
+    };
+    const headers = new Headers();
+
+    for (const [name, value] of request.headers) {
+      // The host is the one checked above, from the URL.
+      if (name.toLowerCase() !== "host") {
+        headers.set(name, KEY_HEADERS.includes(name.toLowerCase()) ? swap(value) : value);
+      }
+    }
+
+    for (const parameter of KEY_PARAMETERS) {
+      const value = url.searchParams.get(parameter);
+
+      if (value !== null && real.has(value)) {
+        url.searchParams.set(parameter, real.get(value)!);
+      }
+    }
+
+    // Not after a redirect: that would take the key to wherever it points.
+    return fetch(new Request(url, { method: request.method, headers, body: request.body, redirect: "manual" }));
+  }
+}
 
 export class ReviewSandbox extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -304,6 +380,24 @@ export class ReviewSandbox extends DurableObject<Env> {
     }
   }
 
+  /**
+   * Hands the sandbox's HTTPS to each key's host to KeyProxy, with that host's
+   * keys. Before every start: an interception lasts as long as its sandbox.
+   */
+  private async intercept(credentials: Credential[]): Promise<void> {
+    const container = this.ctx.container!;
+    const exports = this.ctx.exports as unknown as { KeyProxy: (options: { props: KeyProxyProps }) => Fetcher };
+    const hosts = new Map<string, Array<[string, string]>>();
+
+    for (const credential of credentials) {
+      hosts.set(credential.host, [...(hosts.get(credential.host) ?? []), [credential.placeholder, credential.value]]);
+    }
+
+    for (const [host, keys] of hosts) {
+      await container.interceptOutboundHttps(host, exports.KeyProxy({ props: { host, keys } }));
+    }
+  }
+
   async destroy(): Promise<void> {
     const container = this.ctx.container;
 
@@ -355,6 +449,7 @@ export class ReviewSandbox extends DurableObject<Env> {
       }
 
       try {
+        await this.intercept(spec.credentials);
         container.start({ ...always, containerSnapshot: { id: snapshot.id } });
         await this.ready();
         prepared = true;
@@ -367,6 +462,7 @@ export class ReviewSandbox extends DurableObject<Env> {
     }
 
     if (!prepared) {
+      await this.intercept(spec.credentials);
       container.start({ ...always, image });
       await this.ready();
       await send("note", `Sandbox started (${spec.instance}, ${image}).`);
@@ -407,6 +503,17 @@ export class ReviewSandbox extends DurableObject<Env> {
       }
     }
 
+    // The certificate the keys' hosts are answered with from here, which every
+    // client in the sandbox has to trust: the system's, and Node's through
+    // NODE_EXTRA_CA_CERTS below. Root's work, before the reviewer runs.
+    if (spec.credentials.length > 0) {
+      await this.must(
+        ["sh", "-c", `test -s ${INTERCEPT_CA} && cp ${INTERCEPT_CA} /usr/local/share/ca-certificates/cloudflare-containers-ca.crt && update-ca-certificates > /dev/null`],
+        "trust the certificate the AI providers' hosts are answered with",
+      );
+      await send("note", `The AI providers' keys stay in the Worker: ${[...new Set(spec.credentials.map((credential) => credential.host))].join(", ")} reached through it.`);
+    }
+
     const input = await this.env.BUCKET.get(spec.input);
 
     if (input === null) {
@@ -438,7 +545,15 @@ export class ReviewSandbox extends DurableObject<Env> {
 
     const exitCode = await streamed(
       ["timeout", "--signal=TERM", "--kill-after=30", String(spec.timeout), "sh", "-c", spec.script],
-      { cwd: "/work", env: { ...spec.env, HOME: "/home/reviewer" }, user: REVIEWER },
+      {
+        cwd: "/work",
+        env: {
+          ...spec.env,
+          ...(spec.credentials.length > 0 ? { NODE_EXTRA_CA_CERTS: INTERCEPT_CA, SSL_CERT_FILE: SYSTEM_CA_BUNDLE } : {}),
+          HOME: "/home/reviewer",
+        },
+        user: REVIEWER,
+      },
     );
     let kept = false;
 
@@ -632,6 +747,25 @@ function readSpec(body: unknown): RunSpec | string {
     return "env holds strings under names a shell takes.";
   }
 
+  const credentials = Array.isArray(spec.credentials) ? spec.credentials : [];
+
+  if (
+    credentials.length > 32 ||
+    credentials.some(
+      (credential) =>
+        typeof credential !== "object" ||
+        credential === null ||
+        typeof credential.host !== "string" ||
+        !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(credential.host) ||
+        typeof credential.placeholder !== "string" ||
+        !/^[A-Za-z0-9_-]{24,200}$/.test(credential.placeholder) ||
+        typeof credential.value !== "string" ||
+        credential.value === "",
+    )
+  ) {
+    return "credentials name a host, a placeholder and a key each.";
+  }
+
   const keep = Array.isArray(spec.keep) ? spec.keep : [];
 
   if (keep.some((file) => typeof file !== "string" || !/^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$/.test(file) || file.startsWith(".."))) {
@@ -660,6 +794,7 @@ function readSpec(body: unknown): RunSpec | string {
     setupVersion: typeof spec.setupVersion === "string" ? spec.setupVersion : null,
     script: spec.script,
     env: env as Record<string, string>,
+    credentials: credentials as Credential[],
     keep: keep as string[],
     timeout,
     instance,

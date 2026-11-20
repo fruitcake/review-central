@@ -220,6 +220,10 @@ return [
         // reviews start from. Off when the Worker was deployed with an image
         // that has them.
         'setup' => (bool) env('REVIEW_CLOUDFLARE_SETUP', true),
+        // The AI providers' keys stay in the Worker: the sandbox gets a placeholder,
+        // which the Worker swaps for the key in a request to the provider's host.
+        // Off only for a reviewer that will not trust the Worker's certificate.
+        'proxy_keys' => (bool) env('REVIEW_CLOUDFLARE_PROXY_KEYS', true),
         // What deploys the Worker from here (`php artisan review:deploy-worker`, or
         // Deploy on the setup page): the account, an API token that may edit its
         // Workers, containers and R2, and the Worker's name. The same can be set

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Runners\Container;
 
+use App\Support\SecretFilter;
 use Closure;
 
 /**
@@ -14,9 +15,6 @@ use Closure;
  */
 class RunLogWriter
 {
-    /** A value this short is not a secret worth searching for, and would match by accident. */
-    protected const SHORTEST_SECRET = 8;
-
     protected const TELL_EVERY_SECONDS = 1.0;
 
     protected const COPY_EVERY_SECONDS = 5.0;
@@ -38,8 +36,7 @@ class RunLogWriter
     /** Whether lines were written since. */
     protected bool $untold = false;
 
-    /** @var array<int, string> */
-    protected array $secrets;
+    protected SecretFilter $secrets;
 
     /**
      * @param  array<string, string>  $environment
@@ -53,11 +50,11 @@ class RunLogWriter
         $this->shown = $this->clock() - self::PROGRESS_EVERY_SECONDS / 2;
 
         // The steps are told not to print these, and a tool they call may anyway.
-        $this->secrets = array_values(array_filter(
+        // Also written otherwise: spaced out, reversed, in base64 or hex.
+        $this->secrets = new SecretFilter(array_filter(
             $environment,
-            fn (string $value, string $name): bool => strlen($value) >= self::SHORTEST_SECRET
-                && preg_match('/KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i', $name) === 1,
-            ARRAY_FILTER_USE_BOTH,
+            fn (string $name): bool => preg_match('/KEY|TOKEN|SECRET|PASS|CREDENTIAL|PRIVATE|AUTH/i', $name) === 1,
+            ARRAY_FILTER_USE_KEY,
         ));
     }
 
@@ -147,7 +144,7 @@ class RunLogWriter
             // Colours and cursor movements mean nothing on a page, and a carriage
             // return is a progress line overwriting itself.
             $line = (string) preg_replace('/\e\[[0-9;?]*[A-Za-z]|\e\][^\a]*\a/', '', $line);
-            $line = rtrim((string) str_replace($this->secrets, '[secret]', $line), "\r");
+            $line = rtrim($this->secrets->filter($line), "\r");
             $line = (string) substr($line, (int) strrpos("\r".$line, "\r"));
 
             $text .= "{$time}  {$line}\n";

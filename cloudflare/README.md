@@ -118,6 +118,7 @@ What it shows and what it does not: the whole path through the Worker, the setup
 | --- | --- | --- |
 | `REVIEW_CLOUDFLARE_INSTANCE` | `standard-1` | The sandbox's size: `lite`, `basic`, `standard-1` … `standard-4`. A review typically uses 230–550 MB, so `basic` (1 GiB) may do. |
 | `REVIEW_CLOUDFLARE_SETUP` | `true` | Installs the tools in a fresh sandbox and starts later ones from a snapshot of it. Turn it off with an image of your own (below). |
+| `REVIEW_CLOUDFLARE_PROXY_KEYS` | `true` | Keeps the AI providers' keys in the Worker (see below). Off only for a reviewer that will not trust the Worker's certificate. |
 | `REVIEW_CLOUDFLARE_DISK` | `r2` | The filesystem disk on the bucket the Worker is bound to. |
 | `REVIEW_CLOUDFLARE_LOCAL` | `false` | Uses the Worker on this machine (`npx wrangler dev`) while no deployed one is named. |
 | `REVIEW_CLOUDFLARE_LOCAL_URL` | `http://127.0.0.1:8787` | Where that local Worker listens. |
@@ -131,6 +132,14 @@ Cloudflare charges for the memory and disk of an instance while it runs, and for
 
 The estimate is kept per review (`review_runs.sandbox_cost`) and shown on its page; the month's total per tenant is on the overview, next to the AI providers' cost.
 
+## The AI providers' keys
+
+The sandbox never gets them. review-central sends each key to the Worker beside the run, with the host it is for (`api.anthropic.com`, `api.openai.com`, a gateway's own host when one is set), and gives the reviewer a random placeholder in its place. Before the sandbox starts, the Worker has Cloudflare hand its HTTPS to those hosts to `KeyProxy`, which checks the request is for that host over HTTPS, puts the key in where a provider reads one (`Authorization`, `x-api-key`, `x-goog-api-key`, `api-key`, or the `key` parameter) when that holds exactly the placeholder, and sends it on, without following a redirect. Whatever the reviewer reads or is talked into, it cannot print or send a key it does not have.
+
+That interception answers for those hosts with a certificate of Cloudflare's, which the Worker adds to the sandbox's trust store before the reviewer runs; the reviewer also gets `NODE_EXTRA_CA_CERTS` for Node and `SSL_CERT_FILE` for the rest. A gateway over plain HTTP stops the review instead: the Worker would send its key on unencrypted, and the key never goes into the sandbox.
+
+Other traffic leaves the sandbox as it did: Composer, npm and the CLIs' own updates still reach the internet, as they do from a CI pipeline that runs the same pull request. So the sandbox keeps the keys out of reach, not the code: what it could send out is the checkout it was given, which whoever opened the pull request can read already. A reviewer that is talked into it can still spend the key through the Worker for as long as the review runs, within its budget (`CLAUDE_REVIEW_MAX_BUDGET`, $10 by default) and its time limit.
+
 ## What differs from Docker
 
 - **The first review installs the tools**, which takes a few minutes; the ones after it start from the snapshot. The reviewer's own CLI (Claude Code, Codex, OpenCodeReview, Pi) is installed by its script when the image has none.
@@ -138,7 +147,7 @@ The estimate is kept per review (`review_runs.sandbox_cost`) and shown on its pa
 - **The Composer cache is the destination branch's `vendor/`**, one per repository, in the bucket under `review/cache/<repository>/`. A review fetches it, and Composer installs only what the pull request's lock changes. It is kept again only by a review whose lock is the destination branch's, written right after the install, so what is kept is never a pull request's own packages. Composer's own download cache does not travel.
 - **The session travels, the caches do not.** A follow-up review takes the reviewer's session along (a few MB), not the CLIs and caches in its home (`.local`, `.npm`, `.tools`, `.cache`, `.composer`, together hundreds of MB): the sandbox installs a newer CLI than its snapshot has itself, in seconds.
 - **No memory figure**: a sandbox does not say what it used.
-- **The reviewer's key is in the sandbox**, as it is in the Docker container. The sandbox has the internet and no credential for the repository's host.
+- **The reviewer's key is not in the sandbox**, where it is in the Docker container: the Worker puts it in on the way to the provider (above). The sandbox has the internet and no credential for the repository's host.
 
 ## The image
 

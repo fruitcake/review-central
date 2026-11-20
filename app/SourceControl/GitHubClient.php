@@ -33,8 +33,10 @@ use Throwable;
  * comment that names its parent in a hidden marker, and one is resolved by
  * minimising it as resolved, which is how GitHub folds it away.
  */
-class GitHubClient implements SourceControl
+class GitHubClient implements FiltersSecrets, SourceControl
 {
+    use SecretFiltering;
+
     /** Pages of 100 read before giving up on a list. */
     public const MAX_PAGES = 20;
 
@@ -837,6 +839,8 @@ class GitHubClient implements SourceControl
             ->withHeaders(['Accept' => 'application/vnd.github+json', 'X-GitHub-Api-Version' => '2022-11-28'])
             // GitHub refuses a request that does not say who is asking.
             ->withUserAgent('review-central');
+
+        $request = $this->filtered($request);
 
         return $this->token === null ? $request : $request->withToken($this->token);
     }

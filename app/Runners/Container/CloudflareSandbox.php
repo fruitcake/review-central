@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Runners\Container;
 
+use App\Llm\ProviderKeys;
 use Closure;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Http\Client\PendingRequest;
@@ -112,13 +113,20 @@ class CloudflareSandbox extends Sandbox
 
             $vendor = $composerCache === null ? null : self::vendorCache($composerCache, $workDirectory);
 
+            // The keys stay in the Worker, which puts them in for their placeholders
+            // on the way to the providers' hosts.
+            $keys = config('review.cloudflare.proxy_keys')
+                ? ProviderKeys::proxied($environment)
+                : ['environment' => $environment, 'credentials' => []];
+
             $exit = $this->ask($run, [
                 'input' => $input,
                 'output' => $kept,
                 'setup' => $setup,
                 'setupVersion' => $setup === null ? null : self::setupVersion($setup),
                 'script' => 'mkdir -p "$HOME" && '.$script,
-                'env' => $environment + ($vendor === null ? [] : ['COMPOSER_CACHE_DIR' => self::COMPOSER_CACHE, 'REVIEW_VENDOR_BASE' => $vendor['file']]),
+                'env' => $keys['environment'] + ($vendor === null ? [] : ['COMPOSER_CACHE_DIR' => self::COMPOSER_CACHE, 'REVIEW_VENDOR_BASE' => $vendor['file']]),
+                'credentials' => $keys['credentials'],
                 'keep' => self::KEEP,
                 'timeout' => $timeout,
                 'instance' => $instance,
