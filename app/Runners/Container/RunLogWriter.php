@@ -24,6 +24,13 @@ class RunLogWriter
         'composer', 'tools', 'cli', 'reviewer', 'usage', 'keep', 'download', 'report',
     ];
 
+    /**
+     * What a step may add of how it ran, kept as part of its name, so that a step
+     * that ran two ways is measured as two: "composer (cached)", from a vendor/
+     * that was kept, and "composer (fresh)", from nothing.
+     */
+    public const PHASE_WAYS = ['cached', 'fresh'];
+
     protected const TELL_EVERY_SECONDS = 1.0;
 
     protected const COPY_EVERY_SECONDS = 5.0;
@@ -155,9 +162,10 @@ class RunLogWriter
 
         foreach ($lines as $line) {
             // A script's mark of where a step starts, shown as the runner's own.
-            if (preg_match('/^##\[phase\] ([a-z]+)\s*$/', $line, $match) === 1) {
-                $this->phase($match[1]);
-                $line = "── {$match[1]} ──";
+            if (preg_match('/^##\[phase\] ([a-z]+)(?: ([a-z]+))?\s*$/', $line, $match) === 1) {
+                $way = in_array($match[2] ?? '', self::PHASE_WAYS, true) ? " ({$match[2]})" : '';
+                $this->phase($match[1], $way);
+                $line = "── {$match[1]}{$way} ──";
             }
 
             // Colours and cursor movements mean nothing on a page, and a carriage
@@ -189,10 +197,10 @@ class RunLogWriter
      * steps there are: the reviewer prints what a pull request may put in its
      * mouth, and a step it names is not one.
      */
-    protected function phase(string $name): void
+    protected function phase(string $name, string $way = ''): void
     {
         if (in_array($name, self::PHASES, true)) {
-            @file_put_contents($this->path.'.phases', now()->getTimestamp()." {$name}\n", FILE_APPEND | LOCK_EX);
+            @file_put_contents($this->path.'.phases', now()->getTimestamp()." {$name}{$way}\n", FILE_APPEND | LOCK_EX);
         }
     }
 

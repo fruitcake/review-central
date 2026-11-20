@@ -73,7 +73,7 @@ The checkout, the review's scripts and the reviewer's session go to the sandbox 
 
 ### Its size, and what it measured
 
-Every review in a sandbox runs on the size picked under **Settings → Cloudflare sandboxes** (`standard-1` unless changed), from the next review on; a bigger one costs more per second. Each review measures, per step, how long it took, the most memory it used and how long it waited for a processor, and keeps that with its cost in the sandbox.
+Every review in a sandbox runs on the size picked under **Settings → Cloudflare sandboxes** (`standard-1` unless changed), from the next review on; a bigger one costs more per second. Each review measures, per step, how long it took, the most memory it used and how long it waited for a processor, and keeps that with its cost in the sandbox. Composer's step is measured as *composer (cached)* when it starts from a `vendor/` that was kept, and as *composer (fresh)* when it installs from nothing, which takes many times longer.
 
 On **Platform**, the capacity section advises a size from those measurements: one whose memory has room for what nineteen in twenty reviews used, and one up from a size whose steps around the model were short of processor a quarter of the time or more. A size that was short of processor is not advised again, and just after a change the advice waits for five reviews on the new size. **Use** switches to the advised size. A table per size shows each step's average time, the time nine in ten stay within, its most memory and how long it waited for a processor, with what a review took and cost in the sandbox.
 

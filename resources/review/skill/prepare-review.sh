@@ -420,7 +420,6 @@ export COMPOSER_HOME="$HOME/.composer"
 # vendor/ - but it is a weaker one, so the log says what would fix it. The variable
 # is dropped as soon as Composer is done: the reviewer reads text from the pull
 # request and has no use for it.
-echo "##[phase] composer"
 if [ -f composer.json ]; then
   # Not for a repository that commits anything under vendor/: those files are the
   # pull request's, and kept with the install they would be unpacked into the
@@ -441,6 +440,14 @@ if [ -f composer.json ]; then
     # "2": an archive from before committed vendor files were kept out may hold
     # some, and is not unpacked again. It goes as the newer ones replace it.
     VENDOR_TAR="$COMPOSER_CACHE_DIR/vendor-nodev2-$(cat composer.json composer.lock | sha256sum | cut -c1-32).tar"
+  fi
+
+  # The step says whether it starts from a vendor/ that was kept: an install from
+  # nothing takes many times longer, so the figures of the two are kept apart.
+  if { [ -n "$VENDOR_BASE" ] && [ -f "$VENDOR_BASE" ]; } || { [ -n "$VENDOR_TAR" ] && [ -f "$VENDOR_TAR" ]; }; then
+    echo "##[phase] composer cached"
+  else
+    echo "##[phase] composer fresh"
   fi
 
   # Only vendor/ comes out of an archive: one is written from inside a review's
@@ -486,6 +493,7 @@ if [ -f composer.json ]; then
     fi
   fi
 else
+  echo "##[phase] composer"
   echo "No composer.json; nothing to install."
 fi
 
