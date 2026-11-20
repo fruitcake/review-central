@@ -146,13 +146,10 @@ class ReviewRunResource extends Resource
      *
      * @return array<int, Component>
      */
-    public static function trialFields(): array
+    public static function trialFields(bool $withExisting = true): array
     {
         return [
-            Toggle::make('ignore_existing')
-                ->label('Review as though nobody had')
-                ->default(true)
-                ->helperText('Leaves out the comments and earlier findings on the pull request, from this review and from people. Turn it off to try a follow-up review instead.'),
+            ...($withExisting ? [self::ignoreExistingField()] : []),
             Select::make('runner')
                 ->label('Runs on')
                 ->options(fn (Runners $runners): array => $runners->options())
@@ -175,6 +172,14 @@ class ReviewRunResource extends Resource
             Toggle::make('verify')
                 ->label('Check each blocking finding a second time'),
         ];
+    }
+
+    public static function ignoreExistingField(): Toggle
+    {
+        return Toggle::make('ignore_existing')
+            ->label('Review as though nobody had')
+            ->default(true)
+            ->helperText('Leaves out the comments and earlier findings on the pull request, from this review and from people. Turn it off to try a follow-up review instead.');
     }
 
     /**

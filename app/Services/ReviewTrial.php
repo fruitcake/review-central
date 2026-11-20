@@ -35,6 +35,19 @@ class ReviewTrial
      */
     public function start(Tenant $tenant, string $url, array $options = []): Repository
     {
+        return $this->begin($tenant, $url, $options)['repository'];
+    }
+
+    /**
+     * The same as start(), and the build the trial runs as, to find its run by.
+     *
+     * @param  array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool|null, ignore_existing?: bool}  $options
+     * @return array{repository: Repository, build: int}
+     *
+     * @throws ReviewTrialRefused
+     */
+    public function begin(Tenant $tenant, string $url, array $options = []): array
+    {
         $link = PullRequestLink::parse($url);
 
         if ($link === null) {
@@ -101,11 +114,11 @@ class ReviewTrial
         // Only now: a pull request that cannot be tried leaves no repository behind.
         $repository->save();
         $title = is_string($pullRequest['title'] ?? null) ? $pullRequest['title'] : null;
-        $container === null
+        $build = $container === null
             ? $this->diff->startTrial($repository, $branch, $trial, $title)
             : $container->startTrial($repository, $branch, $trial, $title);
 
-        return $repository;
+        return ['repository' => $repository, 'build' => $build];
     }
 
     /**
