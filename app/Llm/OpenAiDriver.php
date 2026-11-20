@@ -14,6 +14,7 @@ use App\Llm\Agents\Classifier;
 use App\Llm\Agents\Comparer;
 use App\Llm\Agents\Describer;
 use App\Llm\Agents\DiffReviewer;
+use App\Llm\Agents\FindingChecker;
 use App\Models\Connection;
 use App\Runners\Diff\Answer;
 use App\Runners\Diff\ReportSchema;
@@ -157,6 +158,11 @@ class OpenAiDriver implements ExplainsSetup, LlmDriver
     public function classifies(Connection $connection, string $text): AgentResponse
     {
         return (new Classifier)->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: (string) (config('review.turn.openai_model') ?: ReviewSettings::tierModels('openai')['cheapest'] ?? 'gpt-6-luna'), timeout: 30);
+    }
+
+    public function checks(Connection $connection, string $text): AgentResponse
+    {
+        return (new FindingChecker)->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: (string) (config('review.turn.openai_model') ?: ReviewSettings::tierModels('openai')['cheapest'] ?? 'gpt-6-luna'), timeout: 60);
     }
 
     public function compares(Connection $connection, string $text, ?string $model = null): AgentResponse

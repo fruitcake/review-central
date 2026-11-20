@@ -86,6 +86,11 @@ final class ReadOnlyClient implements SourceControl
         return $this->client->getFile($path);
     }
 
+    public function fileOnMainBranch(string $path): string|false|null
+    {
+        return $this->client->fileOnMainBranch($path);
+    }
+
     public function cloneAccess(): array
     {
         return $this->client->cloneAccess();

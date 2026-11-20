@@ -15,6 +15,7 @@ use App\Llm\Agents\Comparer;
 use App\Llm\Agents\Decider;
 use App\Llm\Agents\Describer;
 use App\Llm\Agents\DiffReviewer;
+use App\Llm\Agents\FindingChecker;
 use App\Models\Connection;
 use App\Rules\PublicUrl;
 use App\Runners\Diff\Answer;
@@ -212,6 +213,11 @@ class AnthropicDriver implements ExplainsSetup, LlmDriver
     public function classifies(Connection $connection, string $text): AgentResponse
     {
         return (new Classifier)->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: self::smallModel(), timeout: 30);
+    }
+
+    public function checks(Connection $connection, string $text): AgentResponse
+    {
+        return (new FindingChecker)->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: self::smallModel(), timeout: 60);
     }
 
     public function compares(Connection $connection, string $text, ?string $model = null): AgentResponse

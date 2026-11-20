@@ -76,6 +76,16 @@ Where the tenant has an AI provider, a small model also writes it in a sentence 
 
 Approvals and requests for changes reach Review Central through the webhook events listed under [Setting up a tenant](./tenants). `php artisan review:sync-pull-requests` reads every listed pull request from its host again, for those from before and for a delivery that was missed; it runs every night by itself.
 
+### Open findings
+
+When a pull request is merged into the main branch while its last review still had findings open (new or open, and not called *Not a problem* or *Wrong* by anyone in the team), they stay under **Open findings** in the sidebar, per repository. Trials do not count. The list shows each finding with its pull request, file and line, and where it stands:
+
+- **Not checked yet**: kept at the merge.
+- **Still there**, **Resolved** or **Unclear**: what the last check said, with its one-sentence reason.
+- **Closed**: closed by someone, with why.
+
+Under **Review defaults → Open findings after a merge** a team can have them checked **weekly** or **monthly** (off by default: kept, not checked). A small model, with the AI provider that writes the notes on whose turn, reads each finding's file as it is on the main branch, one request per file, and says whether the problem is still there. A finding whose file is gone is resolved; one without a file is not checked. An admin can also check findings now, all or a selection, and close or reopen them.
+
 ## A security review of a branch
 
 **Security review**, under Reviews, has the reviewer read a whole branch for security problems as it stands, rather than one pull request's change: pick the repository and the branch, such as the default one. Nothing is posted; the report shows under the *Security* view. It reads far more than a pull request's review, so it takes longer and costs more. It needs a runner that reads the code, a Cloudflare sandbox or Docker, and an Anthropic connection, since Claude Code is its reviewer. Its model and effort are set with `SECURITY_REVIEW_MODEL` and the variables beside it in the [configuration](./configuration).

@@ -146,6 +146,13 @@ interface SourceControl
     public function getFile(string $path): ?string;
 
     /**
+     * A file on the repository's main branch; false when the branch has no such
+     * file, which is only said once the repository itself is known to be readable;
+     * null when it could not be read, such as when access is refused.
+     */
+    public function fileOnMainBranch(string $path): string|false|null;
+
+    /**
      * Shows a review among the builds of a commit, which is where a pull request
      * says that one is running and how it ended. The same call again replaces it.
      *

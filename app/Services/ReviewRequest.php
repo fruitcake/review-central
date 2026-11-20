@@ -218,6 +218,12 @@ class ReviewRequest
         $key = ['repository_id' => $repository->getKey(), 'pull_request_id' => (int) $data['id']];
 
         if (($data['state'] ?? null) !== 'OPEN') {
+            // Merged with findings still open: they go on the repository's backlog.
+            // First, so a failure leaves the pull request listed for the next sync.
+            if (($data['state'] ?? null) === 'MERGED') {
+                app(OpenFindings::class)->record($repository, (int) $data['id'], is_string($data['merge_commit']['hash'] ?? null) ? $data['merge_commit']['hash'] : null, is_string($data['destination']['branch']['name'] ?? null) ? $data['destination']['branch']['name'] : null);
+            }
+
             OpenPullRequest::query()->where($key)->delete();
 
             // Merged or declined: what the reviewer kept of it has no further use.
@@ -312,6 +318,10 @@ class ReviewRequest
     public function sync(Repository $repository, int $pullRequestId, ?array $data): void
     {
         if ($data === null || ($data['state'] ?? null) !== 'OPEN') {
+            if (($data['state'] ?? null) === 'MERGED') {
+                app(OpenFindings::class)->record($repository, $pullRequestId, is_string($data['merge_commit']['hash'] ?? null) ? $data['merge_commit']['hash'] : null, is_string($data['destination']['branch']['name'] ?? null) ? $data['destination']['branch']['name'] : null);
+            }
+
             OpenPullRequest::query()->where(['repository_id' => $repository->getKey(), 'pull_request_id' => $pullRequestId])->delete();
 
             return;

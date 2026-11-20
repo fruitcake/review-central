@@ -101,7 +101,15 @@ class ReviewSettingsForm
                         ->label('With model')
                         ->placeholder('The provider\'s cheapest')
                         ->helperText('A tier is read for the AI provider that writes them: the first of Anthropic, OpenAI, the others. A model by name has to be one of that provider.'),
-                ])] : []),
+                ]),
+                Fieldset::make('Open findings after a merge')
+                    ->schema([
+                        Select::make('findings_check')
+                            ->label('Check them against the main branch')
+                            ->options(['weekly' => 'Weekly', 'monthly' => 'Monthly'])
+                            ->placeholder('Off: kept, not checked')
+                            ->helperText('A pull request merged with findings still open leaves them under Open findings. Checked, a small model reads each one\'s file on the main branch, one request per file, and says whether it is still there, resolved, or cannot be told from the file.'),
+                    ])] : []),
             Select::make('language')
                 ->label('Language')
                 ->options(ReviewSettings::LANGUAGES)
@@ -517,7 +525,7 @@ class ReviewSettingsForm
     public static function state(?ReviewSetting $setting): array
     {
         return $setting === null ? [] : collect($setting->attributesToArray())
-            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model'])
+            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model', 'findings_check'])
             ->all();
     }
 }

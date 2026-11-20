@@ -298,6 +298,24 @@ class BitbucketClient implements FiltersSecrets, SourceControl
         return "https://bitbucket.org/{$this->workspace}/{$this->slug}/pull-requests/{$pullRequestId}";
     }
 
+    public function fileOnMainBranch(string $path): string|false|null
+    {
+        $branch = $this->getRepository()['mainbranch']['name'] ?? null;
+
+        if (! is_string($branch) || $branch === '') {
+            return null;
+        }
+
+        $response = $this->request(10)->get($this->url('src/'.rawurlencode($branch).'/'.implode('/', array_map('rawurlencode', explode('/', $path)))));
+
+        // Not found in a repository that could be read just now: the file is gone.
+        return match ($response->status()) {
+            404 => false,
+            403 => null,
+            default => $response->throw()->body(),
+        };
+    }
+
     public function getFile(string $path): ?string
     {
         $branch = $this->getRepository()['mainbranch']['name'] ?? null;
