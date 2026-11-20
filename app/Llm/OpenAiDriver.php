@@ -15,6 +15,7 @@ use App\Llm\Agents\DiffReviewer;
 use App\Models\Connection;
 use App\Runners\Diff\Answer;
 use App\Runners\Diff\ReportSchema;
+use App\Services\ReviewSettings;
 use App\Support\SetupGuide;
 use Illuminate\Support\Facades\Http;
 use Laravel\Ai\Classification;
@@ -93,7 +94,8 @@ class OpenAiDriver implements ExplainsSetup, LlmDriver
 
     public function review(Connection $connection, string $instructions, string $material, ?string $model = null, ?string $effort = null): Answer
     {
-        $model = filled($model) ? (string) $model : (string) config('review.diff.openai_model');
+        // As set, else what .env names, else the SDK's default, which follows the SDK.
+        $model = filled($model) ? (string) $model : (string) (config('review.diff.openai_model') ?: ReviewSettings::tierModels('openai')['default'] ?? 'gpt-6.1-sol');
 
         $agent = new DiffReviewer($instructions, array_filter([
             // Every property required and every object closed, as strict structured output wants it.
@@ -144,7 +146,7 @@ class OpenAiDriver implements ExplainsSetup, LlmDriver
 
     public function describes(Connection $connection, string $instructions, string $text): ?array
     {
-        $answer = (new Describer($instructions))->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: (string) config('review.turn.openai_model'), timeout: 60);
+        $answer = (new Describer($instructions))->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: (string) (config('review.turn.openai_model') ?: ReviewSettings::tierModels('openai')['cheapest'] ?? 'gpt-6-luna'), timeout: 60);
 
         return Describer::read($answer);
     }

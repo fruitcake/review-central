@@ -5,6 +5,7 @@ use App\Enums\ReviewCommandAccess;
 use App\Filament\App\Pages\ReviewDefaults;
 use App\Filament\App\Resources\AiProviders\Pages\ManageAiProviders;
 use App\Filament\Components\ReviewSettingsForm;
+use App\Llm\AnthropicDriver;
 use App\Models\Connection;
 use App\Models\ExchangeRate;
 use App\Models\ModelPrice;
@@ -271,4 +272,23 @@ it('offers OpenCodeReview real model names only, which it passes on as they are'
             return array_intersect($options, ['opus', 'sonnet', 'haiku', 'smartest', 'default', 'cheapest']) === []
                 && in_array('claude-opus-5-5', $options, true);
         });
+});
+
+it('says what a reviewer left to itself ran on last, and takes the SDK\'s models where the API is asked directly', function () {
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->tenant->id]);
+
+    livewire(ReviewDefaults::class)->assertSee('model its own default, effort its own default');
+
+    $repository = Repository::factory()->create(['tenant_id' => $this->tenant->id]);
+    ReviewRun::query()->forceCreate([
+        'tenant_id' => $this->tenant->id, 'repository_id' => $repository->id, 'workspace' => 'acme', 'slug' => 'shop', 'branch' => 'x',
+        'commit' => str_repeat('a', 40), 'status' => ReviewRun::STATUS_FINISHED, 'started_at' => now(), 'agent' => 'claude-code', 'model' => 'claude-opus-5-5', 'effort' => 'xhigh',
+    ]);
+
+    livewire(ReviewDefaults::class)->assertSee('model its own default (the last review with it used claude-opus-5-5), effort its own default (the last review with it used xhigh)');
+
+    $tiers = ReviewSettings::tierModels('anthropic');
+
+    expect(AnthropicDriver::defaultModel())->toBe($tiers['smartest'])
+        ->and(AnthropicDriver::smallModel())->toBe($tiers['cheapest']);
 });

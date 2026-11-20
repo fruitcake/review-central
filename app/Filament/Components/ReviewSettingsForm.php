@@ -6,6 +6,7 @@ use App\Enums\ReviewEffort;
 use App\Enums\ReviewProvider;
 use App\Filament\CurrentTenant;
 use App\Models\ModelPrice;
+use App\Models\ReviewRun;
 use App\Models\ReviewSetting;
 use App\Services\Currency;
 use App\Services\ReviewCredentials;
@@ -226,8 +227,27 @@ class ReviewSettingsForm
         $named = $value($model);
         $tierModel = $named !== null && $driver !== null && in_array($named, ReviewSettings::TIERS, true) ? (ReviewSettings::tierModels($driver)[$named] ?? null) : null;
 
-        return 'model '.($named === null ? 'as the reviewer decides' : $named.($tierModel === null ? '' : " (now {$tierModel})"))
-            .', effort '.(($effort = $value($effort)) === null ? 'as the reviewer decides' : (ReviewEffort::tryFrom($effort)?->text() ?? $effort));
+        // Left to the reviewer, it is known only once a review ran: the newest says what it took.
+        $last = $named === null || $value($effort) === null ? self::lastRun($provider) : null;
+        $own = fn (?string $used): string => 'its own default'.($used === null ? '' : " (the last review with it used {$used})");
+
+        return 'model '.($named === null ? $own($last?->model) : $named.($tierModel === null ? '' : " (now {$tierModel})"))
+            .', effort '.(($chosen = $value($effort)) === null ? $own($last?->effort) : (ReviewEffort::tryFrom($chosen)?->text() ?? $chosen));
+    }
+
+    /**
+     * The team's newest review by this reviewer that says what model it ran on.
+     */
+    protected static function lastRun(ReviewProvider $provider): ?ReviewRun
+    {
+        $tenant = CurrentTenant::find();
+
+        return $tenant === null ? null : ReviewRun::query()
+            ->where('tenant_id', $tenant->getKey())
+            ->where('agent', $provider->value)
+            ->whereNotNull('model')
+            ->latest('started_at')
+            ->first(['model', 'effort']);
     }
 
     protected static function placeholder(?ReviewSetting $defaults, string $field): string
