@@ -37,9 +37,7 @@ it('replaces each key by a placeholder for its host, its gateway\'s where it has
         ]);
 });
 
-it('leaves a key that goes to a gateway over plain HTTP as it is', function () {
-    $proxied = ProviderKeys::proxied(['ANTHROPIC_API_KEY' => 'sk-ant-one-123456', 'ANTHROPIC_BASE_URL' => 'http://gateway.internal']);
-
-    expect($proxied['environment']['ANTHROPIC_API_KEY'])->toBe('sk-ant-one-123456')
-        ->and($proxied['credentials'])->toBe([]);
+it('refuses a key for a gateway over plain HTTP rather than hand it to the sandbox', function () {
+    expect(fn () => ProviderKeys::proxied(['ANTHROPIC_API_KEY' => 'sk-ant-one-123456', 'ANTHROPIC_BASE_URL' => 'http://gateway.internal']))
+        ->toThrow(RuntimeException::class, 'a key goes to a gateway over HTTPS only');
 });

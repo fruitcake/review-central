@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Llm;
 
+use RuntimeException;
+
 /**
  * The AI providers' keys as the reviewers read them from their environment, and
  * the host each one is sent to. A sandbox that can keep them out of its reach
@@ -41,12 +43,14 @@ final class ProviderKeys
 
     /**
      * The environment with every key it holds replaced by a placeholder, and what
-     * puts each back: the key, its placeholder and its host. A key that goes to a
-     * gateway over plain HTTP stays as it is: it would cross the internet unencrypted
-     * from the Worker on, and the Worker only swaps on HTTPS.
+     * puts each back: the key, its placeholder and its host. There is no key that
+     * goes into the sandbox after all: one for a gateway over plain HTTP, which the
+     * Worker would send on unencrypted, stops the run instead.
      *
      * @param  array<string, string>  $environment
      * @return array{environment: array<string, string>, credentials: list<array{host: string, placeholder: string, value: string}>}
+     *
+     * @throws RuntimeException
      */
     public static function proxied(array $environment): array
     {
@@ -59,11 +63,12 @@ final class ProviderKeys
                 continue;
             }
 
-            $base = $environment[self::BASE_URLS[$variable] ?? ''] ?? '';
+            $baseVariable = self::BASE_URLS[$variable] ?? null;
+            $base = $baseVariable === null ? '' : ($environment[$baseVariable] ?? '');
 
             if ($base !== '') {
                 if (parse_url($base, PHP_URL_SCHEME) !== 'https' || ! is_string($gateway = parse_url($base, PHP_URL_HOST))) {
-                    continue;
+                    throw new RuntimeException("{$baseVariable} is {$base}: a key goes to a gateway over HTTPS only. Change the AI provider's base URL to an https:// address.");
                 }
 
                 $host = strtolower($gateway);

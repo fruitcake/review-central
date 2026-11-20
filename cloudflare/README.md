@@ -124,11 +124,11 @@ The estimate is kept per review (`review_runs.sandbox_cost`) and shown on its pa
 
 ## The AI providers' keys
 
-The sandbox never gets them. review-central sends each key to the Worker beside the run, with the host it is for (`api.anthropic.com`, `api.openai.com`, a gateway's own host when one is set), and gives the reviewer a random placeholder in its place. Before the sandbox starts, the Worker has Cloudflare hand its HTTPS to those hosts to `KeyProxy`, which checks the request is for that host over HTTPS, puts the key in for the placeholder in the headers and the query, and sends it on, without following a redirect. Whatever the reviewer reads or is talked into, it cannot print or send a key it does not have.
+The sandbox never gets them. review-central sends each key to the Worker beside the run, with the host it is for (`api.anthropic.com`, `api.openai.com`, a gateway's own host when one is set), and gives the reviewer a random placeholder in its place. Before the sandbox starts, the Worker has Cloudflare hand its HTTPS to those hosts to `KeyProxy`, which checks the request is for that host over HTTPS, puts the key in where a provider reads one (`Authorization`, `x-api-key`, `x-goog-api-key`, `api-key`, or the `key` parameter) when that holds exactly the placeholder, and sends it on, without following a redirect. Whatever the reviewer reads or is talked into, it cannot print or send a key it does not have.
 
-That interception answers for those hosts with a certificate of Cloudflare's, which the Worker adds to the sandbox's trust store before the reviewer runs; the reviewer also gets `NODE_EXTRA_CA_CERTS` for Node and `SSL_CERT_FILE` for the rest. A key for a gateway over plain HTTP is not swapped (the Worker would send it on unencrypted) and goes into the sandbox as before.
+That interception answers for those hosts with a certificate of Cloudflare's, which the Worker adds to the sandbox's trust store before the reviewer runs; the reviewer also gets `NODE_EXTRA_CA_CERTS` for Node and `SSL_CERT_FILE` for the rest. A gateway over plain HTTP stops the review instead: the Worker would send its key on unencrypted, and the key never goes into the sandbox.
 
-Other traffic leaves the sandbox as it did: Composer, npm and the CLIs' own updates still reach the internet.
+Other traffic leaves the sandbox as it did: Composer, npm and the CLIs' own updates still reach the internet, as they do from a CI pipeline that runs the same pull request. So the sandbox keeps the keys out of reach, not the code: what it could send out is the checkout it was given, which whoever opened the pull request can read already. A reviewer that is talked into it can still spend the key through the Worker for as long as the review runs, within its budget (`CLAUDE_REVIEW_MAX_BUDGET`, $10 by default) and its time limit.
 
 ## What differs from Docker
 

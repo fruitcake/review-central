@@ -40,7 +40,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
  * after one is told apart. tests/Feature/CloudflareWorkerVersionTest.php fails
  * on a change that leaves it as it was.
  */
-const WORKER_VERSION = "2026-11-20.1";
+const WORKER_VERSION = "2026-11-20.2";
 
 interface Env {
   REVIEW_SANDBOX: DurableObjectNamespace<ReviewSandbox>;
@@ -96,6 +96,12 @@ interface KeyProxyProps {
   host: string;
   keys: Array<[placeholder: string, value: string]>;
 }
+
+/** The headers a provider reads its key from, lower case: the placeholder is swapped in these alone. */
+const KEY_HEADERS = ["authorization", "x-api-key", "x-goog-api-key", "api-key"];
+
+/** The query parameter a provider reads its key from, as Gemini's API may. */
+const KEY_PARAMETERS = ["key"];
 
 /** Where the runtime puts the certificate its HTTPS interception signs with. */
 const INTERCEPT_CA = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
@@ -206,8 +212,9 @@ export default {
 
 /**
  * The way out of a sandbox to an AI provider: a request to the host it was
- * started for, with the placeholders in its headers and its query replaced by the
- * keys. The container names the host it asks for itself, in its Host header, so
+ * started for, with a placeholder replaced by its key where a provider reads a
+ * key from (KEY_HEADERS, as itself or after "Bearer ", and KEY_PARAMETERS),
+ * and only when it is exactly that placeholder. The container names the host it asks for itself, in its Host header, so
  * that is checked: a key goes to its own host over HTTPS, and nowhere else.
  */
 export class KeyProxy extends WorkerEntrypoint<Env, KeyProxyProps> {
@@ -219,17 +226,28 @@ export class KeyProxy extends WorkerEntrypoint<Env, KeyProxyProps> {
       return new Response(`Only https://${host} is reached this way.`, { status: 403 });
     }
 
-    const swap = (text: string): string => keys.reduce((swapped, [placeholder, value]) => swapped.split(placeholder).join(value), text);
+    const real = new Map(keys);
+    const swap = (value: string): string => {
+      const bearer = /^Bearer (\S+)$/i.exec(value);
+
+      return bearer !== null ? (real.has(bearer[1]) ? `Bearer ${real.get(bearer[1])}` : value) : (real.get(value) ?? value);
+    };
     const headers = new Headers();
 
     for (const [name, value] of request.headers) {
       // The host is the one checked above, from the URL.
       if (name.toLowerCase() !== "host") {
-        headers.set(name, swap(value));
+        headers.set(name, KEY_HEADERS.includes(name.toLowerCase()) ? swap(value) : value);
       }
     }
 
-    url.search = swap(url.search);
+    for (const parameter of KEY_PARAMETERS) {
+      const value = url.searchParams.get(parameter);
+
+      if (value !== null && real.has(value)) {
+        url.searchParams.set(parameter, real.get(value)!);
+      }
+    }
 
     // Not after a redirect: that would take the key to wherever it points.
     return fetch(new Request(url, { method: request.method, headers, body: request.body, redirect: "manual" }));

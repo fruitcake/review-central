@@ -9,7 +9,7 @@ use App\Runners\Container\CloudflareSandbox;
  * Changed cloudflare/worker/src/index.ts? Raise WORKER_VERSION in it, then put the
  * hash this test prints here, with the version.
  */
-const WORKER_SOURCE = ['version' => '2026-11-20.1', 'hash' => '5e25ecadd1043e6cf77e1c859fcf036e8f8ae0434bf3db01fd663ae597093eb1'];
+const WORKER_SOURCE = ['version' => '2026-11-20.2', 'hash' => 'b1d7a7d09818be9e54a5e3c6ef81cc8b4f60179080c8584f4c30101b2be4860a'];
 
 it('raises the Worker\'s version with every change to its code', function () {
     $source = (string) file_get_contents(base_path('cloudflare/worker/src/index.ts'));
