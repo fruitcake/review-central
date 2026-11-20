@@ -174,3 +174,10 @@ it('shows what a commit was classified as with its run', function () {
         ->assertSee('Complex · feature · security')
         ->assertSee('It changes the login check.');
 });
+
+it('gives Pi the picked effort too, which has no effort setting of its own', function () {
+    $repository = Repository::factory()->create();
+
+    expect(ReviewSettings::variables($repository, null, '570', null, ['effort' => ReviewEffort::Xhigh, 'tier' => 'smartest']))->toMatchArray(['PI_REVIEW_EFFORT' => 'xhigh', 'CLAUDE_REVIEW_EFFORT' => 'xhigh', 'OCR_REVIEW_EFFORT' => 'xhigh'])
+        ->and(ReviewSettings::variables($repository, null, '570'))->not->toHaveKey('PI_REVIEW_EFFORT');
+});

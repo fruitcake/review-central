@@ -26,7 +26,7 @@ Under **Review defaults → By pull request** a team can have each pull request 
 | Medium (default) | Medium | High | Extra high |
 | High | High | Extra high | Extra high |
 
-The model works the same along *cheapest*, *default* (the default start) and *smartest*, the Laravel AI SDK's tiers. What it picks replaces every reviewer's effort, and Claude Code's and Codex's model; OpenCodeReview keeps its model. A trial that names its own model or effort runs at those. When the classification fails, the review runs at what is set and the log says why. A repository can set all three for itself under **Review settings**. The summary at the top of Review defaults says what each complexity runs at.
+The model works the same along *cheapest*, *default* (the default start) and *smartest*, the Laravel AI SDK's tiers. What it picks replaces every reviewer's effort (Pi's in a trial too), and Claude Code's and Codex's model; OpenCodeReview keeps its model. A review from the diff alone runs at it the same way. A trial that names its own model or effort runs at those. When the classification fails, the review runs at what is set and the log says why. A repository can set all three for itself under **Review settings**. The summary at the top of Review defaults says what each complexity runs at.
 
 ## What the reviewer reads in the repository
 

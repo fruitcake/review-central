@@ -292,6 +292,11 @@ class ReviewSettings
             }
         }
 
+        // Pi has no effort setting of its own, only a trial's: the pick is its effort too.
+        if ($pick !== null) {
+            $variables['PI_REVIEW_EFFORT'] = $pick['effort']->value;
+        }
+
         // For a reviewer with no default model of its own, OpenCodeReview and Pi: the
         // SDK's pick, Anthropic's smartest and OpenAI's default, read now.
         $variables += array_filter([

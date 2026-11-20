@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 namespace App\Runners\Container;
 
-use App\Enums\ReviewEffort;
 use App\Enums\ReviewProvider;
-use App\Enums\ReviewStrategy;
 use App\Exceptions\ReviewStepFailed;
 use App\Models\Repository;
 use App\Runners\ContainerRunner;
@@ -17,7 +15,6 @@ use App\Services\ReviewOpening;
 use App\Services\ReviewPublisher;
 use App\Services\ReviewSettings;
 use Illuminate\Support\Facades\File;
-use Throwable;
 
 /**
  * The start of a container review, done by the worker itself: which reviewer runs,
@@ -51,48 +48,6 @@ class Precheck
     ) {}
 
     /**
-     * Classifies the pull request when the repository asks for it, and says so. In
-     * apply mode it gives the effort and model tier the review runs at; recording
-     * only, or without a classification, the review runs at what is set. A trial
-     * that names its own model or effort tries what it was asked to.
-     *
-     * @param  callable(string): void  $say
-     * @return array{effort: ReviewEffort, tier: string}|null
-     */
-    protected function classify(Repository $repository, string $branch, string $commit, ?Trial $trial, callable $say): ?array
-    {
-        $strategy = ReviewSettings::strategy($repository);
-
-        if ($strategy['mode'] === ReviewStrategy::Off || ($trial !== null && ($trial->model !== null || $trial->effort !== null))) {
-            return null;
-        }
-
-        try {
-            $id = $trial->pullRequestId ?? $repository->sourceControl()->findOpenPullRequestByBranch($branch)['id'] ?? null;
-            $classification = $id === null ? null : $this->classifier->classify($repository, (string) $id, $commit);
-        } catch (Throwable $exception) {
-            report($exception);
-            $say('Not classified ('.$exception->getMessage().'); the review runs at what is set.');
-
-            return null;
-        }
-
-        if ($classification === null) {
-            $say('Not classified: no open pull request, or no AI provider gave a classification; the review runs at what is set.');
-
-            return null;
-        }
-
-        $pick = ReviewSettings::pick($strategy['effort'], $strategy['tier'], $classification->complexity);
-        $words = "effort {$pick['effort']->value} and the {$pick['tier']} model";
-
-        $say("Classified as {$classification->text()}".($classification->reason === null ? '' : ": {$classification->reason}").' '
-            .($strategy['mode'] === ReviewStrategy::Apply ? "Runs at {$words}." : "Would run at {$words}; recorded only, so the review runs at what is set."));
-
-        return $strategy['mode'] === ReviewStrategy::Apply ? $pick : null;
-    }
-
-    /**
      * @param  string  $directory  the checkout, where the reviewer's files are written
      * @param  RunLogWriter|null  $log  where the run's page reads what was decided
      * @return array{REVIEW_NEEDED: string, REVIEW_REVIEWER: string, REVIEW_PR_ID: string, REVIEW_DESTINATION_BRANCH: string} what the steps after this one are handed
@@ -107,7 +62,7 @@ class Precheck
         ReviewSettings::recordAvailable($repository, $available);
         $say('Reviewers this tenant has a key for: '.(implode(', ', $available) ?: 'none').'.');
 
-        $pick = $this->classify($repository, $branch, $commit, $trial, $say);
+        $pick = $this->classifier->pick($repository, $trial === null ? null : (string) $trial->pullRequestId, $branch, $commit, $trial, $say);
 
         // What the server sets for this repository. A pull request keeps its
         // reviewer: the choice is made from its branch, which never changes.

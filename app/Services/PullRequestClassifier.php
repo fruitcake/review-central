@@ -5,11 +5,15 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Connections\LlmDriver;
+use App\Enums\ReviewEffort;
+use App\Enums\ReviewStrategy;
 use App\Llm\Agents\Classifier;
 use App\Models\ModelPrice;
 use App\Models\Repository;
 use App\Models\ReviewClassification;
+use App\Runners\Container\Trial;
 use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * Classifies a pull request before its review: how much it asks of the review,
@@ -79,10 +83,59 @@ class PullRequestClassifier
                 'model' => $model,
                 'input_tokens' => $response->usage->inputTokens,
                 'output_tokens' => $response->usage->outputTokens,
-                'cost' => $model === null ? null : ModelPrice::estimate([$model => ['input' => $response->usage->inputTokens, 'output' => $response->usage->outputTokens]]),
+                // What was read from or written to a cache is priced apart from the rest of the input.
+                'cost' => $model === null ? null : ModelPrice::estimate([$model => [
+                    'input' => max(0, $response->usage->uncachedInputTokens()),
+                    'output' => $response->usage->outputTokens,
+                    'cache_read' => $response->usage->cacheReadInputTokens ?? 0,
+                    'cache_creation' => $response->usage->cacheWriteInputTokens ?? 0,
+                ]]),
                 'duration_ms' => (int) round((hrtime(true) - $started) / 1_000_000),
             ],
         );
+    }
+
+    /**
+     * Classifies the pull request when the repository asks for it, and says so. In
+     * apply mode it gives the effort and model tier the review runs at; recording
+     * only, or without a classification, the review runs at what is set. A trial
+     * that names its own model or effort tries what it was asked to.
+     *
+     * @param  string|null  $pullRequestId  null finds the open pull request of the branch
+     * @param  callable(string): void  $say
+     * @return array{effort: ReviewEffort, tier: string}|null
+     */
+    public function pick(Repository $repository, ?string $pullRequestId, string $branch, string $commit, ?Trial $trial, callable $say): ?array
+    {
+        $strategy = ReviewSettings::strategy($repository);
+
+        if ($strategy['mode'] === ReviewStrategy::Off || ($trial !== null && ($trial->model !== null || $trial->effort !== null))) {
+            return null;
+        }
+
+        try {
+            $id = $pullRequestId ?? $repository->sourceControl()->findOpenPullRequestByBranch($branch)['id'] ?? null;
+            $classification = $id === null ? null : $this->classify($repository, (string) $id, $commit);
+        } catch (Throwable $exception) {
+            report($exception);
+            $say('Not classified ('.$exception->getMessage().'); the review runs at what is set.');
+
+            return null;
+        }
+
+        if ($classification === null) {
+            $say('Not classified: no open pull request, or no AI provider gave a classification; the review runs at what is set.');
+
+            return null;
+        }
+
+        $pick = ReviewSettings::pick($strategy['effort'], $strategy['tier'], $classification->complexity);
+        $words = "effort {$pick['effort']->value} and the {$pick['tier']} model";
+
+        $say("Classified as {$classification->text()}".($classification->reason === null ? '' : ": {$classification->reason}").' '
+            .($strategy['mode'] === ReviewStrategy::Apply ? "Runs at {$words}." : "Would run at {$words}; recorded only, so the review runs at what is set."));
+
+        return $strategy['mode'] === ReviewStrategy::Apply ? $pick : null;
     }
 
     public static function forCommit(Repository $repository, string $commit): ?ReviewClassification
