@@ -91,7 +91,7 @@ class ReviewComparison extends Model
         $columns = ['A' => ['label' => 'A', 'run' => $this->reviewRun, 'row' => null]];
 
         foreach (array_values($this->rows) as $index => $row) {
-            $label = chr(ord('B') + $index);
+            $label = range('B', 'Z')[$index] ?? 'R'.($index + 2);
             $run = isset($row['build']) ? $runs->get($row['build']) : null;
             $columns[$label] = ['label' => $label, 'run' => $run instanceof ReviewRun ? $run : null, 'row' => $row];
         }
