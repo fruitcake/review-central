@@ -108,6 +108,7 @@ What it shows and what it does not: the whole path through the Worker, the setup
 | --- | --- | --- |
 | `REVIEW_CLOUDFLARE_INSTANCE` | `standard-1` | The sandbox's size: `lite`, `basic`, `standard-1` … `standard-4`. A review typically uses 230–550 MB, so `basic` (1 GiB) may do. |
 | `REVIEW_CLOUDFLARE_SETUP` | `true` | Installs the tools in a fresh sandbox and starts later ones from a snapshot of it. Turn it off with an image of your own (below). |
+| `REVIEW_CLOUDFLARE_PROXY_KEYS` | `true` | Keeps the AI providers' keys in the Worker (see below). Off only for a reviewer that will not trust the Worker's certificate. |
 | `REVIEW_CLOUDFLARE_DISK` | `r2` | The filesystem disk on the bucket the Worker is bound to. |
 | `REVIEW_CLOUDFLARE_LOCAL` | `false` | Uses the Worker on this machine (`npx wrangler dev`) while no deployed one is named. |
 | `REVIEW_CLOUDFLARE_LOCAL_URL` | `http://127.0.0.1:8787` | Where that local Worker listens. |
@@ -120,6 +121,14 @@ What it shows and what it does not: the whole path through the Worker, the setup
 Cloudflare charges for the memory and disk of an instance while it runs, and for the processor it uses. review-central does not get a bill per sandbox from Cloudflare, so it estimates: the instance's size, times the seconds it ran, times the rates above, counting the processor as fully used. That is the most it can be. Five minutes on `standard-1` comes to about half a cent. The Workers plan's included usage, the Worker's own requests and R2 are not in the estimate.
 
 The estimate is kept per review (`review_runs.sandbox_cost`) and shown on its page; the month's total per tenant is on the overview, next to the AI providers' cost.
+
+## The AI providers' keys
+
+The sandbox never gets them. review-central sends each key to the Worker beside the run, with the host it is for (`api.anthropic.com`, `api.openai.com`, a gateway's own host when one is set), and gives the reviewer a random placeholder in its place. Before the sandbox starts, the Worker has Cloudflare hand its HTTPS to those hosts to `KeyProxy`, which checks the request is for that host over HTTPS, puts the key in for the placeholder in the headers and the query, and sends it on, without following a redirect. Whatever the reviewer reads or is talked into, it cannot print or send a key it does not have.
+
+That interception answers for those hosts with a certificate of Cloudflare's, which the Worker adds to the sandbox's trust store before the reviewer runs; the reviewer also gets `NODE_EXTRA_CA_CERTS` for Node and `SSL_CERT_FILE` for the rest. A key for a gateway over plain HTTP is not swapped (the Worker would send it on unencrypted) and goes into the sandbox as before.
+
+Other traffic leaves the sandbox as it did: Composer, npm and the CLIs' own updates still reach the internet.
 
 ## What differs from Docker
 

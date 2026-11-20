@@ -220,6 +220,10 @@ return [
         // reviews start from. Off when the Worker was deployed with an image
         // that has them.
         'setup' => (bool) env('REVIEW_CLOUDFLARE_SETUP', true),
+        // The AI providers' keys stay in the Worker: the sandbox gets a placeholder,
+        // which the Worker swaps for the key in a request to the provider's host.
+        // Off only for a reviewer that will not trust the Worker's certificate.
+        'proxy_keys' => (bool) env('REVIEW_CLOUDFLARE_PROXY_KEYS', true),
         // What an instance has, and what Cloudflare charges for it in dollars, to
         // estimate what a review's sandbox cost: memory and disk for the time it
         // ran, and a processor for all of that time, which is the most it can be.

@@ -115,7 +115,12 @@ it('runs a step in a Cloudflare sandbox: the checkout up through the bucket, the
         // a name for the snapshot of a sandbox that ran it.
         ->and($asked['setup'])->toBe(File::get(resource_path('review/skill/sandbox-setup.sh')))
         ->and($asked['setupVersion'])->toBe(substr(hash_file('sha256', resource_path('review/skill/sandbox-setup.sh')), 0, 16))
-        ->and($asked['env'])->toBe(['ANTHROPIC_API_KEY' => 'sk-ant-one'])
+        // The key stays in the Worker: the sandbox gets a placeholder, which the
+        // Worker swaps for it on the way to Anthropic.
+        ->and($asked['env'])->toHaveKey('ANTHROPIC_API_KEY')
+        ->and($asked['env']['ANTHROPIC_API_KEY'])->toStartWith('sk-ant-placeholder-')
+        ->and(json_encode($asked['env']))->not->toContain('sk-ant-one')
+        ->and($asked['credentials'])->toBe([['host' => 'api.anthropic.com', 'placeholder' => $asked['env']['ANTHROPIC_API_KEY'], 'value' => 'sk-ant-one']])
         ->and($asked['timeout'])->toBe(1800)
         ->and($asked['instance'])->toBe('basic')
         ->and($asked['keep'])->toContain('ai-review.json', 'ai-usage.json')
