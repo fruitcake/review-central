@@ -170,9 +170,28 @@ it('files and publishes a report whose finding has an id and title that are no t
 
     $filed = app(ReviewFiling::class)->file($this->repository->refresh(), [
         'branch' => 'feature/export', 'commit' => $run->commit, 'build' => 97, 'pull_request_id' => 7,
-        'result' => 'FAILED', 'summary' => '1 high.', 'findings' => [['id' => ['F1'], 'title' => ['odd'], 'status' => 'new', 'severity' => 'HIGH']],
+        'result' => 'FAILED', 'summary' => '1 high.', 'findings' => [['id' => ['F1', 'F2'], 'title' => ['odd'], 'status' => 'new', 'severity' => 'HIGH']],
     ]);
 
     expect($run->refresh()->findings[0])->toMatchArray(['id' => null, 'title' => null, 'severity' => 'HIGH'])
         ->and(ReviewPublisher::failed($filed['publish']))->toBeFalse();
+});
+
+it('keeps an open HIGH after the round limit when its id comes as a list, and holds the merge on it', function () {
+    ReviewSettings::saveDefaults($this->repository->tenant, ['max_rounds' => 1]);
+    ($this->rounds)(2, [['id' => 'F1', 'status' => 'new', 'severity' => 'HIGH', 'title' => 'Leaks invoices']]);
+    $run = ($this->run)(['status' => ReviewRun::STATUS_RUNNING, 'started_at' => now(), 'build_number' => 96]);
+
+    app(ReviewFiling::class)->file($this->repository->refresh(), [
+        'branch' => 'feature/export', 'commit' => $run->commit, 'build' => 96, 'pull_request_id' => 7,
+        'result' => 'PASSED', 'summary' => '1 high.', 'publish' => false,
+        'findings' => [
+            ['id' => ['F1'], 'status' => 'open', 'severity' => 'HIGH', 'title' => 'Leaks invoices'],
+            // Unreadable, and called open: left standing rather than set aside.
+            ['id' => ['F1', 'F2'], 'status' => 'open', 'severity' => 'HIGH', 'title' => 'Two ids'],
+        ],
+    ]);
+
+    expect($run->refresh()->result)->toBe('FAILED')
+        ->and(array_column($run->findings, 'id'))->toBe(['F1', null]);
 });

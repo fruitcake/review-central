@@ -90,7 +90,8 @@ class ReviewFollowUps
             $high = in_array(strtoupper((string) ($finding['severity'] ?? '')), ReviewPublisher::HIGH_SEVERITIES, true);
             $id = is_scalar($finding['id'] ?? null) ? (string) $finding['id'] : '';
             // New as the server knows it: called open, but never reported, is new too.
-            $new = ($finding['status'] ?? 'new') === 'new' || ! array_key_exists($id, $known);
+            // One called open without an id cannot be told apart, and is left standing.
+            $new = ($finding['status'] ?? 'new') === 'new' || ($id !== '' && ! array_key_exists($id, $known));
 
             if ($new && ($over || (! $high && $notConverging))) {
                 $set[] = '- '.(is_string($finding['title'] ?? null) ? $finding['title'] : ($id ?: 'A finding'))
