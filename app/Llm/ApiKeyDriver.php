@@ -11,6 +11,7 @@ use App\Exceptions\ConnectionFailed;
 use App\Exceptions\ReviewerFailed;
 use App\Filament\Components\ReviewSettingsForm;
 use App\Llm\Agents\Classifier;
+use App\Llm\Agents\Comparer;
 use App\Llm\Agents\Decider;
 use App\Llm\Agents\Describer;
 use App\Llm\Agents\DiffReviewer;
@@ -240,6 +241,11 @@ abstract class ApiKeyDriver implements ExplainsSetup, LlmDriver
             model: $this->model($connection),
             timeout: 60,
         );
+    }
+
+    public function compares(Connection $connection, string $text, ?string $model = null): AgentResponse
+    {
+        return (new Comparer)->prompt($text, provider: $this->provider($connection, ['driver' => $this->sdk(), 'key' => (string) $connection->credential('api_key')]), model: $model === null ? $this->model($connection) : ReviewSettings::model($this->sdk(), $model), timeout: 300);
     }
 
     /**

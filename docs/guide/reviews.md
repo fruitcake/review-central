@@ -113,4 +113,10 @@ The admin panel opens on **Platform**: every tenant with its connections, reposi
 - *Review as though nobody had* leaves out the comments and earlier findings on the pull request, so two runs start from the same place. Off, the run follows up on what is there.
 - It runs on the runner picked in its form, whatever the repository itself uses.
 
+### Comparing setups
+
+On a review of a pull request, **Compare with** (for the tenant's admins) adds a row for each setup to try: runner, reviewer, model, effort and the second check, up to five. Each row starts a trial of the pull request as it is now, and **Comparisons** in the sidebar shows them side by side with the review it started from, labelled A, B, C and on: each one's outcome, cost, time and findings. A setup that cannot be tried says why, and the others still run.
+
+Once every review has ended, **Analyse** has one model, picked with its AI provider (a Laravel AI tier or a model by name; the provider's smartest when none), read the pull request's diff and every review's findings. It groups the findings that are about the same issue, says of each whether it holds, is a false positive or cannot be settled from the diff, and which reviews raised it. Each column then shows how many of its findings hold, how many are false positives or unclear, and how many issues that hold it missed. The analysis is one request with the whole diff, and its cost shows with it.
+
 Each published review links to a page where anyone who can read the pull request can rate it.

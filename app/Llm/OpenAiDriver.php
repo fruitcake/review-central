@@ -11,6 +11,7 @@ use App\Enums\ReviewProvider;
 use App\Exceptions\ConnectionFailed;
 use App\Exceptions\ReviewerFailed;
 use App\Llm\Agents\Classifier;
+use App\Llm\Agents\Comparer;
 use App\Llm\Agents\Describer;
 use App\Llm\Agents\DiffReviewer;
 use App\Llm\Agents\FindingChecker;
@@ -162,6 +163,11 @@ class OpenAiDriver implements ExplainsSetup, LlmDriver
     public function checks(Connection $connection, string $text): AgentResponse
     {
         return (new FindingChecker)->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: (string) (config('review.turn.openai_model') ?: ReviewSettings::tierModels('openai')['cheapest'] ?? 'gpt-6-luna'), timeout: 60);
+    }
+
+    public function compares(Connection $connection, string $text, ?string $model = null): AgentResponse
+    {
+        return (new Comparer)->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: ReviewSettings::model('openai', $model ?? 'smartest'), timeout: 300);
     }
 
     /**

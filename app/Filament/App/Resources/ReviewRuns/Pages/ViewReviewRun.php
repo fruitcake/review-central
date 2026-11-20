@@ -6,11 +6,14 @@ use App\Enums\FindingVerdictKind;
 use App\Enums\ReviewEffort;
 use App\Events\ReviewLogGrew;
 use App\Exceptions\ReviewTrialRefused;
+use App\Filament\App\Resources\ReviewComparisons\ReviewComparisonResource;
 use App\Filament\App\Resources\ReviewRuns\ReviewRunResource;
 use App\Filament\Concerns\RefreshesOnBroadcast;
 use App\Filament\CurrentTenant;
 use App\Filament\RunPresenter;
+use App\Filament\TenantRole;
 use App\Models\ReviewClassification;
+use App\Models\ReviewComparison;
 use App\Models\ReviewQuestion;
 use App\Models\ReviewRun;
 use App\Models\User;
@@ -19,12 +22,14 @@ use App\Runners\DiffRunner;
 use App\Runners\Runners;
 use App\Services\Broadcasts;
 use App\Services\FindingFeedback;
+use App\Services\ReviewComparisons;
 use App\Services\ReviewCredentials;
 use App\Services\ReviewPublisher;
 use App\Services\ReviewQuestions;
 use App\Services\ReviewRequest;
 use App\Services\ReviewTrial;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
@@ -75,6 +80,32 @@ class ViewReviewRun extends ViewRecord
     {
         return [
             ReviewRunResource::dismissAction(),
+            Action::make('compare')
+                ->label('Compare with')
+                ->icon(Heroicon::OutlinedScale)
+                ->color('gray')
+                ->visible(fn (): bool => TenantRole::isAdmin() && $this->record->pull_request_id !== null)
+                ->modalHeading('Compare this review with other setups')
+                ->modalDescription('Each row reviews this pull request as it is now, as a trial: recorded here and kept off the pull request. They show side by side with this review, and one model can then judge their findings together. Each costs what a review costs.')
+                ->schema([
+                    ReviewRunResource::ignoreExistingField(),
+                    Repeater::make('rows')
+                        ->label('Setups')
+                        ->schema(ReviewRunResource::trialFields(withExisting: false))
+                        ->columns(2)
+                        ->default(fn (): array => [[], []])
+                        ->minItems(1)
+                        ->maxItems(ReviewComparison::MAX_ROWS)
+                        ->addActionLabel('Add a setup'),
+                ])
+                ->modalSubmitActionLabel('Start')
+                ->action(function (array $data, ReviewComparisons $comparisons): void {
+                    $rows = array_map(ReviewRunResource::trialOptions(...), array_values($data['rows'] ?? []));
+                    $user = auth()->user();
+                    $comparison = $comparisons->start($this->record, $rows, (bool) ($data['ignore_existing'] ?? true), $user instanceof User ? $user : null);
+
+                    $this->redirect(ReviewComparisonResource::getUrl('view', ['record' => $comparison]));
+                }),
             Action::make('rerun')
                 ->label('Re-run')
                 ->icon(Heroicon::OutlinedArrowPath)
