@@ -90,7 +90,7 @@ docker build -t review-central/reviewer:latest docker/reviewer
 
 Turn on Horizon for the site, or add a background process that runs `php artisan horizon` in the site's directory as `forge`. Set the time it may take to stop to 7300 seconds, so a review that is running is finished before Horizon stops: a job that [carries on with a new commit](./runners#carrying-on-with-a-new-commit) can take three reviews' time, two hours. With that turned off, 2700 seconds is enough. A process that was already running before step 5 has to be restarted once, to get the `docker` group.
 
-Turn on the Laravel scheduler for the site, or add a scheduled job that runs `php artisan schedule:run` every minute as `forge`. The scheduler closes runs that never reported each hour; each night it refreshes the model prices and the exchange rates, prunes old logs and caches, and reads the open pull requests from their hosts again; it keeps Horizon's metrics every five minutes and samples the capacity each minute.
+Turn on the Laravel scheduler for the site, or add a scheduled job that runs `php artisan schedule:run` every minute as `forge`. The scheduler closes runs that never reported each hour; each night it refreshes the model prices and the exchange rates, prunes old logs and caches, and reads the open pull requests from their hosts again; each hour it has a sandbox snapshot made for a new release of the reviewers' CLIs; it keeps Horizon's metrics every five minutes and samples the capacity each minute.
 
 **7. Sign in**
 

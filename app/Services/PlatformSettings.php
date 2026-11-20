@@ -66,6 +66,12 @@ class PlatformSettings
     /** The token this installation asks the Worker with, made for its deploy, kept encrypted. */
     public const CLOUDFLARE_TOKEN = 'cloudflare_token';
 
+    /**
+     * The versions of the reviewers' CLIs the sandbox's setup installs, by npm
+     * package: those of the newest snapshot, set once it is made.
+     */
+    public const CLOUDFLARE_CLIS = 'cloudflare_clis';
+
     /** Kept encrypted, and never shown again. */
     public const SECRETS = [self::CLOUDFLARE_API_TOKEN, self::R2_SECRET_ACCESS_KEY, self::CLOUDFLARE_TOKEN];
 
@@ -97,6 +103,7 @@ class PlatformSettings
         self::R2_SECRET_ACCESS_KEY => null,
         self::CLOUDFLARE_URL => null,
         self::CLOUDFLARE_TOKEN => null,
+        self::CLOUDFLARE_CLIS => null,
     ];
 
     protected const CACHE = 'platform-settings';
