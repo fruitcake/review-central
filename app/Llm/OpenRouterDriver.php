@@ -29,6 +29,18 @@ class OpenRouterDriver extends ApiKeyDriver
         return 'OPENROUTER_API_KEY';
     }
 
+    protected function keyPage(): string
+    {
+        return 'https://openrouter.ai/settings/keys';
+    }
+
+    protected function keyNotes(): array
+    {
+        return [
+            'A key can have a credit limit of its own: set one to cap what reviews spend.',
+        ];
+    }
+
     protected function ask(Connection $connection): Response
     {
         // Its list of models is public; what the key is good for is not.

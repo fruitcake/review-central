@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\SourceControl;
 
+use App\Connections\ExplainsSetup;
 use App\Connections\Fields\Secret;
 use App\Connections\SourceControlDriver;
 use App\Exceptions\ConnectionFailed;
 use App\Models\Connection;
 use App\Models\Repository;
+use App\Support\SetupGuide;
 use Filament\Forms\Components\TextInput;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Request;
@@ -17,7 +19,7 @@ use Illuminate\Support\Facades\Http;
 /**
  * Bitbucket Cloud.
  */
-class BitbucketDriver implements SourceControlDriver
+class BitbucketDriver implements ExplainsSetup, SourceControlDriver
 {
     /**
      * What the webhook has to deliver: a comment that may ask for a review, and
@@ -54,6 +56,35 @@ class BitbucketDriver implements SourceControlDriver
             TextInput::make('username')->label('Account email')->email()
                 ->helperText('Only with an API token of a user account, which is sent with this address. Leave empty for a workspace access token.'),
         ];
+    }
+
+    /**
+     * The scopes are what BitbucketClient calls: the pull requests with their
+     * comments, tasks and approval, the commit's status and report, and the
+     * workspace's webhooks where they are added for you.
+     */
+    public function setupGuide(): SetupGuide
+    {
+        return new SetupGuide(
+            title: 'A Bitbucket workspace access token',
+            url: 'https://bitbucket.org/account/workspaces/',
+            linkLabel: 'Your Bitbucket workspaces',
+            steps: [
+                'Open the link and pick the workspace, then **Settings** (the cog) → **Security** → **Access tokens** → **Create workspace access token**.',
+                'Name it after what it is, such as "AI Review": the review comments and approves under that name.',
+                'Tick the scopes below and create it.',
+                'Copy the token, which Bitbucket shows once, and paste it here.',
+                'Under Settings, fill in the workspace ID from the address `bitbucket.org/<workspace>`, and leave **Account email** empty.',
+            ],
+            permissions: [
+                'pullrequest:write' => 'reads the pull requests and their diff, comments, adds and resolves tasks, approves or requests changes, and writes the description. Bitbucket ticks the repository scopes it implies, which clone the repository and put the status and report on the commit.',
+                'webhook' => 'only to have "Add it for me" add the webhook for every repository of the workspace: Bitbucket has no screen for that, only its API.',
+            ],
+            notes: [
+                'Workspace access tokens come with Bitbucket\'s Premium plan. Without it, make an API token with scopes for a user account of its own at [id.atlassian.com](https://id.atlassian.com/manage-profile/security/api-tokens), with the same access to repositories, pull requests and webhooks, and fill in that account\'s email under Settings.',
+                'Without the webhook scope, add the webhook to each repository by hand: see **Webhook** in the list.',
+            ],
+        );
     }
 
     public function test(Connection $connection): void

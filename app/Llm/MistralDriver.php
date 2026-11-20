@@ -29,6 +29,18 @@ class MistralDriver extends ApiKeyDriver
         return 'MISTRAL_API_KEY';
     }
 
+    protected function keyPage(): string
+    {
+        return 'https://console.mistral.ai/api-keys';
+    }
+
+    protected function keyNotes(): array
+    {
+        return [
+            'A key works only once the workspace has a plan or credits under **Billing**.',
+        ];
+    }
+
     protected function ask(Connection $connection): Response
     {
         return $this->bearer($connection, 'https://api.mistral.ai/v1/models');

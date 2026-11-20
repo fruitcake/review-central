@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tickets;
 
+use App\Connections\ExplainsSetup;
 use App\Connections\Fields\Secret;
 use App\Connections\TicketDriver;
 use App\Exceptions\ConnectionFailed;
@@ -11,6 +12,7 @@ use App\Exceptions\TicketNotFound;
 use App\Models\Connection;
 use App\Models\Repository;
 use App\Rules\PublicUrl;
+use App\Support\SetupGuide;
 use Filament\Forms\Components\TextInput;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
@@ -19,7 +21,7 @@ use Illuminate\Support\Facades\Http;
  * GitHub issues. A reference is an issue number, looked up in the repository the
  * connection names, or in the one under review when it names none.
  */
-class GitHubIssuesDriver implements TicketDriver
+class GitHubIssuesDriver implements ExplainsSetup, TicketDriver
 {
     public const MAX_COMMENTS = 100;
 
@@ -45,6 +47,32 @@ class GitHubIssuesDriver implements TicketDriver
             TextInput::make('api_url')->label('API URL')->placeholder('https://api.github.com')->url()->rule(new PublicUrl)
                 ->helperText('Only for GitHub Enterprise Server.'),
         ];
+    }
+
+    /**
+     * It reads an issue and its comments, and nothing else.
+     */
+    public function setupGuide(): SetupGuide
+    {
+        return new SetupGuide(
+            title: 'A GitHub token for issues',
+            url: 'https://github.com/settings/personal-access-tokens/new',
+            linkLabel: 'New fine-grained personal access token on GitHub',
+            steps: [
+                'Open the link, name the token and give it an expiry date. As **Resource owner**, pick the organisation (or the user) the issues are in.',
+                'Under **Repository access**, pick the repositories with the issues, or **All repositories**.',
+                'Under **Repository permissions**, set **Issues** to **Read-only**.',
+                'Generate the token, copy it and paste it here.',
+            ],
+            permissions: [
+                'Issues: Read' => 'reads the issue a pull request names, and its comments.',
+                'Metadata: Read' => 'GitHub adds it to every token.',
+            ],
+            notes: [
+                'For GitHub Enterprise Server, make the token on your own server, under your **Settings → Developer settings**, and fill in its API URL under Settings.',
+                'A token expires: replace it here before then.',
+            ],
+        );
     }
 
     public function test(Connection $connection): void

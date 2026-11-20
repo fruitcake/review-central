@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\SourceControl;
 
+use App\Connections\ExplainsSetup;
 use App\Connections\Fields\Secret;
 use App\Connections\SourceControlDriver;
 use App\Exceptions\ConnectionFailed;
 use App\Models\Connection;
 use App\Models\Repository;
 use App\Rules\PublicUrl;
+use App\Support\SetupGuide;
 use Filament\Forms\Components\TextInput;
 use Illuminate\Http\Request;
 
@@ -19,7 +21,7 @@ use Illuminate\Http\Request;
  * it, so what can be done with its repositories is what needs only a clone: a
  * review of a branch as it stands.
  */
-class GitDriver implements SourceControlDriver
+class GitDriver implements ExplainsSetup, SourceControlDriver
 {
     public function label(): string
     {
@@ -43,6 +45,31 @@ class GitDriver implements SourceControlDriver
             TextInput::make('username')->label('User name')->maxLength(120)
                 ->helperText('With a password or token, when the server wants a name with it.'),
         ];
+    }
+
+    /**
+     * Any server, so the guide names the common ones. Only a clone is made, so
+     * the token never needs more than to read the code.
+     */
+    public function setupGuide(): SetupGuide
+    {
+        return new SetupGuide(
+            title: 'A token to clone over HTTPS',
+            url: 'https://gitlab.com/-/user_settings/personal_access_tokens',
+            linkLabel: 'Personal access tokens on GitLab.com, for example',
+            steps: [
+                'Make a token on the git server that may read the repositories: on GitLab a project, group or personal access token; on Gitea or Forgejo under **Settings → Applications**; on another server, whatever it takes for `git clone` over HTTPS.',
+                'Give it read access to the code only: nothing is pushed or posted.',
+                'Paste it here. Under Settings, fill in the address the repositories are cloned from, and the user name the server wants with the token (GitLab takes any name, such as `oauth2`).',
+            ],
+            permissions: [
+                'read_repository (GitLab)' => 'clones the repository.',
+                'read:repository (Gitea, Forgejo)' => 'the same.',
+            ],
+            notes: [
+                'Leave it empty for repositories anyone can clone.',
+            ],
+        );
     }
 
     public function test(Connection $connection): void

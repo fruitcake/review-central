@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tickets;
 
 use App\Connections\ConnectsWithOAuth;
+use App\Connections\ExplainsSetup;
 use App\Connections\Fields\Secret;
 use App\Connections\OAuthTokens;
 use App\Connections\TicketDriver;
@@ -12,6 +13,7 @@ use App\Exceptions\ConnectionFailed;
 use App\Exceptions\TicketNotFound;
 use App\Models\Connection;
 use App\Models\Repository;
+use App\Support\SetupGuide;
 use Filament\Forms\Components\TextInput;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
@@ -19,7 +21,7 @@ use Illuminate\Support\Facades\Http;
 /**
  * Jira Cloud, read with an account's API token.
  */
-class JiraDriver implements ConnectsWithOAuth, TicketDriver
+class JiraDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
 {
     public const MAX_COMMENTS = 100;
 
@@ -51,6 +53,34 @@ class JiraDriver implements ConnectsWithOAuth, TicketDriver
                 ->required(fn (): bool => ! $this->oauthConfigured())
                 ->helperText('The account the API token belongs to. Not needed when you sign in at Atlassian instead.'),
         ];
+    }
+
+    /**
+     * A token without scopes, because the site is called directly with it: an
+     * Atlassian token with scopes is accepted only through api.atlassian.com,
+     * which the connection uses only when it signed in there.
+     */
+    public function setupGuide(): SetupGuide
+    {
+        return new SetupGuide(
+            title: 'An Atlassian API token for Jira',
+            url: 'https://id.atlassian.com/manage-profile/security/api-tokens',
+            linkLabel: 'API tokens of your Atlassian account',
+            steps: [
+                'Sign in at Atlassian as the account the review reads Jira as: one that can browse the projects the pull requests name.',
+                'Choose **Create API token** (not the one with scopes), name it, pick an expiry date and create it.',
+                'Copy the token and paste it here.',
+                'Under Settings, fill in the site, such as `example.atlassian.net`, and the account\'s email.',
+            ],
+            permissions: [
+                'Browse projects' => 'the Jira permission the account needs on each project, to read an issue, its subtasks and its comments. The token can do what its account can; nothing is written.',
+            ],
+            notes: [
+                'A token with scopes does not work here: Atlassian takes one only through api.atlassian.com, and this connection calls your site directly.',
+                'A token expires, after a year at most: replace it here before then. **Test** in the list says whether it still works.',
+                ...($this->oauthConfigured() ? ['Or leave the token and email empty, save, and use **Connect** in the list to sign in at Atlassian instead.'] : []),
+            ],
+        );
     }
 
     public function test(Connection $connection): void

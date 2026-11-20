@@ -5,13 +5,16 @@ namespace App\Filament\App\Resources\Connections;
 use App\Connections\ConnectionDriver;
 use App\Connections\ConnectsWithOAuth;
 use App\Connections\Drivers;
+use App\Connections\ExplainsSetup;
 use App\Connections\OAuthTokens;
 use App\Connections\SourceControlDriver;
 use App\Enums\ConnectionKind;
 use App\Exceptions\ConnectionFailed;
 use App\Filament\App\Resources\Connections\Pages\ManageConnections;
+use App\Filament\Components\SetupGuideAction;
 use App\Models\Connection;
 use App\Services\Connections;
+use App\Support\SetupGuide;
 use BackedEnum;
 use Closure;
 use Filament\Actions\Action;
@@ -144,7 +147,9 @@ class ConnectionResource extends Resource
                         }
                     }
                 })
-                ->disabledOn('edit'),
+                ->disabledOn('edit')
+                // Where the service's key or token is made, and what it needs, without leaving the form.
+                ->hintAction(SetupGuideAction::make(fn (Get $get): ?SetupGuide => ($found = $driver($get)) instanceof ExplainsSetup ? $found->setupGuide() : null)),
             TextInput::make('name')->required()->maxLength(255),
             Section::make('Credentials')
                 ->description('Stored encrypted, and never shown again.')

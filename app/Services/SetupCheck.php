@@ -12,6 +12,7 @@ use App\Models\ReviewInstruction;
 use App\Runners\Container\CloudflareSandbox;
 use App\Runners\Container\WorkerDeployment;
 use App\Runners\Runners;
+use App\Support\SetupGuides;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
@@ -88,7 +89,7 @@ class SetupCheck
     /**
      * Everything, in groups, each check with what to do when it is not right.
      *
-     * @return array<int, array{title: string, checks: array<int, array{state: string, title: string, detail: string, fix: string|null}>}>
+     * @return array<int, array{title: string, checks: array<int, array{state: string, title: string, detail: string, fix: string|null, guide?: string}>}>
      */
     public function groups(): array
     {
@@ -326,26 +327,30 @@ class SetupCheck
 
     /**
      * What an installation can do without, said as what it is: on, off, or half set.
+     * Each names the guide that says where its keys are made, which the page
+     * offers as "How to get this".
      *
-     * @return array<int, array{state: string, title: string, detail: string, fix: string|null}>
+     * @return array<int, array{state: string, title: string, detail: string, fix: string|null, guide?: string}>
      */
     protected function optional(): array
     {
         $checks = [];
 
         foreach ([
-            'Signing in with Google' => ['services.google.client_id', 'services.google.client_secret', 'GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, from an OAuth client with '.url('/sign-in/google/callback').' as redirect address'],
-            'Connecting Asana by signing in' => ['services.asana.client_id', 'services.asana.client_secret', 'ASANA_CLIENT_ID and ASANA_CLIENT_SECRET, from an app with '.url('/connections/oauth/callback').' as redirect address'],
-            'Connecting Jira by signing in' => ['services.atlassian.client_id', 'services.atlassian.client_secret', 'ATLASSIAN_CLIENT_ID and ATLASSIAN_CLIENT_SECRET, from an app with '.url('/connections/oauth/callback').' as redirect address'],
-        ] as $title => [$id, $secret, $needs]) {
+            'Signing in with Google' => ['services.google.client_id', 'services.google.client_secret', 'GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, from an OAuth client with '.url('/sign-in/google/callback').' as redirect address', SetupGuides::GOOGLE],
+            'Connecting Asana by signing in' => ['services.asana.client_id', 'services.asana.client_secret', 'ASANA_CLIENT_ID and ASANA_CLIENT_SECRET, from an app with '.url('/connections/oauth/callback').' as redirect address', SetupGuides::ASANA],
+            'Connecting Jira by signing in' => ['services.atlassian.client_id', 'services.atlassian.client_secret', 'ATLASSIAN_CLIENT_ID and ATLASSIAN_CLIENT_SECRET, from an app with '.url('/connections/oauth/callback').' as redirect address', SetupGuides::ATLASSIAN],
+        ] as $title => [$id, $secret, $needs, $guide]) {
             $has = [filled(config($id)), filled(config($secret))];
 
             $checks[] = match (true) {
                 $has === [true, true] => ['state' => self::OK, 'title' => $title, 'detail' => 'Set up.', 'fix' => null],
-                $has === [false, false] => ['state' => self::NOTE, 'title' => $title, 'detail' => 'Not set up; people use a password or a token instead.', 'fix' => "To turn it on, set {$needs}."],
-                default => ['state' => self::WRONG, 'title' => $title, 'detail' => 'Half set up: one of the two values is missing, so it is off.', 'fix' => "Set both: {$needs}."],
+                $has === [false, false] => ['state' => self::NOTE, 'title' => $title, 'detail' => 'Not set up; people use a password or a token instead.', 'fix' => "To turn it on, set {$needs}.", 'guide' => $guide],
+                default => ['state' => self::WRONG, 'title' => $title, 'detail' => 'Half set up: one of the two values is missing, so it is off.', 'fix' => "Set both: {$needs}.", 'guide' => $guide],
             };
         }
+
+        $checks[] = $this->githubApp();
 
         array_push($checks, ...$this->cloudflare());
 
@@ -353,10 +358,34 @@ class SetupCheck
     }
 
     /**
+     * Reviewing as a GitHub App: on once every value it needs is set, which is
+     * when GitHub App is offered as a connection.
+     *
+     * @return array{state: string, title: string, detail: string, fix: string|null, guide?: string}
+     */
+    protected function githubApp(): array
+    {
+        $title = 'Reviewing as a GitHub App';
+        $values = ['GITHUB_APP_ID' => 'id', 'GITHUB_APP_SLUG' => 'slug', 'GITHUB_APP_CLIENT_ID' => 'client_id', 'GITHUB_APP_CLIENT_SECRET' => 'client_secret', 'GITHUB_APP_PRIVATE_KEY' => 'private_key'];
+        $missing = array_keys(array_filter($values, fn (string $key): bool => blank(config("services.github_app.{$key}"))));
+
+        // Not needed to offer the app, but without it every delivery from GitHub
+        // is refused: tenants connect it, and no pull request is ever reviewed.
+        $unsigned = blank(config('services.github_app.webhook_secret'));
+
+        return match (true) {
+            $missing === [] && $unsigned => ['state' => self::WRONG, 'title' => $title, 'detail' => 'Tenants can connect the app, but GITHUB_APP_WEBHOOK_SECRET is not set, so every webhook delivery from GitHub is refused and no pull request is reviewed.', 'fix' => 'Set GITHUB_APP_WEBHOOK_SECRET to the webhook secret in the app\'s settings on GitHub.', 'guide' => SetupGuides::GITHUB_APP],
+            $missing === [] => ['state' => self::OK, 'title' => $title, 'detail' => 'Set up: tenants can connect GitHub as the app.', 'fix' => null],
+            count($missing) === count($values) => ['state' => self::NOTE, 'title' => $title, 'detail' => 'Not set up; GitHub connections use a token instead.', 'fix' => 'To turn it on, register a GitHub App and set GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_CLIENT_ID, GITHUB_APP_CLIENT_SECRET, GITHUB_APP_PRIVATE_KEY and GITHUB_APP_WEBHOOK_SECRET.', 'guide' => SetupGuides::GITHUB_APP],
+            default => ['state' => self::WRONG, 'title' => $title, 'detail' => 'Half set up, so it is off. Missing: '.implode(', ', $missing).'.', 'fix' => 'Set '.implode(', ', $missing).' from the app\'s settings on GitHub.', 'guide' => SetupGuides::GITHUB_APP],
+        };
+    }
+
+    /**
      * Cloudflare sandboxes: off, with every step to turn them on; or, once
      * anything of them is set, each part on its own, so what is missing shows.
      *
-     * @return array<int, array{state: string, title: string, detail: string, fix: string|null}>
+     * @return array<int, array{state: string, title: string, detail: string, fix: string|null, guide?: string}>
      */
     protected function cloudflare(): array
     {
@@ -377,6 +406,7 @@ class SetupCheck
                     ? 'Not deployed yet; reviewers run in Docker on the worker. The account and API token are set: Deploy the Worker, above, deploys it.'
                     : 'Not set up; reviewers run in Docker on the worker. To run them in a Cloudflare sandbox instead:',
                 'fix' => $this->cloudflareSteps(),
+                'guide' => SetupGuides::CLOUDFLARE_TOKEN,
             ], ...($deploy === null ? [] : [$deploy])];
         }
 
@@ -396,7 +426,7 @@ class SetupCheck
                 "The disk {$diskName} on the bucket ".($bucket['R2_BUCKET'] ?? '').'.',
                 'Set the account ID and the bucket\'s keys under Settings → Cloudflare sandboxes (or '.implode(', ', $missing).' in .env). In the Cloudflare dashboard: R2 → Manage API tokens → Create API token, with Object Read & Write on the bucket only. It shows the Access Key ID and the Secret Access Key.',
                 'Missing: '.implode(', ', $missing).'.',
-            ),
+            ) + ($missing === [] ? [] : ['guide' => SetupGuides::R2_KEYS]),
         ];
 
         if (filled($url) && filled($token)) {

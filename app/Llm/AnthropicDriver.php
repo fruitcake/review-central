@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Llm;
 
+use App\Connections\ExplainsSetup;
 use App\Connections\Fields\Secret;
 use App\Connections\LlmDriver;
 use App\Enums\ReviewProvider;
@@ -15,6 +16,7 @@ use App\Models\Connection;
 use App\Rules\PublicUrl;
 use App\Runners\Diff\Answer;
 use App\Runners\Diff\ReportSchema;
+use App\Support\SetupGuide;
 use Filament\Forms\Components\TextInput;
 use Illuminate\Support\Facades\Http;
 use Laravel\Ai\Responses\Data\FinishReason;
@@ -24,7 +26,7 @@ use Laravel\Ai\Streaming\Events\StreamStart;
 use Laravel\Ai\Streaming\Events\TextDelta;
 use Throwable;
 
-class AnthropicDriver implements LlmDriver
+class AnthropicDriver implements ExplainsSetup, LlmDriver
 {
     use AsksProviders;
 
@@ -63,6 +65,32 @@ class AnthropicDriver implements LlmDriver
             TextInput::make('base_url')->label('Base URL')->url()->rule(new PublicUrl)->placeholder('https://api.anthropic.com')
                 ->helperText('Only when the API is reached through a gateway.'),
         ];
+    }
+
+    /**
+     * An Anthropic key has no scopes: it reaches every model of its workspace.
+     * Claude Code reviews with it as ANTHROPIC_API_KEY, and the review from the
+     * diff and the questions on a pull request use it from this server.
+     */
+    public function setupGuide(): SetupGuide
+    {
+        return new SetupGuide(
+            title: 'An Anthropic API key',
+            url: 'https://platform.claude.com/settings/keys',
+            linkLabel: 'API keys in the Claude Console',
+            steps: [
+                'Sign in to the Claude Console and open the link. A new organisation first needs credits or a payment method under **Billing**.',
+                'Choose **Create Key**, pick the workspace whose limits the reviews should fall under, and name the key after this installation.',
+                'Copy the key, which starts with `sk-ant-` and is shown once, and paste it here.',
+            ],
+            permissions: [
+                'The workspace\'s models' => 'a key has no scopes: it can call every model its workspace may. Claude Code reviews with it, and so do the review from the diff and the questions on a pull request.',
+            ],
+            notes: [
+                'A workspace of its own for the reviews, with a spend limit, keeps them apart from the rest of what the organisation spends.',
+                'The base URL under Settings is only for a gateway that speaks the Anthropic API; the key is then what that gateway takes.',
+            ],
+        );
     }
 
     public function test(Connection $connection): void

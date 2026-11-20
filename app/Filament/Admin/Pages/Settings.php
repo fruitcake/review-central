@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Admin\Pages;
 
+use App\Filament\Components\SetupGuideAction;
 use App\Filament\Themes;
 use App\Runners\Container\CloudflareSandbox;
 use App\Runners\Runners;
@@ -11,6 +12,7 @@ use App\Services\Capacity;
 use App\Services\CloudflareTest;
 use App\Services\Currency;
 use App\Services\PlatformSettings;
+use App\Support\SetupGuides;
 use BackedEnum;
 use Closure;
 use Filament\Actions\Action;
@@ -183,7 +185,8 @@ class Settings extends Page
                             ->revealable()
                             ->autocomplete('off')
                             ->placeholder(fn (): ?string => app(PlatformSettings::class)->secret(PlatformSettings::CLOUDFLARE_API_TOKEN) !== null ? 'Saved; type to replace' : null)
-                            ->helperText(new HtmlString('<a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener" class="underline">Create one</a> for this account with Workers Scripts, Containers and Workers R2 Storage: Edit, and Account Settings: Read. Used only to deploy.'))),
+                            ->helperText(new HtmlString('<a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener" class="underline">Create one</a> for this account with Workers Scripts, Containers and Workers R2 Storage: Edit, and Account Settings: Read. Used only to deploy.'))
+                            ->hintAction(SetupGuideAction::make(fn (SetupGuides $guides) => $guides->cloudflareToken(), 'cloudflareTokenGuide'))),
                         self::overridable(TextInput::make(PlatformSettings::CLOUDFLARE_WORKER)
                             ->label('Worker name')
                             ->placeholder(PlatformSettings::DEFAULT_WORKER)
@@ -209,7 +212,8 @@ class Settings extends Page
                             ->label('Bucket access key ID')
                             ->regex('/^\s*[a-f0-9]{32}\s*$/')
                             ->validationMessages(['regex' => 'The Access Key ID Cloudflare shows once the token is made: 32 characters, 0 to 9 and a to f.'])
-                            ->helperText('R2 → Manage API tokens → Create API token, with Object Read & Write on the bucket only: in a custom token, Workers R2 Storage Bucket Item with Read and Edit both.')),
+                            ->helperText('R2 → Manage API tokens → Create API token, with Object Read & Write on the bucket only: in a custom token, Workers R2 Storage Bucket Item with Read and Edit both.')
+                            ->hintAction(SetupGuideAction::make(fn (SetupGuides $guides) => $guides->r2Keys(), 'r2KeysGuide'))),
                         self::overridable(TextInput::make(PlatformSettings::R2_SECRET_ACCESS_KEY)
                             ->label('Bucket secret access key')
                             ->regex('/^\s*[a-f0-9]{64}\s*$/')

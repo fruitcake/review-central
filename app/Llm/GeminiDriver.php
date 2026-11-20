@@ -30,6 +30,18 @@ class GeminiDriver extends ApiKeyDriver
         return 'GEMINI_API_KEY';
     }
 
+    protected function keyPage(): string
+    {
+        return 'https://aistudio.google.com/apikey';
+    }
+
+    protected function keyNotes(): array
+    {
+        return [
+            'A key from Google AI Studio, for the Gemini API. A Google Cloud API key works too when it may call the Generative Language API.',
+        ];
+    }
+
     protected function ask(Connection $connection): Response
     {
         // Google takes the key in a header of its own.

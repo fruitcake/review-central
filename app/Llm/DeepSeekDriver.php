@@ -29,6 +29,18 @@ class DeepSeekDriver extends ApiKeyDriver
         return 'DEEPSEEK_API_KEY';
     }
 
+    protected function keyPage(): string
+    {
+        return 'https://platform.deepseek.com/api_keys';
+    }
+
+    protected function keyNotes(): array
+    {
+        return [
+            'Requests are refused until the account has a balance, under **Top up**.',
+        ];
+    }
+
     protected function ask(Connection $connection): Response
     {
         return $this->bearer($connection, 'https://api.deepseek.com/models');

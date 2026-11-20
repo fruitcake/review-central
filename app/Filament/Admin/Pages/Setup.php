@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\Filament\Admin\Pages;
 
+use App\Filament\Components\SetupGuideAction;
 use App\Jobs\DeployCloudflareWorker;
 use App\Jobs\PrepareCloudflareSandbox;
 use App\Runners\Container\CloudflareSandbox;
 use App\Runners\Container\WorkerDeployment;
 use App\Services\SetupCheck;
+use App\Support\SetupGuide;
+use App\Support\SetupGuides;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -89,6 +92,15 @@ class Setup extends Page
                     Notification::make()->title('The sandbox is being prepared')->body('On the reviews\' queue. This page says when it is done: refresh in a few minutes.')->success()->send();
                 }),
         ];
+    }
+
+    /**
+     * "How to get this" on a check that names a guide: where its keys are made,
+     * the steps and the scopes, without leaving the page for the docs.
+     */
+    public function guideAction(): Action
+    {
+        return SetupGuideAction::make(fn (array $arguments, SetupGuides $guides): ?SetupGuide => $guides->named((string) ($arguments['guide'] ?? '')), 'guide');
     }
 
     /**

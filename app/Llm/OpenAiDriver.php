@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Llm;
 
+use App\Connections\ExplainsSetup;
 use App\Connections\Fields\Secret;
 use App\Connections\LlmDriver;
 use App\Enums\ReviewProvider;
@@ -13,6 +14,7 @@ use App\Llm\Agents\DiffReviewer;
 use App\Models\Connection;
 use App\Runners\Diff\Answer;
 use App\Runners\Diff\ReportSchema;
+use App\Support\SetupGuide;
 use Illuminate\Support\Facades\Http;
 use Laravel\Ai\Classification;
 use Laravel\Ai\Classification\Boolean;
@@ -20,7 +22,7 @@ use Laravel\Ai\Responses\Data\BooleanAnswer;
 use Laravel\Ai\Responses\Data\FinishReason;
 use Throwable;
 
-class OpenAiDriver implements LlmDriver
+class OpenAiDriver implements ExplainsSetup, LlmDriver
 {
     use AsksProviders;
 
@@ -39,6 +41,34 @@ class OpenAiDriver implements LlmDriver
     public function settingFields(): array
     {
         return [];
+    }
+
+    /**
+     * An OpenAI key may be restricted. Codex and the review from the diff call
+     * the Responses API, and "Test" lists the models, so a restricted key needs
+     * both of those.
+     */
+    public function setupGuide(): SetupGuide
+    {
+        return new SetupGuide(
+            title: 'An OpenAI API key',
+            url: 'https://platform.openai.com/api-keys',
+            linkLabel: 'API keys on the OpenAI platform',
+            steps: [
+                'Sign in to the OpenAI platform and open the link. The organisation needs credits or a payment method under **Billing** before a key works.',
+                'Choose **Create new secret key**, pick the project the reviews should be billed to, and name it after this installation.',
+                'Leave the permissions at **All**, or choose **Restricted** and set the permissions below.',
+                'Copy the key, which is shown once, and paste it here.',
+            ],
+            permissions: [
+                'Models: Read' => 'lists the models, which is what **Test** asks.',
+                'Model capabilities: Write' => 'asks a model for an answer.',
+                'Responses API: Write' => 'what Codex and the review from the diff review through, where the console lists it apart.',
+            ],
+            notes: [
+                'A project of its own for the reviews, with a budget, keeps them apart from the rest of what the organisation spends.',
+            ],
+        );
     }
 
     public function test(Connection $connection): void
