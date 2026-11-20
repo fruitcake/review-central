@@ -8,6 +8,7 @@ use App\Connections\ConnectsWithOAuth;
 use App\Connections\ExplainsSetup;
 use App\Connections\Fields\Secret;
 use App\Connections\Integrations;
+use App\Connections\OAuthApp;
 use App\Connections\OAuthTokens;
 use App\Connections\TicketDriver;
 use App\Exceptions\ConnectionFailed;
@@ -272,13 +273,13 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
 
     public function oauthConfigured(): bool
     {
-        return filled(config('services.asana.client_id')) && filled(config('services.asana.client_secret'));
+        return Integrations::configured(Integrations::ASANA);
     }
 
-    public function oauthAuthorizeUrl(string $redirect, string $state): string
+    public function oauthAuthorizeUrl(OAuthApp $app, string $redirect, string $state): string
     {
         return 'https://app.asana.com/-/oauth_authorize?'.http_build_query(array_filter([
-            'client_id' => config('services.asana.client_id'),
+            'client_id' => $app->clientId(),
             'redirect_uri' => $redirect,
             'response_type' => 'code',
             'state' => $state,
@@ -288,14 +289,14 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
         ], fn (mixed $value): bool => filled($value)), '', '&', PHP_QUERY_RFC3986);
     }
 
-    public function oauthExchange(string $code, string $redirect): array
+    public function oauthExchange(OAuthApp $app, string $code, string $redirect): array
     {
-        return $this->oauthToken(['grant_type' => 'authorization_code', 'code' => $code, 'redirect_uri' => $redirect]);
+        return $this->oauthToken($app, ['grant_type' => 'authorization_code', 'code' => $code, 'redirect_uri' => $redirect]);
     }
 
-    public function oauthRefresh(string $refreshToken): array
+    public function oauthRefresh(OAuthApp $app, string $refreshToken): array
     {
-        return $this->oauthToken(['grant_type' => 'refresh_token', 'refresh_token' => $refreshToken]);
+        return $this->oauthToken($app, ['grant_type' => 'refresh_token', 'refresh_token' => $refreshToken]);
     }
 
     public function oauthConnected(Connection $connection, string $accessToken): array
@@ -307,11 +308,11 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
      * @param  array<string, string>  $grant
      * @return array{access_token: string, refresh_token: string|null, expires_in: int|null}
      */
-    protected function oauthToken(array $grant): array
+    protected function oauthToken(OAuthApp $app, array $grant): array
     {
         $response = Http::asForm()->acceptJson()->timeout(20)->connectTimeout(4)->post('https://app.asana.com/-/oauth_token', $grant + [
-            'client_id' => (string) config('services.asana.client_id'),
-            'client_secret' => (string) config('services.asana.client_secret'),
+            'client_id' => $app->clientId(),
+            'client_secret' => $app->clientSecret(),
         ]);
 
         if (! $response->successful() || ! is_string($response->json('access_token'))) {

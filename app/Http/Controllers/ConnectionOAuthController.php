@@ -33,12 +33,17 @@ class ConnectionOAuthController extends Controller
     {
         $driver = $this->driver($request, $connection);
         $state = Str::random(40);
+        $apps = Integrations::available(Integrations::TYPE_OF[$driver->oauthIntegration()], $connection->tenant);
+        // The app picked, where there are several for this tenant; else the one there is.
+        $app = $apps[(string) $request->query('app')] ?? (count($apps) === 1 ? reset($apps) : null);
 
-        // Which connection the answer is for is kept here, not sent along: the
-        // answer comes back through the person's browser.
-        $request->session()->put('connection_oauth', ['connection' => $connection->getKey(), 'state' => $state]);
+        abort_if($app === null, 404);
 
-        return redirect()->away($driver->oauthAuthorizeUrl(route('connections.oauth.callback'), $state));
+        // Which connection the answer is for, and through which app, is kept here,
+        // not sent along: the answer comes back through the person's browser.
+        $request->session()->put('connection_oauth', ['connection' => $connection->getKey(), 'state' => $state, 'app' => $app->key]);
+
+        return redirect()->away($driver->oauthAuthorizeUrl($app, route('connections.oauth.callback'), $state));
     }
 
     /**
@@ -71,8 +76,11 @@ class ConnectionOAuthController extends Controller
         }
 
         try {
-            $granted = $driver->oauthExchange($code, route('connections.oauth.callback'));
-            $tokens->store($connection, $granted, $driver->oauthConnected($connection, $granted['access_token']));
+            $app = Integrations::available(Integrations::TYPE_OF[$driver->oauthIntegration()], $connection->tenant)[(string) ($pending['app'] ?? '')]
+                ?? throw new ConnectionFailed('The app it was signed in through is no longer there for this team. Connect again.');
+            $granted = $driver->oauthExchange($app, $code, route('connections.oauth.callback'));
+            // Kept with the app it came through, which renews it.
+            $tokens->store($connection, $granted, ['oauth_app' => $app->key] + $driver->oauthConnected($connection, $granted['access_token']));
 
             Notification::make()->title("{$connection->name} is connected")->body('It reads as the account that signed in, for as long as that account leaves it allowed.')->success()->send();
         } catch (ConnectionFailed $exception) {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Connections\Integrations;
 use App\Filament\Themes;
 use App\Models\PlatformSetting;
 use Illuminate\Support\Facades\Cache;
@@ -72,58 +73,8 @@ class PlatformSettings
      */
     public const CLOUDFLARE_CLIS = 'cloudflare_clis';
 
-    public const GOOGLE_CLIENT_ID = 'google_client_id';
-
-    public const GOOGLE_CLIENT_SECRET = 'google_client_secret';
-
-    public const ASANA_CLIENT_ID = 'asana_client_id';
-
-    public const ASANA_CLIENT_SECRET = 'asana_client_secret';
-
-    public const ATLASSIAN_CLIENT_ID = 'atlassian_client_id';
-
-    public const ATLASSIAN_CLIENT_SECRET = 'atlassian_client_secret';
-
-    public const GITHUB_APP_ID = 'github_app_id';
-
-    public const GITHUB_APP_SLUG = 'github_app_slug';
-
-    public const GITHUB_APP_CLIENT_ID = 'github_app_client_id';
-
-    public const GITHUB_APP_CLIENT_SECRET = 'github_app_client_secret';
-
-    public const GITHUB_APP_PRIVATE_KEY = 'github_app_private_key';
-
-    public const GITHUB_APP_WEBHOOK_SECRET = 'github_app_webhook_secret';
-
-    /**
-     * The apps this installation is registered as at Google, Asana, Atlassian and
-     * GitHub: each setting with the variable that sets it instead and where it
-     * goes in the configuration.
-     *
-     * @var array<string, array{0: string, 1: string}>
-     */
-    public const INTEGRATIONS = [
-        self::GOOGLE_CLIENT_ID => ['GOOGLE_CLIENT_ID', 'services.google.client_id'],
-        self::GOOGLE_CLIENT_SECRET => ['GOOGLE_CLIENT_SECRET', 'services.google.client_secret'],
-        self::ASANA_CLIENT_ID => ['ASANA_CLIENT_ID', 'services.asana.client_id'],
-        self::ASANA_CLIENT_SECRET => ['ASANA_CLIENT_SECRET', 'services.asana.client_secret'],
-        self::ATLASSIAN_CLIENT_ID => ['ATLASSIAN_CLIENT_ID', 'services.atlassian.client_id'],
-        self::ATLASSIAN_CLIENT_SECRET => ['ATLASSIAN_CLIENT_SECRET', 'services.atlassian.client_secret'],
-        self::GITHUB_APP_ID => ['GITHUB_APP_ID', 'services.github_app.id'],
-        self::GITHUB_APP_SLUG => ['GITHUB_APP_SLUG', 'services.github_app.slug'],
-        self::GITHUB_APP_CLIENT_ID => ['GITHUB_APP_CLIENT_ID', 'services.github_app.client_id'],
-        self::GITHUB_APP_CLIENT_SECRET => ['GITHUB_APP_CLIENT_SECRET', 'services.github_app.client_secret'],
-        self::GITHUB_APP_PRIVATE_KEY => ['GITHUB_APP_PRIVATE_KEY', 'services.github_app.private_key'],
-        self::GITHUB_APP_WEBHOOK_SECRET => ['GITHUB_APP_WEBHOOK_SECRET', 'services.github_app.webhook_secret'],
-    ];
-
     /** Kept encrypted, and never shown again. */
-    public const SECRETS = [
-        self::CLOUDFLARE_API_TOKEN, self::R2_SECRET_ACCESS_KEY, self::CLOUDFLARE_TOKEN,
-        self::GOOGLE_CLIENT_SECRET, self::ASANA_CLIENT_SECRET, self::ATLASSIAN_CLIENT_SECRET,
-        self::GITHUB_APP_CLIENT_SECRET, self::GITHUB_APP_PRIVATE_KEY, self::GITHUB_APP_WEBHOOK_SECRET,
-    ];
+    public const SECRETS = [self::CLOUDFLARE_API_TOKEN, self::R2_SECRET_ACCESS_KEY, self::CLOUDFLARE_TOKEN];
 
     public const DEFAULT_WORKER = 'review-central-sandbox';
 
@@ -154,18 +105,6 @@ class PlatformSettings
         self::CLOUDFLARE_URL => null,
         self::CLOUDFLARE_TOKEN => null,
         self::CLOUDFLARE_CLIS => null,
-        self::GOOGLE_CLIENT_ID => null,
-        self::GOOGLE_CLIENT_SECRET => null,
-        self::ASANA_CLIENT_ID => null,
-        self::ASANA_CLIENT_SECRET => null,
-        self::ATLASSIAN_CLIENT_ID => null,
-        self::ATLASSIAN_CLIENT_SECRET => null,
-        self::GITHUB_APP_ID => null,
-        self::GITHUB_APP_SLUG => null,
-        self::GITHUB_APP_CLIENT_ID => null,
-        self::GITHUB_APP_CLIENT_SECRET => null,
-        self::GITHUB_APP_PRIVATE_KEY => null,
-        self::GITHUB_APP_WEBHOOK_SECRET => null,
     ];
 
     protected const CACHE = 'platform-settings';
@@ -271,47 +210,17 @@ class PlatformSettings
     }
 
     /**
-     * Fills the configuration of the apps at Google, Asana, Atlassian and GitHub
-     * from these settings, where the environment leaves it empty: what .env sets
-     * holds. One cleared here is cleared there too, unless .env set it.
-     */
-    public function applyIntegrations(): void
-    {
-        // Not into a configuration cache, for the reasons applyCloudflare() gives.
-        if (app()->runningConsoleCommand('config:cache', 'optimize')) {
-            return;
-        }
-
-        foreach (self::INTEGRATIONS as $setting => [, $key]) {
-            $value = in_array($setting, self::SECRETS, true) ? $this->secret($setting) : $this->text($setting);
-            $ours = blank(config($key)) || (array_key_exists($key, self::$applied) && self::$applied[$key] === config($key));
-
-            if (! $ours || config($key) === $value) {
-                continue;
-            }
-
-            config([$key => $value]);
-
-            if ($value === null) {
-                unset(self::$applied[$key]);
-            } else {
-                self::$applied[$key] = $value;
-            }
-        }
-    }
-
-    /**
      * Both: the Cloudflare sandbox and the apps. Again for every job, as a worker
      * outlives a change made here.
      */
     public function apply(): void
     {
         $this->applyCloudflare();
-        $this->applyIntegrations();
+        Integrations::apply();
     }
 
     /**
-     * The environment variable that sets a Cloudflare or app setting instead, when it
+     * The environment variable that sets a Cloudflare setting instead, when it
      * does: then what is saved here is not used. Told by the configuration
      * holding a value these settings did not put there, as env() says nothing
      * once the configuration is cached.
@@ -327,7 +236,7 @@ class PlatformSettings
             self::CLOUDFLARE_BUCKET => ['R2_BUCKET', "filesystems.disks.{$disk}.bucket"],
             self::R2_ACCESS_KEY_ID => ['R2_ACCESS_KEY_ID', "filesystems.disks.{$disk}.key"],
             self::R2_SECRET_ACCESS_KEY => ['R2_SECRET_ACCESS_KEY', "filesystems.disks.{$disk}.secret"],
-            default => self::INTEGRATIONS[$setting] ?? [null, null],
+            default => [null, null],
         };
 
         if ($key === null || blank($value = config($key))) {

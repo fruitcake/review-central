@@ -17,8 +17,9 @@ use App\Models\Connection;
 interface ConnectsWithOAuth
 {
     /**
-     * Whether this installation is registered with the service: it has the app's
-     * id and secret.
+     * Whether this installation, or a tenant, is registered with the service: an
+     * app for it is set up. Which one a connection signs in through is
+     * App\Connections\Integrations' to say.
      */
     public function oauthConfigured(): bool;
 
@@ -31,7 +32,7 @@ interface ConnectsWithOAuth
     /**
      * Where the person is sent to say yes.
      */
-    public function oauthAuthorizeUrl(string $redirect, string $state): string;
+    public function oauthAuthorizeUrl(OAuthApp $app, string $redirect, string $state): string;
 
     /**
      * Trades the code the service sent the person back with for tokens.
@@ -40,7 +41,7 @@ interface ConnectsWithOAuth
      *
      * @throws ConnectionFailed
      */
-    public function oauthExchange(string $code, string $redirect): array;
+    public function oauthExchange(OAuthApp $app, string $code, string $redirect): array;
 
     /**
      * A new access token for one that ran out, and a new refresh token where the
@@ -50,7 +51,7 @@ interface ConnectsWithOAuth
      *
      * @throws ConnectionFailed
      */
-    public function oauthRefresh(string $refreshToken): array;
+    public function oauthRefresh(OAuthApp $app, string $refreshToken): array;
 
     /**
      * What else the connection has to know once it has its tokens, such as which

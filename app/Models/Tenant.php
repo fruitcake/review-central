@@ -19,7 +19,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $currency
  * @property string $timezone The zone its times are shown in
  * @property array<int, string>|null $sign_in_domains The organisations' domains whose people may join by signing in
- * @property array<int, string>|null $integrations_off The installation's apps its connections may not sign in through, by App\Connections\Integrations' names
  * @property array<string, mixed>|null $theme_colors Its own ink, accent and button colour, each a hex colour or left out
  * @property ReviewCommandAccess $review_command Who may start a review by commenting /review
  * @property array<int, string>|null $review_command_accounts The trusted source control accounts, by nickname or account ID: who may comment /review when only they may, and whose pull requests are reviewed where only theirs are
@@ -49,20 +48,10 @@ class Tenant extends Model
             'monthly_budget' => 'decimal:2',
             'theme_colors' => 'array',
             'sign_in_domains' => 'array',
-            'integrations_off' => 'array',
             'review_command' => ReviewCommandAccess::class,
             'review_command_accounts' => 'array',
             'review_forks' => 'boolean',
         ];
-    }
-
-    /**
-     * Whether its connections may sign in through one of the installation's apps:
-     * all of them, unless one is turned off.
-     */
-    public function allowsIntegration(string $name): bool
-    {
-        return ! in_array($name, $this->integrations_off ?? [], true);
     }
 
     /**
@@ -102,6 +91,16 @@ class Tenant extends Model
     public function users(): BelongsToMany
     {
         return $this->belongsToMany(User::class)->withTimestamps();
+    }
+
+    /**
+     * The apps it added for itself, beside the ones the installation gives it.
+     *
+     * @return HasMany<IntegrationApp, $this>
+     */
+    public function integrationApps(): HasMany
+    {
+        return $this->hasMany(IntegrationApp::class);
     }
 
     /**

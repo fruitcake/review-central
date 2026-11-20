@@ -55,25 +55,31 @@ To register it, as the installation's administrator: on GitHub, under the organi
 - **Events**: Pull request, Issue comment, Pull request review comment, Pull request review, Check run.
 - **Where can this GitHub App be installed**: *Any account*, for tenants outside your own organisation. That needs no verification by GitHub; it asks for one only for a paid listing in the Marketplace.
 
-Then generate a private key and a client secret, and fill in the app under **Admin → Settings → Integrations**: its ID, the name in its address, the client ID and secret, the webhook secret and the contents of the private key. `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY` (the PEM file's path, or its contents) and `GITHUB_APP_WEBHOOK_SECRET` in `.env` do the same, and go first. Until all but the webhook secret are set, *GitHub App* is not offered as a connection, and the setup page says the app does not work while the webhook secret is missing.
+Then generate a private key and a client secret, and add it under **Admin → Apps**: its ID, the name in its address, the client ID and secret, the webhook secret and the contents of the private key. `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY` (the PEM file's path, or its contents) and `GITHUB_APP_WEBHOOK_SECRET` in `.env` do the same, and go first. Until all but the webhook secret are set, *GitHub App* is not offered as a connection, and the setup page says the app does not work while the webhook secret is missing.
 
 **Connect** signs the person in at GitHub once, to check that they own the connection's owner: an owner of the organisation, or the user account itself. A member who only has access to some of its repositories cannot connect it. Their own token is revoked straight after. An installation belongs to one connection.
 
 ## Signing in with Google
 
-With a Google OAuth client filled in under **Admin → Settings → Integrations**, or `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`, the sign-in page has a **Sign in with Google** button. Make the client in the Google Cloud console, of the type "Web application", with `<APP_URL>/sign-in/google/callback` as its redirect address. It is for the whole installation: it comes before any tenant is known, and who joins which tenant goes by the tenant's sign-in domains.
+With a Google OAuth client added under **Admin → Apps**, or `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`, the sign-in page has a **Sign in with Google** button. Make the client in the Google Cloud console, of the type "Web application", with `<APP_URL>/sign-in/google/callback` as its redirect address. It is for the whole installation: it comes before any tenant is known, and who joins which tenant goes by the tenant's sign-in domains.
 
 A user whose address is already known signs in as that user, when Google holds that address: a Gmail address, or one of a Google Workspace organisation at its own domain. Someone new joins a tenant only when the tenant lists their organisation's domain under **Sign-in domains** in the admin panel, and Google says the account is that organisation's; a personal account under the same domain does not count, and a Gmail address never joins one.
 
 ## Signing in to Asana and Jira
 
-A ticket connection can sign in at Asana or Jira instead of taking a pasted token, when the installation is registered as an OAuth app there, with `<APP_URL>/connections/oauth/callback` as its redirect address. One app serves every tenant: each person who connects says yes with their own account, and the tokens are kept per connection. Fill in its client ID and secret under **Admin → Settings → Integrations**, or in `.env`, which goes first:
+A ticket connection can sign in at Asana or Jira instead of taking a pasted token, when the installation is registered as an OAuth app there, with `<APP_URL>/connections/oauth/callback` as its redirect address. Add the app under **Admin → Apps**, or set it in `.env`. Each person who connects says yes with their own account, and the tokens are kept per connection, with the app they came through:
 
 - **Asana**: a new app in the [developer console](https://app.asana.com/0/my-apps) (`ASANA_CLIENT_ID`, `ASANA_CLIENT_SECRET`). The app needs the read scopes in `ASANA_OAUTH_SCOPE`; leave that empty for an app with full permissions. Under **Manage distribution**, let it be used in any workspace, for tenants outside your own organisation.
 - **Jira**: an OAuth 2.0 (3LO) app in the [Atlassian developer console](https://developer.atlassian.com/console/myapps/), with read access to Jira issues (`ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLIENT_SECRET`). Under **Distribution**, set it to sharing, so people of other organisations can authorize it.
 
 Without an app, a connection takes a token only, and its form says why.
 
-## Which apps a tenant may use
+## Apps, and which tenant has which
 
-Asana, Jira and the GitHub App are on for every tenant once they are set up. On the tenant, in the admin panel, **Sign in through the installation's apps** turns one off for that tenant: its connections then take a token, its forms say signing in is not on for the team, and the GitHub App is not offered as a connection. An app set up later is on for every tenant until it is turned off. Signing in with Google is not one of these: who joins by it goes by the tenant's sign-in domains.
+**Admin → Apps** lists the apps a person signs in at a service through. **Add app** picks its type:
+
+- **Google**, to sign in with: there is one, for everyone, before any tenant is known. Who joins which tenant goes by the tenant's sign-in domains.
+- **GitHub App**: one, for now.
+- **Asana** and **Atlassian**: as many as you like, for instance one per agency or customer.
+
+An app other than Google is for the tenants picked on it, or for every tenant; a new one is for none until it is given to some. A tenant can also add its own Asana or Atlassian app under **Apps** in its panel, for itself alone. A connection that can sign in through more than one asks which when **Connect** is pressed, and keeps renewing its access through that one. Its form says why it cannot sign in where no app is there for its team. What `.env` sets is an app for every tenant too, listed first; for Google and the GitHub App it goes before the one in the list.

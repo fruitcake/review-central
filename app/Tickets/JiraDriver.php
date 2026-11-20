@@ -8,6 +8,7 @@ use App\Connections\ConnectsWithOAuth;
 use App\Connections\ExplainsSetup;
 use App\Connections\Fields\Secret;
 use App\Connections\Integrations;
+use App\Connections\OAuthApp;
 use App\Connections\OAuthTokens;
 use App\Connections\TicketDriver;
 use App\Exceptions\ConnectionFailed;
@@ -221,14 +222,14 @@ class JiraDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
 
     public function oauthConfigured(): bool
     {
-        return filled(config('services.atlassian.client_id')) && filled(config('services.atlassian.client_secret'));
+        return Integrations::configured(Integrations::JIRA);
     }
 
-    public function oauthAuthorizeUrl(string $redirect, string $state): string
+    public function oauthAuthorizeUrl(OAuthApp $app, string $redirect, string $state): string
     {
         return 'https://auth.atlassian.com/authorize?'.http_build_query([
             'audience' => 'api.atlassian.com',
-            'client_id' => config('services.atlassian.client_id'),
+            'client_id' => $app->clientId(),
             // Reading issues and who they are assigned to, and a refresh token
             // to keep reading them with.
             'scope' => 'read:jira-work read:jira-user offline_access',
@@ -239,14 +240,14 @@ class JiraDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
         ], '', '&', PHP_QUERY_RFC3986);
     }
 
-    public function oauthExchange(string $code, string $redirect): array
+    public function oauthExchange(OAuthApp $app, string $code, string $redirect): array
     {
-        return $this->oauthToken(['grant_type' => 'authorization_code', 'code' => $code, 'redirect_uri' => $redirect]);
+        return $this->oauthToken($app, ['grant_type' => 'authorization_code', 'code' => $code, 'redirect_uri' => $redirect]);
     }
 
-    public function oauthRefresh(string $refreshToken): array
+    public function oauthRefresh(OAuthApp $app, string $refreshToken): array
     {
-        return $this->oauthToken(['grant_type' => 'refresh_token', 'refresh_token' => $refreshToken]);
+        return $this->oauthToken($app, ['grant_type' => 'refresh_token', 'refresh_token' => $refreshToken]);
     }
 
     /**
@@ -274,11 +275,11 @@ class JiraDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
      * @param  array<string, string>  $grant
      * @return array{access_token: string, refresh_token: string|null, expires_in: int|null}
      */
-    protected function oauthToken(array $grant): array
+    protected function oauthToken(OAuthApp $app, array $grant): array
     {
         $response = Http::asJson()->acceptJson()->timeout(20)->connectTimeout(4)->post('https://auth.atlassian.com/oauth/token', $grant + [
-            'client_id' => (string) config('services.atlassian.client_id'),
-            'client_secret' => (string) config('services.atlassian.client_secret'),
+            'client_id' => $app->clientId(),
+            'client_secret' => $app->clientSecret(),
         ]);
 
         if (! $response->successful() || ! is_string($response->json('access_token'))) {
