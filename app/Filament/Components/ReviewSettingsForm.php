@@ -69,8 +69,9 @@ class ReviewSettingsForm
             Fieldset::make('OpenCodeReview')
                 ->columns(2)
                 ->schema([
-                    // No tier: OpenCodeReview picks its own provider, so a tier could be read for the wrong one.
-                    self::model($defaults, 'ocr_model', array_diff_key(self::claudeModels() + self::openAiModels(), array_flip(ReviewSettings::TIERS))),
+                    // No tier and no alias: OpenCodeReview picks its own provider and passes the name on as it is,
+                    // so a tier could be read for the wrong one and an alias names no model at all.
+                    self::model($defaults, 'ocr_model', array_diff_key(self::claudeModels() + self::openAiModels(), array_flip([...ReviewSettings::TIERS, ...self::CLAUDE_ALIASES]))),
                     self::effort($defaults, 'ocr_effort'),
                 ]),
             Select::make('language')
@@ -203,6 +204,9 @@ class ReviewSettingsForm
             ->getOptionLabelUsing(fn (?string $value): ?string => $value === null ? null : ($choices[$value] ?? $value))
             ->rule('regex:'.self::MODEL_NAME);
     }
+
+    /** The names only Claude Code knows a model by. */
+    protected const CLAUDE_ALIASES = ['opus', 'sonnet', 'haiku'];
 
     /** What a model's name can be: an ID, an alias, or a gateway's provider/model. */
     protected const MODEL_NAME = '/^[A-Za-z0-9._:\/@-]{1,255}$/';

@@ -14,6 +14,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Services\ReviewSettings;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Select;
 use Illuminate\Support\Facades\DB;
 
 use function Pest\Livewire\livewire;
@@ -253,4 +254,14 @@ it('offers a provider connection its smartest, default and cheapest model, read 
     expect($cheapest)->not->toBe('')
         ->and($driver->environment($connection))->toContain($cheapest)
         ->and(array_keys($driver->settingFields()[0]->getOptions()))->toContain('smartest', 'default', 'cheapest', $cheapest);
+});
+
+it('offers OpenCodeReview real model names only, which it passes on as they are', function () {
+    livewire(ReviewDefaults::class)
+        ->assertFormFieldExists('ocr_model', function (Select $field): bool {
+            $options = array_keys($field->getOptions());
+
+            return array_intersect($options, ['opus', 'sonnet', 'haiku', 'smartest', 'default', 'cheapest']) === []
+                && in_array('claude-opus-5-5', $options, true);
+        });
 });

@@ -24,12 +24,6 @@ use Laravel\Ai\Contracts\Providers\TextProvider;
 class ReviewSettings
 {
     /**
-     * Each setting under the variable the scripts read it from. REVIEW_PROVIDER is
-     * not among them: variables() picks it from the providers list.
-     *
-     * @var array<string, string>
-     */
-    /**
      * A model can be named by what it is for rather than by its ID: the provider's
      * smartest, default or cheapest, as the Laravel AI SDK names them when the
      * review runs, so the setting follows the SDK as it moves on.
@@ -65,6 +59,12 @@ class ReviewSettings
         return in_array($model, self::TIERS, true) ? (self::tierModels($driver)[$model] ?? $model) : $model;
     }
 
+    /**
+     * Each setting under the variable the scripts read it from. REVIEW_PROVIDER is
+     * not among them: variables() picks it from the providers list.
+     *
+     * @var array<string, string>
+     */
     public const VARIABLES = [
         'claude_model' => 'CLAUDE_REVIEW_MODEL',
         'claude_effort' => 'CLAUDE_REVIEW_EFFORT',
