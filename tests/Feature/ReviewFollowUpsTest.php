@@ -129,3 +129,27 @@ it('hears the review say it is not converging in Dutch', function () {
 
     expect(app(ReviewFollowUps::class)->apply(($this->current)(), [$this->medium], "De review convergeert niet.\n\n1 medium.")['findings'])->toBe([]);
 });
+
+it('hears only a not-converging line at the opening, and recounts OpenCodeReview\'s summary by status', function () {
+    ReviewSettings::saveDefaults($this->repository->tenant, ['max_rounds' => 1]);
+    $open = ['id' => 'F2', 'status' => 'open', 'severity' => 'MEDIUM', 'title' => 'Still open'];
+    ($this->rounds)(1, [$open]);
+
+    $quoted = app(ReviewFollowUps::class)->apply(($this->current)(), [$this->medium], "1 medium.\n\nThe agent wrote \"not converging\" in its commit.");
+
+    expect(array_column($quoted['findings'], 'id'))->toBe(['F5']);
+
+    ($this->rounds)(1);
+    $ocr = app(ReviewFollowUps::class)->apply(($this->current)(), [$this->high, $open], 'OpenCodeReview (gpt) reviewed 2 file(s) changed since the last review: 1 new, 1 still open, 0 fixed.');
+
+    expect($ocr['summary'])->toStartWith('OpenCodeReview (gpt) reviewed 2 file(s) changed since the last review: 0 new, 1 still open, 0 fixed.');
+});
+
+it('does not count runs that published nothing as rounds', function () {
+    ReviewSettings::saveDefaults($this->repository->tenant, ['max_rounds' => 1]);
+    foreach (range(1, 3) as $n) {
+        ($this->run)(['status' => ReviewRun::STATUS_UNPUBLISHED, 'started_at' => now()->subHours($n)]);
+    }
+
+    expect(app(ReviewFollowUps::class)->apply(($this->current)(), [$this->high], '1 high.')['findings'])->toBe([$this->high]);
+});

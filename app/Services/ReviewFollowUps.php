@@ -50,7 +50,9 @@ class ReviewFollowUps
             ->where('repository_id', $run->repository_id)
             ->where('pull_request_id', $run->pull_request_id)
             ->where('custom', false)
-            ->whereIn('status', [ReviewRun::STATUS_FINISHED, ReviewRun::STATUS_UNPUBLISHED])
+            // Only what was the pull request's answer: a run that published nothing
+            // left no thread of findings to follow up on.
+            ->where('status', ReviewRun::STATUS_FINISHED)
             ->whereKeyNot($run->getKey())
             ->where('started_at', '<=', $run->started_at ?? now())
             ->latest('started_at')
@@ -75,7 +77,8 @@ class ReviewFollowUps
             }
         }
 
-        $notConverging = is_string($summary) && preg_match(self::NOT_CONVERGING, $summary) === 1;
+        // Said in the opening line, as the rule asks, not quoted further down.
+        $notConverging = is_string($summary) && preg_match(self::NOT_CONVERGING, (string) (array_values(array_filter(preg_split('/\R/', $summary) ?: [], fn (string $line): bool => trim($line) !== ''))[0] ?? '')) === 1;
         $max = ReviewSettings::maxRounds($run->repository);
         $over = $earlier->count() > $max;
         $late = $earlier->count() >= self::ADVISORY_FROM;
@@ -141,6 +144,11 @@ class ReviewFollowUps
 
         $blocking = array_filter($open, fn (array $finding): bool => ReviewPublisher::blocks($finding, ReviewPublisher::DEFAULT_FAIL_ON));
         $line = $counts === [] ? 'No findings.' : implode(', ', $counts).($blocking === [] ? ', nothing blocking.' : '.');
+
+        // OpenCodeReview counts by status: "…: 1 new, 0 still open, 2 fixed".
+        $new = count(array_filter($open, fn (array $finding): bool => ($finding['status'] ?? 'new') === 'new'));
+        $still = count($open) - $new;
+        $summary = (string) preg_replace('/: \d+ new, \d+ still open, /', ": {$new} new, {$still} still open, ", $summary, 1);
 
         $pattern = '/^(No findings\.|\d+ (critical|high|medium|low)(, \d+ (critical|high|medium|low))*(, nothing blocking)?\.?)[ \t]*$/mi';
 

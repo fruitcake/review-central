@@ -218,7 +218,9 @@ class ReviewPublisher
         $confidence = $finding['confidence'] ?? null;
 
         return in_array(strtolower((string) ($finding['status'] ?? 'new')), self::OPEN, true)
-            // Reported, but past the round where a finding below HIGH holds the merge.
+            // Reported, but past the round where a finding below HIGH holds the merge:
+            // set by the server alone (ReviewFollowUps), which drops any the reviewer
+            // sends, so the step's blocking.jq has no use for it.
             && ($finding['advisory'] ?? false) !== true
             && (! is_numeric($confidence) || (float) $confidence >= self::CONFIDENT)
             && ! self::preExisting($finding)
