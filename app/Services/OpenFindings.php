@@ -24,7 +24,7 @@ class OpenFindings
     /** How often a team may have its open findings checked, by setting, in days. */
     public const INTERVALS = ['weekly' => 7, 'monthly' => 30];
 
-    /** Characters of a file the checking model reads whole; a longer one is read around the findings' lines. */
+    /** Characters of a file, with its line numbers, the checking model reads whole; a longer one is read around the findings' lines, up to as much. */
     public const FILE_LENGTH = 60000;
 
     /** Lines either side of a finding's line that a long file's excerpt shows. */
@@ -160,7 +160,7 @@ class OpenFindings
                     continue;
                 }
 
-                [$text, $excerpt] = self::material((string) $path, $file, $group);
+                [$text, $covered] = self::material((string) $path, $file, $group);
                 $response = $driver->checks($connection, $text);
                 // By the row's own id: two pull requests can each have an F1 in this file.
                 $verdicts = FindingChecker::read($response, $group->map(fn (OpenFinding $finding): string => (string) $finding->getKey())->all());
@@ -172,8 +172,8 @@ class OpenFindings
                         continue;
                     }
 
-                    // Code an excerpt leaves out is not code that is gone.
-                    $status = $verdict['verdict'] === OpenFinding::RESOLVED && $excerpt && $finding->line === null ? OpenFinding::UNCLEAR : $verdict['verdict'];
+                    // Code the model was not shown is not code that is gone.
+                    $status = $verdict['verdict'] === OpenFinding::RESOLVED && ! in_array($finding->getKey(), $covered, true) ? OpenFinding::UNCLEAR : $verdict['verdict'];
                     $checked += (int) $this->settle($finding, $status, $verdict['note'], $response->meta->model);
                 }
             } catch (Throwable $exception) {
@@ -208,38 +208,73 @@ class OpenFindings
     }
 
     /**
-     * What the checking model reads: the file with its line numbers, whole, or in
-     * excerpts around each finding's line when it is longer than is read, and the
-     * findings by their row's id.
+     * What the checking model reads: the file with its line numbers, whole when that
+     * fits, or else the lines around each finding's line, merged where they overlap,
+     * for as many findings as fit. Nothing is cut off unsaid.
      *
      * @param  Collection<int, OpenFinding>  $findings
-     * @return array{0: string, 1: bool} the text, and whether the file is shown in excerpts
+     * @return array{0: string, 1: array<int, int>} the text, and the ids of the findings whose code it shows
      */
     protected static function material(string $path, string $file, Collection $findings): array
     {
         $lines = preg_split('/\R/', $file) ?: [];
+        $count = count($lines);
         $numbered = fn (int $from, int $to): string => implode("\n", array_map(fn (int $index): string => ($index + 1).': '.$lines[$index], range($from, $to)));
-        $excerpt = strlen($file) > self::FILE_LENGTH;
+        $whole = $count === 0 ? '' : $numbered(0, $count - 1);
 
-        if (! $excerpt || $lines === []) {
-            $shown = $lines === [] ? '' : $numbered(0, count($lines) - 1);
+        if (strlen($whole) <= self::FILE_LENGTH) {
+            $shown = $whole;
+            $heading = "# {$path}, as it is now";
+            // All of it, but for a finding whose line is past the end: the file moved
+            // too much for it to be found by its line.
+            $covered = $findings->filter(fn (OpenFinding $finding): bool => $finding->line === null || $finding->line <= $count)
+                ->map(fn (OpenFinding $finding): int => (int) $finding->getKey())
+                ->values()
+                ->all();
         } else {
-            $shown = $findings->pluck('line')->filter()->unique()->sort()->map(function (int $line) use ($lines, $numbered): string {
-                $from = max(0, $line - 1 - self::EXCERPT_LINES);
-                $to = min(count($lines) - 1, $line - 1 + self::EXCERPT_LINES);
+            // Windows around each finding's line, nearest the top first, merged where
+            // they touch, until the budget is spent.
+            $windows = [];
+            $covered = [];
+            $length = 0;
 
-                return $from > $to ? '' : $numbered($from, $to);
-            })->filter()->implode("\n…\n");
+            foreach ($findings->filter(fn (OpenFinding $finding): bool => $finding->line !== null && $finding->line <= $count)->sortBy('line') as $finding) {
+                $from = max(0, (int) $finding->line - 1 - self::EXCERPT_LINES);
+                $to = min($count - 1, (int) $finding->line - 1 + self::EXCERPT_LINES);
+                $last = array_key_last($windows);
+
+                if ($last !== null && $from <= $windows[$last][1] + 1) {
+                    $grown = [$windows[$last][0], max($windows[$last][1], $to)];
+                    $extra = strlen($numbered($grown[0], $grown[1])) - strlen($numbered($windows[$last][0], $windows[$last][1]));
+
+                    if ($length + $extra > self::FILE_LENGTH) {
+                        continue;
+                    }
+
+                    $windows[$last] = $grown;
+                    $length += $extra;
+                } else {
+                    $size = strlen($numbered($from, $to));
+
+                    if ($length + $size > self::FILE_LENGTH) {
+                        continue;
+                    }
+
+                    $windows[] = [$from, $to];
+                    $length += $size;
+                }
+
+                $covered[] = $finding->getKey();
+            }
+
+            $shown = implode("\n…\n", array_map(fn (array $window): string => $numbered($window[0], $window[1]), $windows));
+            $heading = "# {$path}, as it is now: excerpts around the findings' lines. The rest of the file is not shown, and code not shown is not gone.";
         }
 
         $items = $findings->map(fn (OpenFinding $finding): string => "## {$finding->getKey()} · {$finding->severity} · {$finding->title}\n"
             .($finding->line === null ? '' : "Raised on line {$finding->line}.\n")
             .Str::limit((string) $finding->details, 2000))->implode("\n\n");
 
-        $heading = $excerpt
-            ? "# {$path}, as it is now: excerpts around the findings' lines. The rest of the file is not shown, and code not shown is not gone."
-            : "# {$path}, as it is now";
-
-        return ["{$heading}\n\n".Str::limit($shown, self::FILE_LENGTH + 20000)."\n\n# The findings\n\n{$items}", $excerpt];
+        return ["{$heading}\n\n{$shown}\n\n# The findings\n\n{$items}", array_values(array_map('intval', $covered))];
     }
 }
