@@ -25,7 +25,7 @@ The result is on the review's page a minute later. Nothing is posted on GitHub.
 
 From there:
 
-- **A reviewer that reads the repository** (Claude Code, Codex, OpenCodeReview, Pi) needs a sandbox for the pull request's code: [Docker on your server](./runners#a-container-on-this-server), or [Cloudflare sandboxes](./runners#a-cloudflare-sandbox) (experimental), which can also run on this machine with `npx wrangler dev` and your own Docker.
+- **A reviewer that reads the repository** (Claude Code, Codex or OpenCodeReview, and Pi in a trial) needs a sandbox for the pull request's code: [Cloudflare sandboxes](./runners#a-cloudflare-sandbox), the safest, or [Docker on your server](./runners#a-container-on-this-server). The Cloudflare Worker can also run on this machine with `npx wrangler dev` and your own Docker.
 - **Reviews posted on your pull requests** need a source control connection with a token, GitHub or Bitbucket Cloud, and the webhook it shows. See [Setting up a tenant](./tenants).
 - **Admin → Setup** says what is in place, and what to do about what is not.
 

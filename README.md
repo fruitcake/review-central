@@ -41,8 +41,9 @@ It started as exactly such a pipeline step at [Fruitcake](https://fruitcake.nl),
 
 - **Reviews against the ticket.** The reviewer reads the pull request with its ticket from Jira, Asana or GitHub Issues, so it checks what was asked for, not only what was written.
 - **Acts on the pull request.** A summary in the description, a comment per finding, tasks for what blocks the merge, and an approval or a request for changes. The next push marks what was fixed and resolves its threads. On **Bitbucket Cloud** and **GitHub**, which has no tasks.
-- **Your reviewer, your model.** Claude Code, Codex, OpenCodeReview or Pi, with the model and effort you set, or only the diff sent to your AI provider: Anthropic, OpenAI, Gemini, Mistral, Groq, DeepSeek, xAI or OpenRouter.
-- **Sandboxed.** The reviewer reads the code in a throwaway container under gVisor, or in a Cloudflare sandbox (experimental), holding nothing but the AI key. Your code stays on your server and your sandbox, and goes to the AI provider you chose.
+- **Your reviewer, your model.** Claude Code, Codex or OpenCodeReview (and Pi in a trial), with the model and effort you set, or only the diff sent to your AI provider: Anthropic, OpenAI, Gemini, Mistral, Groq, DeepSeek, xAI or OpenRouter.
+- **Sandboxed.** The reviewer reads the code in a throwaway container under gVisor, holding nothing but its own AI key, or in a Cloudflare sandbox, which never holds the key at all. Your code stays on your server and your sandbox, and goes to the AI provider you chose.
+- **Whose turn.** Every open pull request says who has to act next, the author, a reviewer, the team or the AI review, and what, with a short summary and its history. **With me** lists the ones that wait for you.
 - **Many teams, one installation.** Each tenant brings its own connections, colours, currency and time zone; the admin panel shows every tenant's cost against its budget.
 - **Measured.** Findings are marked valid, not a problem or wrong, and the overview shows how often the team agrees with the reviewer.
 
@@ -82,7 +83,7 @@ php artisan migrate:fresh --seed --seeder=DemoSeeder
 
 Everything else is on **[review-central.com](https://review-central.com)**:
 
-- [Where a review runs](https://review-central.com/guide/runners): the diff runner, Docker with gVisor, and Cloudflare sandboxes (experimental).
+- [Where a review runs](https://review-central.com/guide/runners): the diff runner, Cloudflare sandboxes, and Docker with gVisor.
 - [Setting up a tenant](https://review-central.com/guide/tenants): source control, tickets, AI providers and webhooks.
 - [Reviews, settings and cost](https://review-central.com/guide/reviews).
 - [Configuration](https://review-central.com/guide/configuration): every setting in `.env`, with its default.

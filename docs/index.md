@@ -31,10 +31,10 @@ features:
     details: A summary in the description, a comment per finding, tasks for what blocks the merge, and an approval or a request for changes. The next push marks what was fixed and resolves its threads. Ask it a question with @review.
   - icon: 🧰
     title: Your reviewer, your model
-    details: Claude Code, Codex, OpenCodeReview or Pi, with the model and effort you set, and a budget per reviewer. Or only the diff, sent to your AI provider.
+    details: Claude Code, Codex or OpenCodeReview (and Pi in a trial), with the model and effort you set, and a budget per reviewer. Or only the diff, sent to your AI provider.
   - icon: 🔒
     title: Sandboxed
-    details: The reviewer reads the code in a throwaway container under gVisor, or in a Cloudflare sandbox (experimental), holding nothing but the AI key. The diff runner runs nothing at all.
+    details: The reviewer reads the code in a Cloudflare sandbox, which never holds the key, or in a throwaway container under gVisor, holding nothing but its own AI key. The diff runner runs nothing at all.
   - icon: 🏢
     title: Many teams, one installation
     details: Each tenant brings its own source control, tickets, AI providers, colours, currency and time zone. One admin panel shows them all, with cost against budget and how often the team agrees with the reviewer.

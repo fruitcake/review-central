@@ -48,7 +48,7 @@ The usual Laravel settings apply as well: `APP_URL`, `APP_KEY`, the database (`D
 | `REVIEW_CONTAINER_LOG_DISK` | — | A filesystem disk, such as `r2`, the log is also copied to, so a server other than the worker can show it. |
 | `REVIEW_CONTAINER_LOG_DAYS` | `14` | Days a log is kept. |
 
-## Cloudflare sandboxes (experimental)
+## Cloudflare sandboxes
 
 See [`cloudflare/README.md`](https://github.com/fruitcake/review-central/blob/main/cloudflare/README.md) for deploying the Worker.
 
@@ -61,7 +61,8 @@ See [`cloudflare/README.md`](https://github.com/fruitcake/review-central/blob/ma
 | `REVIEW_CLOUDFLARE_LOCAL` | `false` | Use the Worker on this machine (`npx wrangler dev`) while no deployed one is named. |
 | `REVIEW_CLOUDFLARE_LOCAL_URL` | `http://127.0.0.1:8787` | Where that local Worker answers. |
 | `REVIEW_CLOUDFLARE_DISK` | `r2` | The filesystem disk on the bucket the Worker is bound to. |
-| `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_ENDPOINT` | — | That bucket's credentials, for the `r2` disk. |
+| `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_ENDPOINT` | — | That bucket's credentials, for the `r2` disk. Also under Settings. |
+| `REVIEW_CLOUDFLARE_PROXY_KEYS` | `true` | Keep the AI providers' keys in the Worker, and give the sandbox a placeholder the Worker swaps on the way to the provider. Off only for a reviewer that does not trust the Worker's certificate. |
 | `REVIEW_CLOUDFLARE_INSTANCE` | `standard-1` | The sandbox's size: `lite`, `basic`, `standard-1` to `standard-4`. Also under Settings → Cloudflare sandboxes. The capacity page advises one from what the reviews measured: their memory at most, and how often the steps around the model were short of processor on each size, with a button to switch. |
 | `REVIEW_CLOUDFLARE_SETUP` | `true` | Install PHP, Composer and the reviewers' tools in a fresh sandbox, and snapshot that. Off when the Worker's image has them. |
 | `REVIEW_CLOUDFLARE_RATE_VCPU`, `REVIEW_CLOUDFLARE_RATE_MEMORY`, `REVIEW_CLOUDFLARE_RATE_DISK` | Cloudflare's list prices | Dollars per vCPU-second, GiB-second of memory and GB-second of disk, to estimate what a sandbox cost. |

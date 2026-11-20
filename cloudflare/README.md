@@ -1,7 +1,7 @@
 # Reviews in a Cloudflare sandbox
 
-> [!WARNING]
-> **Experimental.** This runner has not yet run against Cloudflare itself. The Worker type-checks against Cloudflare's own type definitions and the PHP side is tested against a faked Worker. Try it on your own machine first (below), and use [Docker](https://review-central.com/guide/runners#a-container-on-this-server) or the diff for reviews you rely on.
+> [!NOTE]
+> Cloudflare's Sandbox SDK and its snapshots are in beta at Cloudflare. This is the safest runner that reads the code: see [Security](https://review-central.com/guide/security#which-runner).
 
 A container review can run its reviewer in a [Cloudflare sandbox](https://developers.cloudflare.com/sandbox/) instead of in Docker on this installation's worker. A sandbox is a microVM of its own, started for one review and destroyed after it. Many can run side by side, whatever the worker's own size.
 
@@ -19,12 +19,28 @@ fetch the archive               <--  R2 bucket
 file the report                      sandbox destroyed
 ```
 
-Until it has, "Run it on your own machine" below is the way to try it before deploying. Reports of how it went, good or bad, are welcome as [GitHub issues](https://github.com/fruitcake/review-central/issues).
+Reports of how it went, good or bad, are welcome as [GitHub issues](https://github.com/fruitcake/review-central/issues).
 
 ## What you need
 
 - A Cloudflare account on the **Workers Paid** plan ($5 a month). Containers are not on the free plan.
 - Node 20 or later on the machine you deploy from. No Docker, and no image to build or publish: see "The image" below.
+
+## Deploy it from review-central
+
+The usual way: review-central deploys it itself, from the machine that runs its reviews' queue (Node 20 or later).
+
+1. In the Cloudflare dashboard, [create an API token](https://dash.cloudflare.com/profile/api-tokens) for the account with **Workers Scripts**, **Containers** and **Workers R2 Storage**: Edit, and **Account Settings**: Read. For the bucket's own keys: R2 → Manage API tokens → Create API token, with Object Read & Write on the bucket.
+2. Under **Admin → Settings → Cloudflare sandboxes**, set the account ID, that token, and the bucket's keys. The Worker's name and the bucket's default to `review-central-sandbox` and `review-central`.
+3. On **Admin → Setup**, press **Deploy the Worker**. On the reviews' queue it installs Wrangler, makes the bucket when it is not there, deploys the Worker with those names, and gives it a token it makes. The Worker's address and that token are kept under Settings; the setup page shows how the deploy went, with what Wrangler printed.
+
+Then add the bucket's two lifecycle rules, as in [step 1](#1-the-bucket); a deploy makes the bucket but sets no rules.
+
+Press it again after an update: the setup page says when the Worker runs an older version. The same from a shell is `php artisan review:deploy-worker`, which also takes `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` from the environment. What `.env` sets always goes before what is under Settings.
+
+## Or by hand
+
+The same in three steps, from a checkout of this repository, and the way to [run it on your own machine](#run-it-on-your-own-machine).
 
 ## 1. The bucket
 
@@ -45,16 +61,6 @@ Add two lifecycle rules:
 - objects under `review/cache/` deleted after 14 days: each repository's `vendor/`. One that expires is installed and kept again by the next review of a pull request whose lock is the destination branch's.
 
 Not under `review/snapshots/`, where the Worker notes its snapshot.
-
-## Or deploy it from review-central
-
-Steps 1 to 3 can also be left to review-central itself, from the machine that runs its reviews' queue (Node 20 or later):
-
-1. In the Cloudflare dashboard, [create an API token](https://dash.cloudflare.com/profile/api-tokens) for the account with **Workers Scripts**, **Containers** and **Workers R2 Storage**: Edit, and **Account Settings**: Read. For the bucket's own keys: R2 → Manage API tokens → Create API token, with Object Read & Write on the bucket.
-2. Under **Admin → Settings → Cloudflare sandboxes**, set the account ID, that token, and the bucket's keys. The Worker's name and the bucket's default to `review-central-sandbox` and `review-central`.
-3. On **Admin → Setup**, press **Deploy the Worker**. On the reviews' queue it installs Wrangler, makes the bucket when it is not there, deploys the Worker with those names, and gives it a token it makes. The Worker's address and that token are kept under Settings; the setup page shows how the deploy went, with what Wrangler printed.
-
-Press it again after an update: the setup page says when the Worker runs an older version. The same from a shell is `php artisan review:deploy-worker`, which also takes `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` from the environment. What `.env` sets always goes before what is under Settings.
 
 ## 2. The Worker
 
@@ -138,7 +144,7 @@ The sandbox never gets them. review-central sends each key to the Worker beside 
 
 That interception answers for those hosts with a certificate of Cloudflare's, which the Worker adds to the sandbox's trust store before the reviewer runs; the reviewer also gets `NODE_EXTRA_CA_CERTS` for Node and `SSL_CERT_FILE` for the rest. A gateway over plain HTTP stops the review instead: the Worker would send its key on unencrypted, and the key never goes into the sandbox.
 
-Other traffic leaves the sandbox as it did: Composer, npm and the CLIs' own updates still reach the internet, as they do from a CI pipeline that runs the same pull request. So the sandbox keeps the keys out of reach, not the code: what it could send out is the checkout it was given, which whoever opened the pull request can read already. A reviewer that is talked into it can still spend the key through the Worker for as long as the review runs, within its budget (`CLAUDE_REVIEW_MAX_BUDGET`, $10 by default) and its time limit.
+Other traffic leaves the sandbox as it did: Composer, npm and the CLIs' own updates still reach the internet, as they do from a CI pipeline that runs the same pull request. So the sandbox keeps the keys out of reach, not the code: what it could send out is the checkout it was given, which whoever opened the pull request can read already. A reviewer that is talked into it can still spend the key through the Worker for as long as the review runs, within its budget (**Budget per review** in the review settings, $10 by default) and its time limit.
 
 ## What differs from Docker
 
@@ -146,7 +152,7 @@ Other traffic leaves the sandbox as it did: Composer, npm and the CLIs' own upda
 - **PHP 8.1 to 8.5**, where the reviewer's Docker image goes back to 5.6. An older repository is reviewed on the newest; Composer runs with `--ignore-platform-reqs`, as it does on Docker.
 - **The Composer cache is the destination branch's `vendor/`**, one per repository, in the bucket under `review/cache/<repository>/`. A review fetches it, and Composer installs only what the pull request's lock changes. It is kept again only by a review whose lock is the destination branch's, written right after the install, so what is kept is never a pull request's own packages. Composer's own download cache does not travel.
 - **The session travels, the caches do not.** A follow-up review takes the reviewer's session along (a few MB), not the CLIs and caches in its home (`.local`, `.npm`, `.tools`, `.cache`, `.composer`, together hundreds of MB): the sandbox installs a newer CLI than its snapshot has itself, in seconds.
-- **No memory figure**: a sandbox does not say what it used.
+- **Memory and processor are measured per step**, as on Docker: the review's page and the capacity section on Platform show them.
 - **The reviewer's key is not in the sandbox**, where it is in the Docker container: the Worker puts it in on the way to the provider (above). The sandbox has the internet and no credential for the repository's host.
 
 ## The image
@@ -182,7 +188,7 @@ Do this again after the reviewer's image changes.
 
 ## When something is wrong
 
-- **The setup page says the Worker is not up to date**: this installation has newer Worker code than the one deployed. Deploy it again from a checkout of the same version: `cd cloudflare/worker && npx wrangler deploy`. A change to `src/index.ts` raises `WORKER_VERSION` in it, which is what the page compares.
+- **The setup page says the Worker is not up to date**: this installation has newer Worker code than the one deployed. Deploy it again: **Deploy the Worker** on the setup page, `php artisan review:deploy-worker`, or from a checkout of the same version `cd cloudflare/worker && npx wrangler deploy`. A change to `src/index.ts` raises `WORKER_VERSION` in it, which is what the page compares.
 - **`wrangler deploy` refuses the containers block for having no image**: the block names no image on purpose, since the Worker starts Cloudflare's own (`cloudflare/debian-trixie`). If your Wrangler wants one all the same, use "An image of your own" above; nothing else changes.
 - **401 from the Worker**: `REVIEW_CLOUDFLARE_TOKEN` is not the secret the Worker has. `npx wrangler secret put API_TOKEN` again.
 - **"Nothing in the bucket at …"**: the Worker's bucket is not the one the `r2` disk writes to. Compare `bucket_name` in `wrangler.jsonc` with `R2_BUCKET`.

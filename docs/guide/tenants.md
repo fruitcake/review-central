@@ -4,7 +4,7 @@ In the admin panel, at `/admin`:
 
 1. Add the tenant, and the users who may open it. A new user is mailed an invitation to choose a password, so the installation needs working mail (`MAIL_*` in `.env`) and a running queue. From the list of users the invitation can be sent again, and a password reset mailed.
 
-In the tenant's panel, at `/app/<tenant>`:
+In the tenant's panel, at `/app/<tenant>`. Every connection form has **How to get this** next to the service you pick: a link to the page where its key or token is made, the steps there, and the scopes it needs with why.
 
 2. **Source control**: add the host.
    - **GitHub**: a fine-grained personal access token for the repositories, with read access to Contents and Metadata, read and write access to Pull requests, Issues and Commit statuses, and Webhooks to have the webhook added for you. The review comments, approves and requests changes as the account that owns the token, so give it an account of its own, a machine user: GitHub does not let an account approve its own pull request. The owner is the user or organisation from the address. Without a token, a public repository is only read, and its pull requests can be tried.

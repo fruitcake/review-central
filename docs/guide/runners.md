@@ -6,7 +6,9 @@ How a review runs is its **runner**. There are three, from the lightest to the s
 |---|---|---|
 | `diff` | The pull request's diff, with its ticket, comments and earlier findings. Nothing is cloned and nothing runs. | Only an AI provider key. The default. |
 | `docker` | The whole checkout, in a throwaway container under gVisor on your own server. | Docker, gVisor and a worker of its own. |
-| `cloudflare` | The whole checkout, in a Cloudflare sandbox. **Experimental.** | A Cloudflare account and the Worker deployed. |
+| `cloudflare` | The whole checkout, in a Cloudflare sandbox. The safest that reads the code. | A Cloudflare account on the Workers Paid plan, and the Worker deployed: from **Admin → Setup**, or by hand. |
+
+For a review that reads the code, the Cloudflare sandbox is the one to use: the code runs in a microVM of its own away from your server, and the AI provider's key never enters it. Docker is for your own repositories on a machine of its own. [Security](./security#which-runner) compares the three.
 
 The platform's runner is picked under **Admin → Settings**, from the ones that are set up, and a repository can pick its own under **Runs on**. **Admin → Setup** says which runners are set up and what the others still need.
 
@@ -18,7 +20,7 @@ The review runs as a queued job on this installation's own worker. What it print
 
 The job clones the repository on the worker, and then runs the review's scripts in containers that are thrown away:
 
-- the reviewer is the only step that sees the pull request's code. It gets the AI provider's key and nothing else: no credential for this server or for the repository's host. It cannot change the scripts the other steps run.
+- the reviewer is the only step that sees the pull request's code. It gets the key of the AI provider that runs it and nothing else: no other provider's key, no credential for this server or for the repository's host. It cannot change the scripts the other steps run, and it runs with the review's own settings for its CLI, not the pull request's: see [Security](./security#what-it-does).
 - the worker itself decides whether to review and writes what the reviewer reads: the pull request, its comments, the ticket and the instructions. That reads no code, so it needs no container.
 - the worker reads the report the reviewer wrote, as data, and files it: the review on the pull request and, on Bitbucket, the Code Insights report on the commit. Each review uses one container; a review that is turned away uses none.
 
@@ -29,7 +31,7 @@ To turn it on, on a machine that runs `php artisan queue:work --queue=reviews`:
 3. Set `REVIEW_DOCKER_ENABLED=true`. Until then a repository on Docker says in its readiness that the runner is not set up, and no review starts.
 4. Set the queue connection's `retry_after` above the job's timeout, or a long review is started a second time. The job may take the reviewer's limit plus ten minutes (`REVIEW_CONTAINER_TIMEOUT` + 600 seconds) for each review it does, and up to three when it [carries on with a new commit](#carrying-on-with-a-new-commit). With Redis the `reviews` connection is sized for that already (7,500 seconds); on the database queue set `DB_QUEUE_RETRY_AFTER=7500`.
 
-A review's page shows the most memory its container was seen to use, sampled every `REVIEW_CONTAINER_SAMPLE_SECONDS` (10), next to the limit `REVIEW_CONTAINER_MEMORY` gives it. The limit is a ceiling, not a reservation; where reviews stay well under it, lowering it lets more of them run side by side.
+A review's page counts its duration up while it runs, and shows the most memory its container was seen to use, sampled every `REVIEW_CONTAINER_SAMPLE_SECONDS` (10), next to the limit `REVIEW_CONTAINER_MEMORY` gives it. The limit is a ceiling, not a reservation; where reviews stay well under it, lowering it lets more of them run side by side.
 
 The worker can start containers, which is as good as root on that machine: give it a machine of its own that reaches only the database, the cache and Docker. `config/review.php` has the limits, the networks of the steps and the address the containers reach this server at.
 
@@ -43,17 +45,37 @@ The lightest review, and the default until another runner is set up and picked. 
 
 Nothing is cloned and no container starts, so it needs no Docker and finishes in a minute or two. The reviewer sees only what the diff shows: it cannot read the code around a change, a caller or a definition, so it finds less and is told to report only what the diff itself establishes. Lock files, built files and binary files are left out, and so are whole files once the diff passes `REVIEW_DIFF_MAX_BYTES` (600,000); the review's log names each.
 
-Which provider is asked follows the repository's reviewer settings: Codex means OpenAI, anything else Anthropic, and a tenant with one provider is asked through that one. The model and effort are the ones set for that reviewer. A Claude model that is an alias only Claude Code knows, such as `opus`, gives way to `claude-opus-5-5`; without a Codex model, OpenAI is asked for `REVIEW_DIFF_OPENAI_MODEL`. On Anthropic's own API a request a safety classifier declines is run again on the model Anthropic recommends for it (`fallbacks`), which a diff full of security code can need.
+Which provider is asked follows the repository's reviewer settings: Codex means OpenAI, anything else Anthropic, and a tenant without that provider is asked through the one it connected first. The model and effort are the ones set for that reviewer. A Claude model that is an alias only Claude Code knows, such as `opus`, gives way to `claude-opus-5-5`; without a Codex model, OpenAI is asked for `REVIEW_DIFF_OPENAI_MODEL`. On Anthropic's own API a request a safety classifier declines is run again on the model Anthropic recommends for it (`fallbacks`), which a diff full of security code can need.
 
 `REVIEW_DIFF_ENABLED=false` takes the choice away.
 
 ## A Cloudflare sandbox
 
-::: warning Experimental
-This runner has not yet run against Cloudflare itself: the Worker type-checks against Cloudflare's own types and the PHP side is tested against a faked Worker. Try it locally first, and use Docker or the diff for reviews you rely on. Reports of how it went are welcome as [GitHub issues](https://github.com/fruitcake/review-central/issues).
+::: tip
+Cloudflare's Sandbox SDK and its snapshots are in beta at Cloudflare. Reports of how it went are welcome as [GitHub issues](https://github.com/fruitcake/review-central/issues).
 :::
 
-The reviewer can also run in a [Cloudflare sandbox](https://developers.cloudflare.com/sandbox/): the job stays on this server, and the pull request's code runs on Cloudflare's side, in a container of its own for every review. It needs no Docker on the server and scales with the number of reviews. Deploying the Worker and its bucket, and running it locally with `npx wrangler dev` to try it, is described in [`cloudflare/README.md`](https://github.com/fruitcake/review-central/blob/main/cloudflare/README.md). **Admin → Setup** shows whether the Worker answers and is up to date.
+The reviewer can also run in a [Cloudflare sandbox](https://developers.cloudflare.com/sandbox/): the job stays on this server, and the pull request's code runs on Cloudflare's side, in a container of its own for every review. It needs no Docker on the server and scales with the number of reviews: a worker on this server only waits for its sandbox.
+
+### Setting it up
+
+All of it can be done from the admin panel:
+
+1. Under **Admin → Settings → Cloudflare sandboxes**, set the account ID, an API token for the account, and the bucket's access keys. **How to get this** next to the token and the bucket's keys says where they are made and which permissions it needs. The Worker's name and the bucket's default to `review-central-sandbox` and `review-central`. **Test** checks the token and the bucket the way a review uses them, and says what a refused token lacks. What `.env` sets goes before what is saved here, and the field says so.
+2. On **Admin → Setup**, **Deploy the Worker** installs Wrangler on the reviews' queue, makes the bucket when it is not there, and deploys the Worker under that name with a token of its own. Its address and token are kept under Settings. From a shell, `php artisan review:deploy-worker` does the same.
+3. **Prepare the sandbox** has the Worker install PHP, Composer and the reviewers' tools once and keep a snapshot, so the first review does not wait for that. The snapshot belongs to one version of the setup script: pressing it again does nothing until a release changes the script. A reviewer's CLI that has a newer release since is updated in the review's own step, which costs a few seconds and says so in its log.
+
+Deploying by hand, and running the Worker locally with `npx wrangler dev` to try it, is described in [`cloudflare/README.md`](https://github.com/fruitcake/review-central/blob/main/cloudflare/README.md). **Admin → Setup** shows whether the Worker answers and is up to date.
+
+### What the sandbox holds
+
+The checkout, the review's scripts and the reviewer's session go to the sandbox through the bucket, and the report and the session come back the same way. The CLIs and caches in the reviewer's home stay behind: the snapshot has the tools. The AI provider's key never enters the sandbox: it holds a placeholder, and the Worker puts the key in only on a request over HTTPS to that provider's own host.
+
+### Its size, and what it measured
+
+Every review in a sandbox runs on the size picked under **Settings → Cloudflare sandboxes** (`standard-1` unless changed), from the next review on; a bigger one costs more per second. Each review measures, per step, how long it took, the most memory it used and how long it waited for a processor, and keeps that with its cost in the sandbox.
+
+On **Platform**, the capacity section advises a size from those measurements: one whose memory has room for what nineteen in twenty reviews used, and one up from a size whose steps around the model were short of processor a quarter of the time or more. A size that was short of processor is not advised again, and just after a change the advice waits for five reviews on the new size. **Use** switches to the advised size. A table per size shows each step's average time, the time nine in ten stay within, its most memory and how long it waited for a processor, with what a review took and cost in the sandbox.
 
 ## The reviewer's session, and asking it a question
 
