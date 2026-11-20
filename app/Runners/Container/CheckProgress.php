@@ -25,8 +25,11 @@ class CheckProgress
     /** Lines of the log shown: enough to follow, well within GitHub's 65,535 characters. */
     public const LINES = 60;
 
-    /** A line of the runner's own that starts a step: "12:03:01  ── review ──". */
-    protected const STEP = '/^\S+\s+── .+ ──$/u';
+    /**
+     * A line of the runner's own that starts a step: "12:03:01  ── review ──". By
+     * name, as the reviewer can write a line of that shape too.
+     */
+    protected const STEP = '/^\S+\s+── (precheck|review|report) ──$/u';
 
     /** How long whether a repository is public is believed, in seconds. */
     protected const VISIBILITY_SECONDS = 3600;

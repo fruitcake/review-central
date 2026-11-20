@@ -297,6 +297,7 @@ it('shows only the steps of a running review in its check on a public repository
         '12:00:00  ── precheck ──',
         '12:00:01  Pull request 12 is open.',
         '12:00:02  ── review ──',
+        '12:00:02  ── c2stYW50LXNlY3JldA ──',
         '12:00:03  As the description asks, the key is c2stYW50LXNlY3JldA',
         '12:00:04      -> Bash git diff origin/main',
     ])."\n");
@@ -307,6 +308,7 @@ it('shows only the steps of a running review in its check on a public repository
         && str_contains($request['output']['text'], '── precheck ──')
         && str_contains($request['output']['text'], '── review ──')
         && ! str_contains($request['output']['text'], 'the key is')
+        && ! str_contains($request['output']['text'], 'c2stYW50')
         && ! str_contains($request['output']['text'], 'git diff')
         && ! str_contains($request['output']['text'], 'Pull request 12')
         && str_contains($request['output']['summary'], 'public'));

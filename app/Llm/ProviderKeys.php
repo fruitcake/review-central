@@ -71,6 +71,11 @@ final class ProviderKeys
                     throw new RuntimeException("{$baseVariable} is {$base}: a key goes to a gateway over HTTPS only. Change the AI provider's base URL to an https:// address.");
                 }
 
+                // The Worker takes a sandbox's HTTPS on its own port alone.
+                if (! in_array(parse_url($base, PHP_URL_PORT), [null, 443], true)) {
+                    throw new RuntimeException("{$baseVariable} is {$base}: in a Cloudflare sandbox a key goes to a gateway on port 443 only. Serve the gateway there, or set REVIEW_CLOUDFLARE_PROXY_KEYS=false to give the sandbox the key itself.");
+                }
+
                 $host = strtolower($gateway);
             }
 

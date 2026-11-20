@@ -41,3 +41,11 @@ it('refuses a key for a gateway over plain HTTP rather than hand it to the sandb
     expect(fn () => ProviderKeys::proxied(['ANTHROPIC_API_KEY' => 'sk-ant-one-123456', 'ANTHROPIC_BASE_URL' => 'http://gateway.internal']))
         ->toThrow(RuntimeException::class, 'a key goes to a gateway over HTTPS only');
 });
+
+it('refuses a key for a gateway on another port than the Worker takes', function () {
+    expect(fn () => ProviderKeys::proxied(['ANTHROPIC_API_KEY' => 'sk-ant-one-123456', 'ANTHROPIC_BASE_URL' => 'https://gateway.example.com:8443']))
+        ->toThrow(RuntimeException::class, 'port 443 only');
+
+    expect(ProviderKeys::proxied(['ANTHROPIC_API_KEY' => 'sk-ant-one-123456', 'ANTHROPIC_BASE_URL' => 'https://gateway.example.com:443/v1'])['credentials'][0]['host'])
+        ->toBe('gateway.example.com');
+});
