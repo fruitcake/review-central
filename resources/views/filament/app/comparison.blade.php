@@ -11,7 +11,7 @@
 
 <x-filament-panels::page>
     {{-- Until every review and the analysis have ended, it looks again now and then. --}}
-    <div class="rc-stack" @if (! $done || $comparison->analysis_status === ReviewComparison::ANALYSIS_RUNNING) wire:poll.15s @endif>
+    <div class="rc-stack" @if (! $settled || $comparison->analysis_status === ReviewComparison::ANALYSIS_RUNNING) wire:poll.15s @endif>
         @if ($commits->count() > 1)
             <p class="rc-note">Not every review is of the same commit: the pull request moved on between them. Compare with that in mind.</p>
         @endif
@@ -94,6 +94,14 @@
             @elseif ($comparison->analysis === null)
                 <p class="rc-muted">{{ $done ? 'Analyse has one model judge the findings of the reviews not left out together: which hold, which are false, and who missed what.' : 'Once every review not left out has ended, Analyse has one model judge their findings together.' }}</p>
             @else
+                @if ($analysed !== null)
+                    <p class="rc-muted">
+                        Of {{ implode(', ', $analysed) }}.
+                        @if ($analysed !== $analysable)
+                            The reviews to analyse are {{ implode(', ', $analysable) ?: 'none' }} now: analyse again to judge those. The scores stay as this analysis gave them.
+                        @endif
+                    </p>
+                @endif
                 @if (filled($comparison->analysis['summary'] ?? null))
                     <p>{{ $comparison->analysis['summary'] }}</p>
                 @endif

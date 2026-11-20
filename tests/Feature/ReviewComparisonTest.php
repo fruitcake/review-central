@@ -396,3 +396,44 @@ it('reads the reviews that could be read when the analysis was asked for, not a 
     expect($comparison->refresh()->analysis['labels'])->toBe(['A'])
         ->and(array_keys(ReviewComparisons::scores($comparison)))->toBe(['A']);
 });
+
+it('keeps looking while a left-out review still runs, keeps the scores an analysis gave, and says what it read', function () {
+    ($this->run)(51, [['id' => 'F1', 'title' => 'Found by B alone']]);
+    ($this->run)(52, [], ReviewRun::STATUS_RUNNING);
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [['build' => 51], ['build' => 52]], 'excluded' => ['C'],
+        'analysis_status' => ReviewComparison::ANALYSIS_FINISHED,
+        'analysis' => ['summary' => 'B found it.', 'labels' => ['A', 'B'], 'findings' => [
+            ['title' => 'Leak', 'path' => null, 'verdict' => 'valid', 'found_by' => ['B-F1'], 'reason' => 'It leaks.'],
+        ]],
+    ]);
+
+    // B is left out after the analysis: its scores stay, and the page says the selection moved on.
+    $comparison->toggleExcluded('B');
+
+    expect(ReviewComparisons::scores($comparison))->toBe([
+        'A' => ['valid' => 0, 'false_positive' => 0, 'unclear' => 0, 'missed' => 1],
+        'B' => ['valid' => 1, 'false_positive' => 0, 'unclear' => 0, 'missed' => 0],
+    ]);
+
+    livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])
+        ->assertSeeHtml('wire:poll.15s')
+        ->assertSee('Of A, B.')
+        ->assertSee('The reviews to analyse are A now');
+});
+
+it('applies two changes to which columns are left out that overlap', function () {
+    ($this->run)(51, []);
+    ($this->run)(52, []);
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [['build' => 51], ['build' => 52]],
+    ]);
+    $stale = ReviewComparison::query()->find($comparison->id);
+
+    $comparison->toggleExcluded('B');
+    $stale->toggleExcluded('C');
+
+    expect($comparison->refresh()->excluded)->toBe(['B', 'C']);
+});

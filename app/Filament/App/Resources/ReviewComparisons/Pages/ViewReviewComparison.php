@@ -134,6 +134,10 @@ class ViewReviewComparison extends ViewRecord
             'columns' => $comparison->columns(),
             'scores' => ReviewComparisons::scores($comparison),
             'done' => $comparison->done(),
+            'settled' => $comparison->settled(),
+            // What the analysis read, against what would be read now.
+            'analysed' => $comparison->analysis['labels'] ?? null,
+            'analysable' => ReviewComparisons::analysable($comparison),
         ];
     }
 }

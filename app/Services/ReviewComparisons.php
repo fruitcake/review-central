@@ -250,7 +250,8 @@ Of an older commit, '.substr($column['run']->commit, 0, 12).': a finding about c
         $read = $comparison->analysis['labels'] ?? null;
 
         foreach ($comparison->columns() as $label => $column) {
-            if ($column['run'] === null || $comparison->isExcluded($label) || ($read !== null && ! in_array($label, $read, true))) {
+            // As the analysis made them: for the reviews it read, whether left out since or not.
+            if ($column['run'] === null || ($read !== null && ! in_array($label, $read, true))) {
                 continue;
             }
 

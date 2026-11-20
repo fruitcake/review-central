@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Reviews of one pull request with different setups, side by side: the review it
@@ -127,11 +128,25 @@ class ReviewComparison extends Model
      */
     public function toggleExcluded(string $label): void
     {
-        $excluded = $this->excluded ?? [];
+        // On the saved selection, under a lock: two changes at once both hold.
+        DB::transaction(function () use ($label): void {
+            $excluded = self::query()->whereKey($this->getKey())->lockForUpdate()->firstOrFail()->excluded ?? [];
 
-        $this->update(['excluded' => $this->isExcluded($label)
-            ? array_values(array_diff($excluded, [$label]))
-            : [...$excluded, $label]]);
+            $this->update(['excluded' => in_array($label, $excluded, true)
+                ? array_values(array_diff($excluded, [$label]))
+                : [...$excluded, $label]]);
+        });
+    }
+
+    /**
+     * Whether every column's review has ended, the ones left out too: until then
+     * the page keeps looking.
+     */
+    public function settled(): bool
+    {
+        return $this->columns()->every(fn (array $column): bool => $column['run'] === null
+            ? ($column['row']['error'] ?? null) !== null
+            : ! in_array($column['run']->status, [ReviewRun::STATUS_QUEUED, ReviewRun::STATUS_RUNNING, ReviewRun::STATUS_PENDING], true));
     }
 
     /**
