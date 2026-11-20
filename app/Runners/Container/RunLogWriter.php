@@ -27,9 +27,11 @@ class RunLogWriter
     /**
      * What a step may add of how it ran, kept as part of its name, so that a step
      * that ran two ways is measured as two: "composer (cached)", from a vendor/
-     * that was kept, and "composer (fresh)", from nothing.
+     * that was kept, and "composer (fresh)", from nothing; and "reviewer
+     * (candidates)", the part of a review where Codex's own review hunts for
+     * candidates before the main one.
      */
-    public const PHASE_WAYS = ['cached', 'fresh'];
+    public const PHASE_WAYS = ['cached', 'fresh', 'candidates'];
 
     protected const TELL_EVERY_SECONDS = 1.0;
 
