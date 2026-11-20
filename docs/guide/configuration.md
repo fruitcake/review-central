@@ -8,7 +8,7 @@ The usual Laravel settings apply as well: `APP_URL`, `APP_KEY`, the database (`D
 
 | Setting | Default | What it does |
 |---|---|---|
-| `REVIEW_DEFAULT_RUNNER` | `diff` | The platform's runner until an administrator picks one under **Admin → Settings**: `diff`, `docker` or `cloudflare`. When it is not set up, the first runner that is. |
+| `REVIEW_DEFAULT_RUNNER` | — | The platform's runner until an administrator picks one under **Admin → Settings**: `diff`, `docker` or `cloudflare`. Unset, or not set up: a Cloudflare sandbox once it is set up, else the diff. Docker runs only when it is picked. |
 | `REVIEW_DIFF_ENABLED` | `true` | Whether the review from the diff can be picked. |
 | `REVIEW_DIFF_TIMEOUT` | `900` | Seconds the AI provider may take to answer a review from the diff. |
 | `REVIEW_DIFF_MAX_BYTES` | `600000` | The most diff one request carries; files past it are left out, and the review says which. |

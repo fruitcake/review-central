@@ -8,9 +8,12 @@ use App\Jobs\CheckWorker;
 use App\Jobs\PrepareCloudflareSandbox;
 use App\Models\CapacitySample;
 use App\Models\ModelPrice;
+use App\Models\Repository;
 use App\Models\ReviewInstruction;
+use App\Runners\CloudflareRunner;
 use App\Runners\Container\CloudflareSandbox;
 use App\Runners\Container\WorkerDeployment;
+use App\Runners\ContainerRunner;
 use App\Runners\Runners;
 use App\Support\SetupGuides;
 use Carbon\CarbonImmutable;
@@ -322,7 +325,43 @@ class SetupCheck
                 app(Runners::class)->options() === [] ? 'No runner is set up.' : 'Set up: '.implode(', ', array_map($this->inSentence(...), app(Runners::class)->options())).'. The platform\'s is '.$this->inSentence(rescue(fn (): string => app(Runners::class)->get(app(Runners::class)->default())->label(), '?', false)).'; Admin → Settings changes it.',
                 'Set REVIEW_DOCKER_ENABLED=true (with a worker that has Docker), set up Cloudflare sandboxes, or REVIEW_DIFF_ENABLED=true.',
             ),
+            ...$this->dockerBesideCloudflare(),
         ];
+    }
+
+    /**
+     * Repositories that still review on Docker while Cloudflare sandboxes are set
+     * up: there the code runs next to this server with the AI key in reach, where
+     * a sandbox would run it away from both.
+     *
+     * @return array<int, array{state: string, title: string, detail: string, fix: string|null}>
+     */
+    protected function dockerBesideCloudflare(): array
+    {
+        $runners = app(Runners::class);
+
+        if (! array_key_exists(CloudflareRunner::NAME, $runners->options())) {
+            return [];
+        }
+
+        $onDocker = Repository::query()->where('reviews_enabled', true)->get(['id', 'review_runner'])
+            ->filter(fn (Repository $repository): bool => $runners->nameFor($repository->review_runner) === ContainerRunner::NAME)
+            ->count();
+
+        if ($onDocker === 0) {
+            return [['state' => self::OK, 'title' => 'Reviews that read the code run in a sandbox', 'detail' => 'No repository reviews on Docker while Cloudflare sandboxes are set up.', 'fix' => null]];
+        }
+
+        $platform = $runners->default() === ContainerRunner::NAME;
+
+        return [[
+            'state' => self::NOTE,
+            'title' => $onDocker === 1 ? 'A repository reviews on Docker' : "{$onDocker} repositories review on Docker",
+            'detail' => 'Cloudflare sandboxes are set up, and they keep the pull request\'s code away from this server and the AI key out of its reach. On Docker the reviewer holds the key, next to this server.',
+            'fix' => $platform
+                ? 'Pick "A Cloudflare sandbox" under Settings → Reviews run on; a repository that picked Docker under Runs on keeps it.'
+                : 'Change Runs on of those repositories to the platform\'s runner or to a Cloudflare sandbox.',
+        ]];
     }
 
     /**

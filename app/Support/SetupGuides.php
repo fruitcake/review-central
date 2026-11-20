@@ -183,7 +183,7 @@ class SetupGuides
                 'Name the app; its comments show as `<name>[bot]`. Homepage URL: `'.url('/').'`.',
                 'Callback URL: `'.url('/connections/oauth/callback').'`. Leave **Request user authorization (OAuth) during installation** off.',
                 'Webhook URL: `'.url('/api/webhooks/github-app').'`, with a long random secret of your own.',
-                'Set the permissions below, subscribe to the events **Pull request**, **Issue comment**, **Pull request review comment** and **Check run**, and let it be installed on **Any account** for tenants outside your organisation.',
+                'Set the permissions below, subscribe to the events **Pull request**, **Issue comment**, **Pull request review comment**, **Pull request review** and **Check run**, and let it be installed on **Any account** for tenants outside your organisation.',
                 'Create it, then **Generate a private key**. Set `GITHUB_APP_ID`, `GITHUB_APP_SLUG` (the name in the app\'s address), `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` (generate one), `GITHUB_APP_PRIVATE_KEY` (the PEM file\'s path, or its contents) and `GITHUB_APP_WEBHOOK_SECRET` in `.env`.',
             ],
             permissions: [

@@ -98,9 +98,9 @@ class Settings extends Page
 
                             return $options;
                         })
-                        // Unpicked, the platform follows REVIEW_DEFAULT_RUNNER, or the first runner that is set up.
+                        // Unpicked, the platform follows REVIEW_DEFAULT_RUNNER, else a Cloudflare sandbox once it is set up, else the diff.
                         ->placeholder(fn (Runners $runners): string => 'As configured: '.rescue(fn (): string => $runners->get($runners->default())->label(), $runners->default(), false))
-                        ->helperText('For every repository that does not pick its own runner, from its next review on. Docker and a Cloudflare sandbox run the reviewer a repository\'s settings pick; the diff alone sends the diff, with the pull request\'s context, to the AI provider. Only runners that are set up can be picked; see Setup.'),
+                        ->helperText('For every repository that does not pick its own runner, from its next review on. Docker and a Cloudflare sandbox run the reviewer a repository\'s settings pick; the diff alone sends the diff, with the pull request\'s context, to the AI provider. A Cloudflare sandbox is the safest that reads the code: it runs away from this server and never holds the AI key, where Docker\'s container holds it next to this server. Only runners that are set up can be picked; see Setup.'),
                     Select::make(PlatformSettings::CURRENCY)
                         ->label('Currency')
                         ->options(Currency::NAMES)
