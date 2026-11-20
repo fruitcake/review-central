@@ -7,6 +7,8 @@ namespace App\Services;
 use App\Filament\Themes;
 use App\Models\PlatformSetting;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
+use Throwable;
 
 /**
  * What holds for the whole installation, set by an administrator under Settings:
@@ -38,6 +40,36 @@ class PlatformSettings
     /** Whether the sidebar says who made Review Central. */
     public const CREDIT = 'credit';
 
+    /** The Cloudflare account the sandbox's Worker and bucket are in. */
+    public const CLOUDFLARE_ACCOUNT = 'cloudflare_account';
+
+    /** A Cloudflare API token that deploys them, kept encrypted. */
+    public const CLOUDFLARE_API_TOKEN = 'cloudflare_api_token';
+
+    /** What the Worker is called on Cloudflare. */
+    public const CLOUDFLARE_WORKER = 'cloudflare_worker';
+
+    /** The bucket the Worker and this installation hand files through. */
+    public const CLOUDFLARE_BUCKET = 'cloudflare_bucket';
+
+    /** The bucket's own keys, for its S3 API, the secret kept encrypted. */
+    public const R2_ACCESS_KEY_ID = 'r2_access_key_id';
+
+    public const R2_SECRET_ACCESS_KEY = 'r2_secret_access_key';
+
+    /** Where the deployed Worker answers, as its deploy said. */
+    public const CLOUDFLARE_URL = 'cloudflare_url';
+
+    /** The token this installation asks the Worker with, made for its deploy, kept encrypted. */
+    public const CLOUDFLARE_TOKEN = 'cloudflare_token';
+
+    /** Kept encrypted, and never shown again. */
+    public const SECRETS = [self::CLOUDFLARE_API_TOKEN, self::R2_SECRET_ACCESS_KEY, self::CLOUDFLARE_TOKEN];
+
+    public const DEFAULT_WORKER = 'review-central-sandbox';
+
+    public const DEFAULT_BUCKET = 'review-central';
+
     public const DEFAULT_NAME = 'Review Central';
 
     /** A logo is an image, of a size the settings table holds without trouble. */
@@ -53,6 +85,14 @@ class PlatformSettings
         self::LOGO => null,
         self::COLOUR => null,
         self::CREDIT => true,
+        self::CLOUDFLARE_ACCOUNT => null,
+        self::CLOUDFLARE_API_TOKEN => null,
+        self::CLOUDFLARE_WORKER => null,
+        self::CLOUDFLARE_BUCKET => null,
+        self::R2_ACCESS_KEY_ID => null,
+        self::R2_SECRET_ACCESS_KEY => null,
+        self::CLOUDFLARE_URL => null,
+        self::CLOUDFLARE_TOKEN => null,
     ];
 
     protected const CACHE = 'platform-settings';
@@ -111,6 +151,77 @@ class PlatformSettings
         return (bool) $this->get(self::CREDIT);
     }
 
+    /**
+     * Fills the configuration of the Cloudflare sandbox and its bucket from these
+     * settings, where the environment leaves it empty: what .env sets holds.
+     */
+    public function applyCloudflare(): void
+    {
+        $account = $this->text(self::CLOUDFLARE_ACCOUNT);
+        $disk = (string) config('review.cloudflare.disk');
+        $values = [
+            'review.cloudflare.account' => $account,
+            'review.cloudflare.api_token' => $this->secret(self::CLOUDFLARE_API_TOKEN),
+            'review.cloudflare.worker' => $this->text(self::CLOUDFLARE_WORKER),
+            'review.cloudflare.url' => $this->text(self::CLOUDFLARE_URL),
+            'review.cloudflare.token' => $this->secret(self::CLOUDFLARE_TOKEN),
+            "filesystems.disks.{$disk}.key" => $this->text(self::R2_ACCESS_KEY_ID),
+            "filesystems.disks.{$disk}.secret" => $this->secret(self::R2_SECRET_ACCESS_KEY),
+            "filesystems.disks.{$disk}.bucket" => $this->text(self::CLOUDFLARE_BUCKET) ?? ($account === null ? null : self::DEFAULT_BUCKET),
+            "filesystems.disks.{$disk}.endpoint" => $account === null ? null : "https://{$account}.r2.cloudflarestorage.com",
+        ];
+        $changed = false;
+
+        foreach ($values as $key => $value) {
+            // Empty in the environment, or what these settings put there before.
+            $ours = blank(config($key)) || (array_key_exists($key, self::$applied) && self::$applied[$key] === config($key));
+
+            if ($value !== null && $ours && config($key) !== $value) {
+                config([$key => $value]);
+                self::$applied[$key] = $value;
+                $changed = true;
+            }
+        }
+
+        // A disk made before holds the keys it was made with.
+        if ($changed && $disk !== '') {
+            rescue(fn () => app('filesystem')->forgetDisk($disk), null, false);
+        }
+    }
+
+    /**
+     * What applyCloudflare() put in the configuration, so a later change to the
+     * settings replaces it, and never what the environment set.
+     *
+     * @var array<string, string>
+     */
+    protected static array $applied = [];
+
+    /**
+     * A secret as it was saved, or null when none is, or when it was encrypted
+     * with another APP_KEY.
+     */
+    public function secret(string $key): ?string
+    {
+        $value = $this->get($key);
+
+        try {
+            return is_string($value) && $value !== '' ? Crypt::decryptString($value) : null;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * A setting that is text, or null when it is empty.
+     */
+    public function text(string $key): ?string
+    {
+        $value = $this->get($key);
+
+        return is_string($value) && trim($value) !== '' ? trim($value) : null;
+    }
+
     public function get(string $key): mixed
     {
         return $this->all()[$key] ?? self::DEFAULTS[$key] ?? null;
@@ -135,6 +246,15 @@ class PlatformSettings
     public function save(array $values): void
     {
         foreach (array_intersect_key($values, self::DEFAULTS) as $key => $value) {
+            // A secret left empty is kept as it was; one that is given is kept encrypted.
+            if (in_array($key, self::SECRETS, true)) {
+                if (blank($value)) {
+                    continue;
+                }
+
+                $value = Crypt::encryptString((string) $value);
+            }
+
             PlatformSetting::query()->updateOrCreate(['key' => $key], ['value' => $value]);
         }
 
