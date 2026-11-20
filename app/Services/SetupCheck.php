@@ -394,7 +394,7 @@ class SetupCheck
                 $missing === [],
                 "{$title}: the bucket's keys",
                 "The disk {$diskName} on the bucket ".($bucket['R2_BUCKET'] ?? '').'.',
-                'Set '.implode(', ', $missing).'. In the Cloudflare dashboard: R2 → Manage API tokens → Create API token, with Object Read & Write on the bucket only. It shows the key id, the secret and the S3 endpoint (`https://<account id>.r2.cloudflarestorage.com`).',
+                'Set the account ID and the bucket\'s keys under Settings → Cloudflare sandboxes (or '.implode(', ', $missing).' in .env). In the Cloudflare dashboard: R2 → Manage API tokens → Create API token, with Object Read & Write on the bucket only. It shows the Access Key ID and the Secret Access Key.',
                 'Missing: '.implode(', ', $missing).'.',
             ),
         ];
