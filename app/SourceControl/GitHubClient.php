@@ -747,7 +747,8 @@ class GitHubClient implements FiltersSecrets, SourceControl
         $participants = [];
 
         foreach ($reviews as $review) {
-            $state = match ($review['state'] ?? null) {
+            // Upper case from the REST API, lower case in a webhook.
+            $state = match (strtoupper((string) ($review['state'] ?? ''))) {
                 'APPROVED' => Reviewers::APPROVED,
                 'CHANGES_REQUESTED' => Reviewers::CHANGES_REQUESTED,
                 'DISMISSED' => null,
@@ -778,7 +779,9 @@ class GitHubClient implements FiltersSecrets, SourceControl
      */
     public function getPullRequestReviews(string $id): array
     {
-        return array_values(array_filter((array) $this->request(10)->get($this->url("pulls/{$id}/reviews"), ['per_page' => 100])->throw()->json(), 'is_array'));
+        // Every page: each inline comment the review posts is a review of its own,
+        // and the newest, which say where a reviewer stands, come last.
+        return array_values(array_filter($this->all($this->url("pulls/{$id}/reviews")), 'is_array'));
     }
 
     /**

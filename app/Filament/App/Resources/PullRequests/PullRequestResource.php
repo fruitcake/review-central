@@ -220,8 +220,19 @@ class PullRequestResource extends Resource
             return [];
         }
 
-        return self::getEloquentQuery()->with('repository.tenant')->get()
-            ->filter(fn (Model $record): bool => $record instanceof OpenPullRequest && PullRequestTurn::of($record)->isFor($user))
+        $records = self::getEloquentQuery()->with('repository.tenant')->get();
+
+        // Each one's newest review, in one query rather than one per pull request.
+        $runs = ReviewRun::query()
+            ->whereIn('repository_id', $records->pluck('repository_id')->unique())
+            ->whereIn('pull_request_id', $records->pluck('pull_request_id')->unique())
+            ->orderBy('started_at')
+            ->get()
+            ->keyBy(fn (ReviewRun $run): string => $run->repository_id.':'.$run->pull_request_id);
+
+        return $records
+            ->filter(fn (Model $record): bool => $record instanceof OpenPullRequest
+                && PullRequestTurn::of($record, $runs->get($record->repository_id.':'.$record->pull_request_id))->isFor($user))
             ->modelKeys();
     }
 

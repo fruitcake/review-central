@@ -142,7 +142,7 @@ it('reads GitHub\'s reviews, which list only who has yet to review', function ()
     ];
 
     $deliver('pull_request', ['action' => 'review_requested', 'pull_request' => $pull([['login' => 'nora', 'id' => 5], ['login' => 'piet', 'id' => 6]])])->assertOk();
-    $deliver('pull_request_review', ['action' => 'submitted', 'review' => ['state' => 'APPROVED', 'user' => ['login' => 'nora', 'id' => 5], 'submitted_at' => '2026-11-19T11:00:00Z'],
+    $deliver('pull_request_review', ['action' => 'submitted', 'review' => ['state' => 'approved', 'user' => ['login' => 'nora', 'id' => 5], 'submitted_at' => '2026-11-19T11:00:00Z'],
         'pull_request' => $pull([['login' => 'piet', 'id' => 6]])])->assertOk();
 
     $record = OpenPullRequest::query()->sole();
