@@ -283,6 +283,13 @@ class ReviewSettings
             }
         }
 
+        // For a reviewer with no default model of its own, OpenCodeReview and Pi: the
+        // SDK's pick, Anthropic's smartest and OpenAI's default, read now.
+        $variables += array_filter([
+            'REVIEW_DEFAULT_MODEL_ANTHROPIC' => self::tierModels('anthropic')['smartest'] ?? null,
+            'REVIEW_DEFAULT_MODEL_OPENAI' => self::tierModels('openai')['default'] ?? null,
+        ]);
+
         return $variables;
     }
 

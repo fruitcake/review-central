@@ -70,7 +70,7 @@ class ReviewSettingsForm
                 ->defaultItems(0)
                 ->reorderable()
                 ->addActionLabel('Add reviewer')
-                ->helperText('Each pull request gets one of these, picked by share among those there is a key for, and keeps it for every push. A share of 0 runs only when nothing above it can. '
+                ->helperText('Each pull request gets one of these, picked by share among those there is a key for, and keeps it for every push. One with a share of 0 is a fallback: it runs only when none with a share can, the first of them in this order. '
                     .'One whose reviews have cost its monthly budget is passed over for the rest of the month: to use one until its budget is spent and another after, give the first a share and a budget and the second a share of 0. '
                     .($defaults === null ? 'Empty leaves it to the keys: Claude Code with an Anthropic key, else Codex.' : 'Empty uses the defaults.')),
             ...($withProviders ? [
@@ -211,7 +211,7 @@ class ReviewSettingsForm
             $provider = ReviewProvider::tryFrom((string) $entry['provider']);
             $share = (int) ($entry['share'] ?? 0);
             $notes = array_filter([
-                $share === 0 ? 'only when none above can run' : null,
+                $share === 0 ? 'only when none with a share can run' : null,
                 filled($entry['budget'] ?? null) ? 'up to '.Currency::showOwn((float) $entry['budget']).' a month' : null,
                 $provider !== null && ! in_array($provider->value, $keys, true) ? 'no key for it, so passed over' : null,
             ]);
@@ -245,8 +245,21 @@ class ReviewSettingsForm
         $last = $named === null || $value($effort) === null ? self::lastRun($provider) : null;
         $own = fn (?string $used): string => 'not set, '.$provider->text().' picks'.($used === null ? '' : " (the last review with it used {$used})");
 
+        // An effort left empty everywhere is the platform's, which the precheck sets.
+        $chosen = $value($effort) ?? self::platformEffort($provider);
+
         return 'model '.($named === null ? $own($last?->model) : $named.($tierModel === null ? '' : " (Laravel AI's, now {$tierModel})"))
-            .', effort '.(($chosen = $value($effort)) === null ? $own($last?->effort) : (ReviewEffort::tryFrom($chosen)?->text() ?? $chosen));
+            .', effort '.($chosen === null ? $own($last?->effort) : (ReviewEffort::tryFrom($chosen)?->text() ?? $chosen).($value($effort) === null ? " (the platform's default)" : ''));
+    }
+
+    /**
+     * The effort the precheck gives a reviewer whose effort nobody set.
+     */
+    protected static function platformEffort(ReviewProvider $provider): ?string
+    {
+        $effort = config("review.default_effort.{$provider->value}");
+
+        return is_string($effort) && $effort !== '' ? $effort : null;
     }
 
     /**
@@ -267,6 +280,21 @@ class ReviewSettingsForm
     protected static function placeholder(?ReviewSetting $defaults, string $field): string
     {
         $default = $defaults?->{$field};
+
+        // An effort left empty is the platform's default, which the precheck sets.
+        $provider = match (true) {
+            str_starts_with($field, 'claude_') => ReviewProvider::ClaudeCode,
+            str_starts_with($field, 'codex_') => ReviewProvider::CodexCli,
+            str_starts_with($field, 'ocr_') => ReviewProvider::Ocr,
+            default => null,
+        };
+        $platform = str_ends_with($field, '_effort') && $provider !== null ? self::platformEffort($provider) : null;
+        if ($platform !== null && ! $default instanceof ReviewEffort && blank($default)) {
+            $text = 'Not set: '.(ReviewEffort::tryFrom($platform)?->text() ?? $platform).", the platform's default";
+
+            return $defaults === null ? $text : 'As the team: '.lcfirst($text);
+        }
+
         // Left empty: not set, so the reviewer picks itself, the same way every
         // time; as opposed to the Laravel AI SDK's default, a tier picked by name.
         $auto = 'Not set: '.match (true) {

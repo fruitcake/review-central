@@ -155,7 +155,7 @@ it('sets each reviewer\'s model and effort under Review defaults, and says what 
         ])
         ->assertSee('Each pull request is reviewed by one of these')
         ->assertSee("model smartest (Laravel AI's, now claude-opus-5-5), effort High")
-        ->assertSee('only when none above can run')
+        ->assertSee('only when none with a share can run')
         ->assertSee('no key for it')
         ->call('save')
         ->assertHasNoFormErrors();
@@ -279,7 +279,7 @@ it('offers OpenCodeReview real model names only, which it passes on as they are'
 it('says what a reviewer left to itself ran on last, and takes the SDK\'s models where the API is asked directly', function () {
     Connection::factory()->anthropic()->create(['tenant_id' => $this->tenant->id]);
 
-    livewire(ReviewDefaults::class)->assertSee('model not set, Claude Code picks, effort not set, Claude Code picks');
+    livewire(ReviewDefaults::class)->assertSee("model not set, Claude Code picks, effort High (the platform's default)");
 
     $repository = Repository::factory()->create(['tenant_id' => $this->tenant->id]);
     ReviewRun::query()->forceCreate([
@@ -287,7 +287,7 @@ it('says what a reviewer left to itself ran on last, and takes the SDK\'s models
         'commit' => str_repeat('a', 40), 'status' => ReviewRun::STATUS_FINISHED, 'started_at' => now(), 'agent' => 'claude-code', 'model' => 'claude-opus-5-5', 'effort' => 'xhigh',
     ]);
 
-    livewire(ReviewDefaults::class)->assertSee('model not set, Claude Code picks (the last review with it used claude-opus-5-5), effort not set, Claude Code picks (the last review with it used xhigh)');
+    livewire(ReviewDefaults::class)->assertSee("model not set, Claude Code picks (the last review with it used claude-opus-5-5), effort High (the platform's default)");
 
     $tiers = ReviewSettings::tierModels('anthropic');
 

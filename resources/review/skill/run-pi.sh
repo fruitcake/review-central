@@ -100,18 +100,16 @@ OWN_KEY=$(key_variable "${PROVIDER:-none}") || {
 }
 
 # The model, when the review names none: the one the tenant set with the
-# provider's connection, or the one the other reviewers use, so a trial compares
-# the reviewer rather than the model.
+# provider's connection, or the Laravel AI SDK's pick for the provider.
 if [ -z "$MODEL" ]; then
   MODEL=$(eval "printf '%s' \"\${PI_REVIEW_MODEL_$(printf '%s' "$PROVIDER" | tr 'a-z' 'A-Z'):-}\"")
 fi
 if [ -z "$MODEL" ]; then
+  # The Laravel AI SDK's pick, as the review server sends it; the names after them
+  # for a step run without the server.
   case "$PROVIDER" in
-    anthropic) MODEL=claude-opus-5-5 ;;
-    openai)
-      MODEL=$(grep -m1 -E '^[[:space:]]*model[[:space:]]*=' "$HERE/codex-config.toml" 2>/dev/null \
-        | sed -E 's/^[^=]*=[[:space:]]*"?([^"]*)"?.*/\1/') || MODEL=""
-      ;;
+    anthropic) MODEL=${REVIEW_DEFAULT_MODEL_ANTHROPIC:-claude-opus-5-5} ;;
+    openai) MODEL=${REVIEW_DEFAULT_MODEL_OPENAI:-gpt-6.1-sol} ;;
   esac
 fi
 
