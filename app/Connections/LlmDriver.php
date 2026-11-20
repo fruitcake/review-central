@@ -51,9 +51,10 @@ interface LlmDriver extends ConnectionDriver
 
     /**
      * Where a pull request stands, in a few sentences from a small model: what the
-     * one at turn has to do, and what it changes and went through.
+     * one at turn has to do, and what it changes and went through. The model
+     * the team picked, or the provider's small one when it picked none.
      *
      * @return array{next_step: string, summary: string}|null null when the provider gave no such answer
      */
-    public function describes(Connection $connection, string $instructions, string $text): ?array;
+    public function describes(Connection $connection, string $instructions, string $text, ?string $model = null): ?array;
 }

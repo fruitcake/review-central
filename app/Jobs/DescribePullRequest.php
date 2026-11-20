@@ -11,6 +11,7 @@ use App\Llm\OpenAiDriver;
 use App\Models\Connection;
 use App\Models\OpenPullRequest;
 use App\Services\PullRequestTurn;
+use App\Services\ReviewSettings;
 use App\SourceControl\Reviewers;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -44,6 +45,8 @@ class DescribePullRequest implements ShouldQueue
     public static function wanted(OpenPullRequest $record): bool
     {
         return (bool) config('review.turn.notes')
+            // The team's own choice, under its review defaults: on unless it turned it off.
+            && ReviewSettings::defaults($record->repository->tenant)->turn_notes !== 'false'
             && ($record->note['key'] ?? null) !== PullRequestTurn::of($record)->key
             && self::connection($record) !== null;
     }
@@ -67,7 +70,9 @@ class DescribePullRequest implements ShouldQueue
         $turn = PullRequestTurn::of($record, $run);
 
         try {
-            $note = $driver->describes($connection, self::instructions(), $this->material($record, $turn));
+            // The team's model, or a tier read for this provider; the provider's small one where it picked none.
+            $model = ReviewSettings::defaults($record->repository->tenant)->turn_model;
+            $note = $driver->describes($connection, self::instructions(), $this->material($record, $turn), filled($model) ? $model : null);
         } catch (Throwable $exception) {
             report($exception);
 

@@ -144,9 +144,9 @@ class OpenAiDriver implements ExplainsSetup, LlmDriver
         return $answer instanceof BooleanAnswer ? $answer->isTrue() : null;
     }
 
-    public function describes(Connection $connection, string $instructions, string $text): ?array
+    public function describes(Connection $connection, string $instructions, string $text, ?string $model = null): ?array
     {
-        $answer = (new Describer($instructions))->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: (string) (config('review.turn.openai_model') ?: ReviewSettings::tierModels('openai')['cheapest'] ?? 'gpt-6-luna'), timeout: 60);
+        $answer = (new Describer($instructions))->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: $model !== null ? ReviewSettings::model('openai', $model) : (string) (config('review.turn.openai_model') ?: ReviewSettings::tierModels('openai')['cheapest'] ?? 'gpt-6-luna'), timeout: 60);
 
         return Describer::read($answer);
     }

@@ -85,6 +85,20 @@ class ReviewSettingsForm
                     self::model($defaults, 'ocr_model', array_diff_key(self::claudeModels() + self::openAiModels(), array_flip([...ReviewSettings::TIERS, ...self::CLAUDE_ALIASES]))),
                     self::effort($defaults, 'ocr_effort'),
                 ]),
+            // The team's, for the pull request overview: not a repository's.
+            ...($defaults === null ? [Fieldset::make('Notes on whose turn')
+                ->columns(2)
+                ->schema([
+                    Select::make('turn_notes')
+                        ->label('Write them')
+                        ->options(['true' => 'On', 'false' => 'Off'])
+                        ->placeholder('On')
+                        ->helperText('Under Pull requests, a small model says in a sentence or two what the one at turn has to do, and sums up the pull request, each time its state changes. Off, the fixed rules\' words show.'),
+                    self::modelField('turn_model', ['cheapest' => 'cheapest (Laravel AI)', 'default' => 'default (Laravel AI)', 'smartest' => 'smartest (Laravel AI)'] + array_diff_key(self::claudeModels() + self::openAiModels(), array_flip([...ReviewSettings::TIERS, ...self::CLAUDE_ALIASES])))
+                        ->label('With model')
+                        ->placeholder('The provider\'s cheapest')
+                        ->helperText('A tier is read for the AI provider that writes them: the first of Anthropic, OpenAI, the others. A model by name has to be one of that provider.'),
+                ])] : []),
             Select::make('language')
                 ->label('Language')
                 ->options(ReviewSettings::LANGUAGES)
@@ -229,9 +243,9 @@ class ReviewSettingsForm
 
         // Left to the reviewer, it is known only once a review ran: the newest says what it took.
         $last = $named === null || $value($effort) === null ? self::lastRun($provider) : null;
-        $own = fn (?string $used): string => 'its own default'.($used === null ? '' : " (the last review with it used {$used})");
+        $own = fn (?string $used): string => 'auto, as '.$provider->text().' picks'.($used === null ? '' : " (the last review with it used {$used})");
 
-        return 'model '.($named === null ? $own($last?->model) : $named.($tierModel === null ? '' : " (now {$tierModel})"))
+        return 'model '.($named === null ? $own($last?->model) : $named.($tierModel === null ? '' : " (Laravel AI's, now {$tierModel})"))
             .', effort '.(($chosen = $value($effort)) === null ? $own($last?->effort) : (ReviewEffort::tryFrom($chosen)?->text() ?? $chosen));
     }
 
@@ -253,12 +267,21 @@ class ReviewSettingsForm
     protected static function placeholder(?ReviewSetting $defaults, string $field): string
     {
         $default = $defaults?->{$field};
+        // Left empty: the reviewer's own pick, its "auto", as opposed to the
+        // Laravel AI SDK's default, which is a tier to pick by name.
+        $auto = 'Auto: '.match (true) {
+            str_starts_with($field, 'claude_advisor') => 'no advisor',
+            str_starts_with($field, 'claude_') => 'Claude Code picks',
+            str_starts_with($field, 'codex_') => 'Codex picks',
+            str_starts_with($field, 'ocr_') => 'OpenCodeReview picks',
+            default => 'the reviewer picks',
+        };
 
         return match (true) {
-            $defaults === null => 'The reviewer decides',
-            $default instanceof ReviewEffort => 'Default: '.$default->text(),
-            is_string($default) && $default !== '' => 'Default: '.$default,
-            default => 'Default: the reviewer decides',
+            $defaults === null => $auto,
+            $default instanceof ReviewEffort => 'As the team: '.$default->text(),
+            is_string($default) && $default !== '' => 'As the team: '.$default,
+            default => 'As the team: '.lcfirst($auto),
         };
     }
 
@@ -347,7 +370,7 @@ class ReviewSettingsForm
         $tiers = [];
 
         foreach ($models as $tier => $model) {
-            $tiers[$tier] = "{$tier}: now {$model}";
+            $tiers[$tier] = "{$tier} (Laravel AI): now {$model}";
         }
 
         foreach ($models as $tier => $model) {
@@ -392,7 +415,7 @@ class ReviewSettingsForm
     public static function state(?ReviewSetting $setting): array
     {
         return $setting === null ? [] : collect($setting->attributesToArray())
-            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes'])
+            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'turn_notes', 'turn_model'])
             ->all();
     }
 }

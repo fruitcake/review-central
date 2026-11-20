@@ -199,9 +199,9 @@ class AnthropicDriver implements ExplainsSetup, LlmDriver
         return is_bool($answer['answer'] ?? null) ? $answer['answer'] : null;
     }
 
-    public function describes(Connection $connection, string $instructions, string $text): ?array
+    public function describes(Connection $connection, string $instructions, string $text, ?string $model = null): ?array
     {
-        $answer = (new Describer($instructions))->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: self::smallModel(), timeout: 60);
+        $answer = (new Describer($instructions))->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: $model === null ? self::smallModel() : ReviewSettings::model('anthropic', $model), timeout: 60);
 
         return Describer::read($answer);
     }

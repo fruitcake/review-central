@@ -5,10 +5,12 @@ use App\Enums\ReviewCommandAccess;
 use App\Filament\App\Pages\ReviewDefaults;
 use App\Filament\App\Resources\AiProviders\Pages\ManageAiProviders;
 use App\Filament\Components\ReviewSettingsForm;
+use App\Jobs\DescribePullRequest;
 use App\Llm\AnthropicDriver;
 use App\Models\Connection;
 use App\Models\ExchangeRate;
 use App\Models\ModelPrice;
+use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Models\Tenant;
@@ -152,7 +154,7 @@ it('sets each reviewer\'s model and effort under Review defaults, and says what 
             'claude_model' => 'smartest', 'claude_effort' => 'high', 'codex_model' => 'gpt-kept',
         ])
         ->assertSee('Each pull request is reviewed by one of these')
-        ->assertSee('model smartest (now claude-opus-5-5), effort High')
+        ->assertSee("model smartest (Laravel AI's, now claude-opus-5-5), effort High")
         ->assertSee('only when none above can run')
         ->assertSee('no key for it')
         ->call('save')
@@ -220,7 +222,7 @@ it('offers the models it knows to pick from, newest first, and keeps one typed t
     // The aliases first, then the SDK's smartest, default and cheapest, then the
     // other IDs; no dated snapshot, no provider's prefix, no other provider's.
     expect(array_keys($claude))->toBe(['opus', 'sonnet', 'haiku', 'smartest', 'default', 'cheapest', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-opus-5'])
-        ->and($claude['smartest'])->toBe('smartest: now claude-opus-5-5')
+        ->and($claude['smartest'])->toBe('smartest (Laravel AI): now claude-opus-5-5')
         ->and($claude['claude-opus-5-5'])->toBe('claude-opus-5-5 (smartest)')
         ->and(array_keys(ReviewSettingsForm::openAiModels()))->toBe(['smartest', 'default', 'cheapest', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna']);
 
@@ -277,7 +279,7 @@ it('offers OpenCodeReview real model names only, which it passes on as they are'
 it('says what a reviewer left to itself ran on last, and takes the SDK\'s models where the API is asked directly', function () {
     Connection::factory()->anthropic()->create(['tenant_id' => $this->tenant->id]);
 
-    livewire(ReviewDefaults::class)->assertSee('model its own default, effort its own default');
+    livewire(ReviewDefaults::class)->assertSee('model auto, as Claude Code picks, effort auto, as Claude Code picks');
 
     $repository = Repository::factory()->create(['tenant_id' => $this->tenant->id]);
     ReviewRun::query()->forceCreate([
@@ -285,10 +287,30 @@ it('says what a reviewer left to itself ran on last, and takes the SDK\'s models
         'commit' => str_repeat('a', 40), 'status' => ReviewRun::STATUS_FINISHED, 'started_at' => now(), 'agent' => 'claude-code', 'model' => 'claude-opus-5-5', 'effort' => 'xhigh',
     ]);
 
-    livewire(ReviewDefaults::class)->assertSee('model its own default (the last review with it used claude-opus-5-5), effort its own default (the last review with it used xhigh)');
+    livewire(ReviewDefaults::class)->assertSee('model auto, as Claude Code picks (the last review with it used claude-opus-5-5), effort auto, as Claude Code picks (the last review with it used xhigh)');
 
     $tiers = ReviewSettings::tierModels('anthropic');
 
     expect(AnthropicDriver::defaultModel())->toBe($tiers['smartest'])
         ->and(AnthropicDriver::smallModel())->toBe($tiers['cheapest']);
+});
+
+it('lets a team turn the notes on whose turn off, and pick the model they are written with', function () {
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->tenant->id]);
+    $repository = Repository::factory()->create(['tenant_id' => $this->tenant->id]);
+    $record = OpenPullRequest::query()->forceCreate(['repository_id' => $repository->id, 'pull_request_id' => 7, 'title' => 'Export']);
+    config(['review.turn.notes' => true]);
+
+    expect(DescribePullRequest::wanted($record))->toBeTrue();
+
+    livewire(ReviewDefaults::class)
+        ->fillForm(['turn_notes' => 'false', 'turn_model' => 'smartest'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $defaults = ReviewSettings::defaults($this->tenant)->refresh();
+
+    expect($defaults->turn_notes)->toBe('false')
+        ->and($defaults->turn_model)->toBe('smartest')
+        ->and(DescribePullRequest::wanted($record->refresh()))->toBeFalse();
 });

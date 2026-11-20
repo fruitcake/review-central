@@ -126,7 +126,8 @@ class ReviewSettings
     public static function saveDefaults(Tenant $tenant, array $data): void
     {
         $setting = self::defaults($tenant);
-        $setting->fill(array_intersect_key($data, self::VARIABLES + ['providers' => true, 'follow_ups' => true]));
+        // The notes on whose turn are the team's alone, and no repository's.
+        $setting->fill(array_intersect_key($data, self::VARIABLES + ['providers' => true, 'follow_ups' => true, 'turn_notes' => true, 'turn_model' => true]));
         $setting->save();
     }
 
