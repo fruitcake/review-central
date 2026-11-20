@@ -136,6 +136,7 @@ The estimate is kept per review (`review_runs.sandbox_cost`) and shown on its pa
 - **The first review installs the tools**, which takes a few minutes; the ones after it start from the snapshot. The reviewer's own CLI (Claude Code, Codex, OpenCodeReview, Pi) is installed by its script when the image has none.
 - **PHP 8.1 to 8.5**, where the reviewer's Docker image goes back to 5.6. An older repository is reviewed on the newest; Composer runs with `--ignore-platform-reqs`, as it does on Docker.
 - **The Composer cache is the destination branch's `vendor/`**, one per repository, in the bucket under `review/cache/<repository>/`. A review fetches it, and Composer installs only what the pull request's lock changes. It is kept again only by a review whose lock is the destination branch's, written right after the install, so what is kept is never a pull request's own packages. Composer's own download cache does not travel.
+- **The session travels, the caches do not.** A follow-up review takes the reviewer's session along (a few MB), not the CLIs and caches in its home (`.local`, `.npm`, `.tools`, `.cache`, `.composer`, together hundreds of MB): the sandbox installs a newer CLI than its snapshot has itself, in seconds.
 - **No memory figure**: a sandbox does not say what it used.
 - **The reviewer's key is in the sandbox**, as it is in the Docker container. The sandbox has the internet and no credential for the repository's host.
 

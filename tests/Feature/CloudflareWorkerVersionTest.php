@@ -1,6 +1,7 @@
 <?php
 
 use App\Runners\Container\CloudflareSandbox;
+use App\Runners\Container\ReviewSessions;
 
 /*
  * The setup page tells a Worker that was not deployed again after a change by the
@@ -9,7 +10,7 @@ use App\Runners\Container\CloudflareSandbox;
  * Changed cloudflare/worker/src/index.ts? Raise WORKER_VERSION in it, then put the
  * hash this test prints here, with the version.
  */
-const WORKER_SOURCE = ['version' => '2026-11-19.2', 'hash' => '09463cbc9d7a18ae012480365671ba3e802e2b635ab4e7a79174a828ddfa7567'];
+const WORKER_SOURCE = ['version' => '2026-11-20.3', 'hash' => '14435c323d88064675ec4af39ab92728ad446d4b2cb70cb0b73df2914d8ca897'];
 
 it('raises the Worker\'s version with every change to its code', function () {
     $source = (string) file_get_contents(base_path('cloudflare/worker/src/index.ts'));
@@ -17,4 +18,12 @@ it('raises the Worker\'s version with every change to its code', function () {
 
     expect(CloudflareSandbox::workerVersion())->toBe(WORKER_SOURCE['version'], 'WORKER_VERSION in index.ts and here differ.')
         ->and($hash)->toBe(WORKER_SOURCE['hash'], "cloudflare/worker/src/index.ts changed: raise WORKER_VERSION there, and set version and hash here (the hash is now {$hash}).");
+});
+
+it('leaves the same caches out of the reviewer\'s home as review-central', function () {
+    $source = (string) file_get_contents(base_path('cloudflare/worker/src/index.ts'));
+
+    preg_match('/^const HOME_CACHES = \[(.*)\];$/m', $source, $match);
+
+    expect(json_decode('['.($match[1] ?? '').']', true))->toBe(ReviewSessions::CACHES);
 });
