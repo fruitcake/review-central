@@ -41,7 +41,11 @@ class ReviewComparisons
             try {
                 $row = ['ignore_existing' => $ignoreExisting] + $row;
 
-                return $row + ['build' => $this->trials->begin($run->tenant, $url, $row)['build']];
+                $started = $this->trials->begin($run->tenant, $url, $row);
+
+                // The repository the trial runs under, which with two connections for
+                // one workspace need not be the review's own.
+                return $row + ['build' => $started['build'], 'repository_id' => (int) $started['repository']->getKey()];
             } catch (ReviewTrialRefused $exception) {
                 return $row + ['error' => $exception->getMessage()];
             }
@@ -104,15 +108,28 @@ class ReviewComparisons
     {
         $source = $comparison->repository->sourceControl();
         $pullRequest = $source->getPullRequest((string) $comparison->pull_request_id) ?? [];
+        $columns = $comparison->columns()->filter(fn (array $column): bool => $column['run'] !== null);
+
+        // The diff read is the open pull request's as it is now. A review of another
+        // commit is judged against code it did not read, so it is said with it; when
+        // no review is of the head, the diff is none of theirs.
+        $head = ($pullRequest['state'] ?? null) === 'OPEN' ? (string) ($pullRequest['source']['commit']['hash'] ?? '') : '';
+        $older = $head === '' ? [] : $columns
+            ->filter(fn (array $column): bool => ! ReviewContext::isSameCommit($column['run']->commit, $head))
+            ->keys()
+            ->all();
+
+        if ($older !== [] && count($older) === $columns->count()) {
+            throw new RuntimeException('The pull request has moved on to '.substr($head, 0, 12).' since these reviews, so its diff is not what they read. Start a new comparison from its newest review.');
+        }
+
         $ids = [];
         $reviews = [];
 
-        foreach ($comparison->columns() as $label => $column) {
-            if ($column['run'] === null) {
-                continue;
-            }
-
-            $lines = ["## Review {$label}: ".self::setup($column['run'])];
+        foreach ($columns as $label => $column) {
+            $lines = ["## Review {$label}: ".self::setup($column['run'])
+                .(in_array($label, $older, true) ? '
+Of an older commit, '.substr($column['run']->commit, 0, 12).': a finding about code this diff no longer has is unclear, not false.' : '')];
 
             foreach (array_values(array_filter($column['run']->findings ?? [], is_array(...))) as $index => $finding) {
                 $id = "{$label}-".($finding['id'] ?? 'F'.($index + 1));

@@ -22,7 +22,7 @@ use Illuminate\Support\Collection;
  * @property int $pull_request_id
  * @property int|null $review_run_id
  * @property int|null $user_id
- * @property array<int, array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool, ignore_existing?: bool, build?: int|null, error?: string|null}> $rows
+ * @property array<int, array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool, ignore_existing?: bool, build?: int|null, repository_id?: int, error?: string|null}> $rows
  * @property string|null $analysis_status running, finished or failed
  * @property string|null $analysis_model
  * @property array{summary?: string, findings?: array<int, array{title: string, path: string|null, verdict: string, found_by: array<int, string>, reason: string}>}|null $analysis
@@ -77,22 +77,28 @@ class ReviewComparison extends Model
      * The columns: the review it was started from, labelled A, then each setup's
      * run as B, C and on, or null for one whose run has not started or could not.
      *
-     * @return Collection<string, array{label: string, run: ReviewRun|null, row: array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool, ignore_existing?: bool, build?: int|null, error?: string|null}|null}>
+     * @return Collection<string, array{label: string, run: ReviewRun|null, row: array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool, ignore_existing?: bool, build?: int|null, repository_id?: int, error?: string|null}|null}>
      */
     public function columns(): Collection
     {
-        $builds = array_values(array_filter(array_map(fn (array $row): ?int => $row['build'] ?? null, $this->rows)));
+        $started = array_filter($this->rows, fn (array $row): bool => isset($row['build']));
         $runs = ReviewRun::query()
-            ->where('repository_id', $this->repository_id)
-            ->whereIn('build_number', $builds)
+            ->where(function ($query) use ($started): void {
+                // Nothing started yet matches nothing, rather than every run.
+                $query->whereRaw('1 = 0');
+
+                foreach ($started as $row) {
+                    $query->orWhere(fn ($run) => $run->where('repository_id', $row['repository_id'] ?? $this->repository_id)->where('build_number', $row['build']));
+                }
+            })
             ->get()
-            ->keyBy('build_number');
+            ->keyBy(fn (ReviewRun $run): string => "{$run->repository_id}:{$run->build_number}");
 
         $columns = ['A' => ['label' => 'A', 'run' => $this->reviewRun, 'row' => null]];
 
         foreach (array_values($this->rows) as $index => $row) {
             $label = range('B', 'Z')[$index] ?? 'R'.($index + 2);
-            $run = isset($row['build']) ? $runs->get($row['build']) : null;
+            $run = isset($row['build']) ? $runs->get(($row['repository_id'] ?? $this->repository_id).":{$row['build']}") : null;
             $columns[$label] = ['label' => $label, 'run' => $run instanceof ReviewRun ? $run : null, 'row' => $row];
         }
 

@@ -162,3 +162,76 @@ it('is for the tenant\'s admins only', function () {
     livewire(ViewReviewRun::class, ['record' => $this->base->uuid])->assertActionHidden('compare');
     livewire(ListReviewComparisons::class)->assertForbidden();
 });
+
+it('finds a trial\'s run under the repository it ran in, which need not be the review\'s', function () {
+    $other = Repository::factory()->create(['tenant_id' => $this->repository->tenant_id, 'slug' => 'shop']);
+    ($this->run)(51, [['id' => 'F1', 'title' => 'In this repository']]);
+    ($this->run)(51, [['id' => 'F1', 'title' => 'In the other one']], attributes: ['repository_id' => $other->id]);
+
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [['build' => 51, 'repository_id' => $other->id]],
+    ]);
+
+    expect($comparison->columns()['B']['run']->findings[0]['title'])->toBe('In the other one');
+});
+
+it('will not judge reviews against a diff none of them read, and says which read an older one', function () {
+    $connection = Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    $head = str_repeat('c', 12);
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570/diff' => Http::response("diff --git a/app/Export.php b/app/Export.php\n+return Invoice::all();\n"),
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570' => function () use (&$head) {
+            return Http::response(['id' => 570, 'title' => 'Add the export', 'state' => 'OPEN', 'source' => ['branch' => ['name' => 'feature/export'], 'commit' => ['hash' => $head]]]);
+        },
+    ]);
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [['build' => 51]],
+    ]);
+    ($this->run)(51, [], attributes: ['commit' => str_repeat('b', 40)]);
+
+    // Moved on past both.
+    AnalyzeReviewComparison::dispatchSync($comparison->id, $connection->id);
+
+    expect($comparison->refresh()->analysis_status)->toBe(ReviewComparison::ANALYSIS_FAILED)
+        ->and($comparison->analysis_error)->toContain('The pull request has moved on to cccccccccccc');
+
+    // At B's commit: A is said to be of an older one.
+    $head = str_repeat('b', 12);
+    Comparer::fake([['summary' => 'Fine.', 'findings' => []]]);
+    AnalyzeReviewComparison::dispatchSync($comparison->id, $connection->id);
+
+    expect($comparison->refresh()->analysis_status)->toBe(ReviewComparison::ANALYSIS_FINISHED);
+    Comparer::assertPrompted(fn ($prompt): bool => str_contains($prompt->prompt, "## Review A: claude-code · claude-opus-5-5 · effort high\nOf an older commit, aaaaaaaaaaaa")
+        && ! str_contains($prompt->prompt, "Review B: claude-code · claude-opus-5-5 · effort high\nOf an older commit"));
+});
+
+it('runs the analysis on the reviews\' queue, and leaves it to try again when it cannot finish', function () {
+    config(['review.container.queue' => 'reviews']);
+    Queue::fake();
+    $connection = Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [], 'analysis_status' => ReviewComparison::ANALYSIS_RUNNING,
+    ]);
+
+    AnalyzeReviewComparison::dispatch($comparison->id, $connection->id);
+    Queue::assertPushedOn('reviews', AnalyzeReviewComparison::class);
+
+    // Its AI provider removed while it waited.
+    $connection->delete();
+    (new AnalyzeReviewComparison($comparison->id, $connection->id))->handle(app(ReviewComparisons::class));
+
+    expect($comparison->refresh()->analysis_status)->toBe(ReviewComparison::ANALYSIS_FAILED)
+        ->and($comparison->analysis_error)->toContain('is gone');
+
+    // A job that died.
+    $comparison->update(['analysis_status' => ReviewComparison::ANALYSIS_RUNNING]);
+    (new AnalyzeReviewComparison($comparison->id, $connection->id))->failed(new RuntimeException('Timed out'));
+
+    expect($comparison->refresh()->analysis_status)->toBe(ReviewComparison::ANALYSIS_FAILED)
+        ->and($comparison->analysis_error)->toContain('Timed out');
+
+    livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])->assertActionEnabled('analyze');
+});
