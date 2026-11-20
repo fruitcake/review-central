@@ -41,8 +41,8 @@ it('leaves a first review and a trial as they are', function () {
 });
 
 it('keeps only new HIGHs once the review says it is not converging, and sets the rest under Open questions', function () {
-    ($this->rounds)(1);
     $open = ['id' => 'F2', 'status' => 'open', 'severity' => 'MEDIUM', 'title' => 'Still open'];
+    ($this->rounds)(1, [$open]);
 
     $applied = app(ReviewFollowUps::class)->apply(($this->current)(), [$this->medium, $this->high, $open], "The review is not converging: look at the approach.\n\n1 high, 2 medium.\n\n### Open questions\n\n- Is the cache shared?");
 
@@ -63,8 +63,8 @@ it('lets a new finding below HIGH hold no merge from the third follow-up on, in 
 
 it('records nothing new after the team\'s most follow-up rounds, a HIGH neither', function () {
     ReviewSettings::saveDefaults($this->repository->tenant, ['max_rounds' => 2]);
-    ($this->rounds)(3);
     $open = ['id' => 'F2', 'status' => 'open', 'severity' => 'HIGH', 'title' => 'Still open'];
+    ($this->rounds)(3, [$open]);
 
     $applied = app(ReviewFollowUps::class)->apply(($this->current)(), [$this->high, $open], '1 high.');
 
@@ -75,8 +75,6 @@ it('records nothing new after the team\'s most follow-up rounds, a HIGH neither'
 it('passes a late follow-up whose only new finding is below HIGH', function () {
     ($this->rounds)(3);
     $run = ($this->run)(['status' => ReviewRun::STATUS_RUNNING, 'started_at' => now(), 'build_number' => 99]);
-    $this->repository->integration->update(['settings' => ['workspace' => 'acme', ReadOnlyClient::SETTING => ReadOnlyClient::READ]]);
-
     app(ReviewFiling::class)->file($this->repository->refresh(), [
         'branch' => 'feature/export', 'commit' => $run->commit, 'build' => 99, 'pull_request_id' => 7,
         'result' => 'FAILED', 'summary' => '1 medium.', 'findings' => [$this->medium], 'publish' => false,
@@ -86,4 +84,48 @@ it('passes a late follow-up whose only new finding is below HIGH', function () {
 
     expect($filed->result)->toBe('PASSED')
         ->and($filed->findings[0]['advisory'])->toBeTrue();
+});
+
+it('leaves a connection that keeps its reviews here alone, where every review reads the change afresh', function () {
+    $this->repository->integration->update(['settings' => ['workspace' => 'acme', ReadOnlyClient::SETTING => ReadOnlyClient::READ]]);
+    ReviewSettings::saveDefaults($this->repository->tenant, ['max_rounds' => 1]);
+    ($this->rounds)(3);
+
+    expect(app(ReviewFollowUps::class)->apply(($this->current)()->refresh(), [$this->high], '1 high.')['findings'])->toBe([$this->high]);
+});
+
+it('takes no advisory from the reviewer, and holds the merge on a first review\'s HIGH', function () {
+    $run = ($this->run)(['status' => ReviewRun::STATUS_RUNNING, 'started_at' => now(), 'build_number' => 98]);
+
+    app(ReviewFiling::class)->file($this->repository->refresh(), [
+        'branch' => 'feature/export', 'commit' => $run->commit, 'build' => 98, 'pull_request_id' => 7,
+        'result' => 'PASSED', 'summary' => '1 high.', 'findings' => [$this->high + ['advisory' => true]], 'publish' => false,
+    ]);
+
+    expect($run->refresh()->result)->toBe('FAILED')
+        ->and($run->findings[0])->not->toHaveKey('advisory');
+});
+
+it('counts a finding called open that was never reported as new, keeps advisory across a round it was left out of, and recounts the summary', function () {
+    ReviewSettings::saveDefaults($this->repository->tenant, ['max_rounds' => 3]);
+    // F4 was advisory two rounds ago and left out of the last one.
+    ($this->run)(['started_at' => now()->subHours(9), 'findings' => []]);
+    ($this->run)(['started_at' => now()->subHours(8), 'findings' => []]);
+    ($this->run)(['started_at' => now()->subHours(7), 'findings' => [['id' => 'F4', 'severity' => 'MEDIUM', 'status' => 'new', 'advisory' => true]]]);
+    ($this->run)(['started_at' => now()->subHours(6), 'findings' => []]);
+    $back = ['id' => 'F4', 'status' => 'open', 'severity' => 'MEDIUM', 'title' => 'Back again'];
+    $claimed = ['id' => 'F9', 'status' => 'open', 'severity' => 'HIGH', 'title' => 'Never reported'];
+
+    $applied = app(ReviewFollowUps::class)->apply(($this->current)(), [$back, $claimed], "1 high, 1 medium.\n\nThe rest.");
+
+    expect(array_column($applied['findings'], 'id'))->toBe(['F4'])
+        ->and($applied['findings'][0]['advisory'])->toBeTrue()
+        ->and($applied['summary'])->toStartWith("1 medium, nothing blocking.\n\nThe rest.")
+        ->and($applied['summary'])->toContain('Never reported: high, set aside because this pull request has had its 3 follow-up rounds.');
+});
+
+it('hears the review say it is not converging in Dutch', function () {
+    ($this->rounds)(1);
+
+    expect(app(ReviewFollowUps::class)->apply(($this->current)(), [$this->medium], "De review convergeert niet.\n\n1 medium.")['findings'])->toBe([]);
 });

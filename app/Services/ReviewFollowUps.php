@@ -31,7 +31,7 @@ class ReviewFollowUps
     public const MAX_ROUNDS = 5;
 
     /** How the review says it is not converging, in English and Dutch. */
-    public const NOT_CONVERGING = '/\bnot\s+converging\b|\bniet\s+(meer\s+)?(convergeert|convergerend)\b/i';
+    public const NOT_CONVERGING = '/\bnot\s+converging\b|\bniet\s+(meer\s+)?(convergeert|convergerend)\b|\bconvergeert\s+(nog\s+)?niet\b/i';
 
     /**
      * @param  array<int, array<string, mixed>>  $findings  as normalised for filing
@@ -39,7 +39,10 @@ class ReviewFollowUps
      */
     public function apply(ReviewRun $run, array $findings, ?string $summary): array
     {
-        if ($run->custom || $run->pull_request_id === null) {
+        // A connection that keeps its reviews here has no thread of findings for a
+        // review to follow up on: each reads the change afresh, and nothing it says
+        // reaches an agent that pushes again.
+        if ($run->custom || $run->pull_request_id === null || ! rescue(fn (): bool => $run->repository->sourceControl()->publishes(), true, false)) {
             return ['findings' => $findings, 'summary' => $summary];
         }
 
@@ -58,11 +61,19 @@ class ReviewFollowUps
             return ['findings' => $findings, 'summary' => $summary];
         }
 
-        // What a round before left as not holding the merge, by finding id.
-        $advisory = collect($earlier->first()->findings ?? [])
-            ->filter(fn (array $finding): bool => ($finding['advisory'] ?? false) === true)
-            ->pluck('id')
-            ->all();
+        // Every finding id reported before, with whether its latest report left it
+        // as not holding the merge: one left out for a round keeps what it was.
+        $known = [];
+
+        foreach ($earlier as $previous) {
+            foreach (array_filter($previous->findings ?? [], is_array(...)) as $finding) {
+                $id = (string) ($finding['id'] ?? '');
+
+                if ($id !== '' && ! array_key_exists($id, $known)) {
+                    $known[$id] = ($finding['advisory'] ?? false) === true;
+                }
+            }
+        }
 
         $notConverging = is_string($summary) && preg_match(self::NOT_CONVERGING, $summary) === 1;
         $max = ReviewSettings::maxRounds($run->repository);
@@ -70,22 +81,27 @@ class ReviewFollowUps
         $late = $earlier->count() >= self::ADVISORY_FROM;
         $kept = [];
         $set = [];
+        $changed = false;
 
         foreach ($findings as $finding) {
             $high = in_array(strtoupper((string) ($finding['severity'] ?? '')), ReviewPublisher::HIGH_SEVERITIES, true);
-            $new = ($finding['status'] ?? 'new') === 'new';
+            $id = (string) ($finding['id'] ?? '');
+            // New as the server knows it: called open, but never reported, is new too.
+            $new = ($finding['status'] ?? 'new') === 'new' || ! array_key_exists($id, $known);
 
             if ($new && ($over || (! $high && $notConverging))) {
-                $set[] = '- '.($finding['title'] ?? $finding['id'] ?? 'A finding')
+                $set[] = '- '.($finding['title'] ?? ($id ?: 'A finding'))
                     .(filled($finding['path'] ?? null) ? " (`{$finding['path']}".(filled($finding['line'] ?? null) ? ":{$finding['line']}" : '').'`)' : '')
                     .': '.strtolower((string) ($finding['severity'] ?? '')).', set aside because '
                     .($over ? "this pull request has had its {$max} follow-up rounds" : 'the review is not converging').'.';
+                $changed = true;
 
                 continue;
             }
 
-            if (! $high && (($new && $late) || in_array($finding['id'] ?? null, $advisory, true))) {
+            if (! $high && (($new && $late) || ($known[$id] ?? false))) {
                 $finding['advisory'] = true;
+                $changed = true;
             }
 
             $kept[] = $finding;
@@ -95,7 +111,40 @@ class ReviewFollowUps
             $summary = self::withOpenQuestions((string) $summary, $set);
         }
 
+        // The count the summary opens with, as it now stands.
+        if ($changed && is_string($summary)) {
+            $summary = self::recounted($summary, $kept);
+        }
+
         return ['findings' => $kept, 'summary' => $summary];
+    }
+
+    /**
+     * The summary with its line of counts ("1 high, 2 medium") told again from the
+     * findings that stand: what was set aside is gone from it, and "nothing
+     * blocking" said where nothing holds the merge any more.
+     *
+     * @param  array<int, array<string, mixed>>  $findings
+     */
+    protected static function recounted(string $summary, array $findings): string
+    {
+        $open = array_filter($findings, fn (array $finding): bool => in_array($finding['status'] ?? 'new', ReviewPublisher::OPEN, true));
+        $counts = [];
+
+        foreach (['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as $severity) {
+            $n = count(array_filter($open, fn (array $finding): bool => strtoupper((string) ($finding['severity'] ?? '')) === $severity));
+
+            if ($n > 0) {
+                $counts[] = $n.' '.strtolower($severity);
+            }
+        }
+
+        $blocking = array_filter($open, fn (array $finding): bool => ReviewPublisher::blocks($finding, ReviewPublisher::DEFAULT_FAIL_ON));
+        $line = $counts === [] ? 'No findings.' : implode(', ', $counts).($blocking === [] ? ', nothing blocking.' : '.');
+
+        $pattern = '/^(No findings\.|\d+ (critical|high|medium|low)(, \d+ (critical|high|medium|low))*(, nothing blocking)?\.?)[ \t]*$/mi';
+
+        return preg_match($pattern, $summary) === 1 ? (string) preg_replace($pattern, $line, $summary, 1) : $summary;
     }
 
     /**

@@ -206,6 +206,9 @@ class ReviewFiling
         return array_values(array_map(function (array $finding): array {
             $finding['status'] = strtolower((string) ($finding['status'] ?? 'new')) ?: 'new';
 
+            // The server's to set, by the rules for follow-up rounds: never the reviewer's.
+            unset($finding['advisory']);
+
             if (isset($finding['severity'])) {
                 $finding['severity'] = strtoupper((string) $finding['severity']);
             }
