@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\ConnectionKind;
 use App\Enums\ReviewCommandAccess;
 use App\Filament\App\Pages\ReviewDefaults;
 use App\Filament\App\Resources\AiProviders\Pages\ManageAiProviders;
@@ -209,9 +210,10 @@ it('offers the models it knows to pick from, newest first, and keeps one typed t
 
     // The aliases first, then the SDK's smartest, default and cheapest, then the
     // other IDs; no dated snapshot, no provider's prefix, no other provider's.
-    expect(array_keys($claude))->toBe(['opus', 'sonnet', 'haiku', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-opus-5'])
+    expect(array_keys($claude))->toBe(['opus', 'sonnet', 'haiku', 'smartest', 'default', 'cheapest', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-opus-5'])
+        ->and($claude['smartest'])->toBe('smartest: now claude-opus-5-5')
         ->and($claude['claude-opus-5-5'])->toBe('claude-opus-5-5 (smartest)')
-        ->and(array_keys(ReviewSettingsForm::openAiModels()))->toBe(['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna']);
+        ->and(array_keys(ReviewSettingsForm::openAiModels()))->toBe(['smartest', 'default', 'cheapest', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna']);
 
     livewire(ReviewDefaults::class)
         ->fillForm(['ocr_model' => 'my-gateway/claude-x'])
@@ -224,4 +226,31 @@ it('offers the models it knows to pick from, newest first, and keeps one typed t
         ->fillForm(['ocr_model' => 'not a model; rm -rf'])
         ->call('save')
         ->assertHasFormErrors(['ocr_model']);
+});
+
+it('reads a tier as the model the SDK names for it when the review runs', function () {
+    $repository = Repository::factory()->create(['tenant_id' => $this->tenant->id]);
+    ReviewSettings::defaults($this->tenant)->forceFill(['claude_model' => 'smartest', 'claude_advisor' => 'cheapest', 'codex_model' => 'default', 'ocr_model' => 'smartest'])->save();
+
+    expect(ReviewSettings::variables($repository))->toMatchArray([
+        'CLAUDE_REVIEW_MODEL' => 'claude-opus-5-5',
+        'CLAUDE_REVIEW_ADVISOR' => 'claude-haiku-5-5',
+        'CODEX_REVIEW_MODEL' => 'gpt-6.1-sol',
+        // Not a model setting a tier is read for: as it is.
+        'OCR_REVIEW_MODEL' => 'smartest',
+    ])
+        ->and(ReviewSettings::model('anthropic', 'claude-opus-5'))->toBe('claude-opus-5');
+});
+
+it('offers a provider connection its smartest, default and cheapest model, read when it is used', function () {
+    $connection = Connection::factory()->create([
+        'tenant_id' => $this->tenant->id, 'kind' => ConnectionKind::Llm, 'driver' => 'gemini', 'name' => 'Gemini',
+        'credentials' => ['api_key' => 'gemini-key'], 'settings' => ['model' => 'cheapest'], 'webhook_key' => null, 'webhook_secret' => null,
+    ]);
+    $driver = $connection->driver();
+    $cheapest = ReviewSettings::tierModels('gemini')['cheapest'];
+
+    expect($cheapest)->not->toBe('')
+        ->and($driver->environment($connection))->toContain($cheapest)
+        ->and(array_keys($driver->settingFields()[0]->getOptions()))->toContain('smartest', 'default', 'cheapest', $cheapest);
 });

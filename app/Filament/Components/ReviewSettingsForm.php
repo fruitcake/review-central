@@ -15,8 +15,6 @@ use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Utilities\Get;
-use Laravel\Ai\Ai;
-use Laravel\Ai\Contracts\Providers\TextProvider;
 
 /**
  * Which reviewer runs, and at what model and effort: the tenant's defaults, and a
@@ -71,7 +69,8 @@ class ReviewSettingsForm
             Fieldset::make('OpenCodeReview')
                 ->columns(2)
                 ->schema([
-                    self::model($defaults, 'ocr_model', [...self::claudeModels(), ...self::openAiModels()]),
+                    // No tier: OpenCodeReview picks its own provider, so a tier could be read for the wrong one.
+                    self::model($defaults, 'ocr_model', array_diff_key(self::claudeModels() + self::openAiModels(), array_flip(ReviewSettings::TIERS))),
                     self::effort($defaults, 'ocr_effort'),
                 ]),
             Select::make('language')
@@ -175,6 +174,16 @@ class ReviewSettingsForm
      */
     protected static function model(?ReviewSetting $defaults, string $field, array $choices): Select
     {
+        return self::modelField($field, $choices)->placeholder(self::placeholder($defaults, $field));
+    }
+
+    /**
+     * A model field of any form: picked from the choices given, or typed.
+     *
+     * @param  array<string, string>  $choices  model => label
+     */
+    public static function modelField(string $field, array $choices): Select
+    {
         $search = function (string $term) use ($choices): array {
             $term = trim($term);
             $found = collect($choices)->filter(fn (string $label, string $model): bool => str_contains(mb_strtolower($model.' '.$label), mb_strtolower($term)))->take(50)->all();
@@ -192,8 +201,7 @@ class ReviewSettingsForm
             ->getSearchResultsUsing($search)
             // One saved before, or typed, that no list holds: shown as it is.
             ->getOptionLabelUsing(fn (?string $value): ?string => $value === null ? null : ($choices[$value] ?? $value))
-            ->rule('regex:'.self::MODEL_NAME)
-            ->placeholder(self::placeholder($defaults, $field));
+            ->rule('regex:'.self::MODEL_NAME);
     }
 
     /** What a model's name can be: an ID, an alias, or a gateway's provider/model. */
@@ -227,28 +235,26 @@ class ReviewSettingsForm
     }
 
     /**
-     * The provider's smartest, default and cheapest model, as the Laravel AI SDK
-     * names them: first in the list, and there before the price list has any.
+     * The provider's smartest, default and cheapest: as a tier, which follows the
+     * Laravel AI SDK when the review runs, then as the model each is now. First
+     * in the list, and there before the price list has any.
      *
      * @return array<string, string>
      */
     protected static function tiers(string $driver): array
     {
-        return once(fn (): array => rescue(function () use ($driver): array {
-            $provider = Ai::build(['name' => "model-tiers-{$driver}", 'driver' => $driver, 'key' => '']);
+        $models = ReviewSettings::tierModels($driver);
+        $tiers = [];
 
-            if (! $provider instanceof TextProvider) {
-                return [];
-            }
+        foreach ($models as $tier => $model) {
+            $tiers[$tier] = "{$tier}: now {$model}";
+        }
 
-            $tiers = [];
+        foreach ($models as $tier => $model) {
+            $tiers[$model] ??= "{$model} ({$tier})";
+        }
 
-            foreach (['smartest' => $provider->smartestTextModel(), 'default' => $provider->defaultTextModel(), 'cheapest' => $provider->cheapestTextModel()] as $tier => $model) {
-                $tiers[$model] ??= "{$model} ({$tier})";
-            }
-
-            return $tiers;
-        }, [], false));
+        return $tiers;
     }
 
     /**
