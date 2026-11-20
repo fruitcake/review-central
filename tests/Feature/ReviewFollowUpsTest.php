@@ -153,3 +153,11 @@ it('does not count runs that published nothing as rounds', function () {
 
     expect(app(ReviewFollowUps::class)->apply(($this->current)(), [$this->high], '1 high.')['findings'])->toBe([$this->high]);
 });
+
+it('files a follow-up whose finding has an id that is no text', function () {
+    ($this->rounds)(1, [['id' => ['F1'], 'status' => 'new', 'severity' => 'LOW']]);
+
+    $applied = app(ReviewFollowUps::class)->apply(($this->current)(), [['id' => ['F2'], 'status' => 'open', 'severity' => 'HIGH', 'title' => ['odd']]], '1 high.');
+
+    expect($applied['findings'])->toHaveCount(1);
+});
