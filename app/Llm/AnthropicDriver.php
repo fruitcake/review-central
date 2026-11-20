@@ -17,6 +17,7 @@ use App\Models\Connection;
 use App\Rules\PublicUrl;
 use App\Runners\Diff\Answer;
 use App\Runners\Diff\ReportSchema;
+use App\Services\ReviewSettings;
 use App\Support\SetupGuide;
 use Filament\Forms\Components\TextInput;
 use Illuminate\Support\Facades\Http;
@@ -31,11 +32,24 @@ class AnthropicDriver implements ExplainsSetup, LlmDriver
 {
     use AsksProviders;
 
-    /** The model a review through the API runs on when the repository names none. */
+    /**
+     * The model a review through the API runs on when the repository names none:
+     * the SDK's smartest, so it follows the SDK; this where the SDK names none.
+     */
     public const DEFAULT_MODEL = 'claude-opus-5-5';
 
-    /** The model for a yes or a no, which needs no more. */
+    /** The model for a yes or a no and a short note, which need no more: the SDK's cheapest; this where it names none. */
     public const SMALL_MODEL = 'claude-haiku-5-5';
+
+    public static function defaultModel(): string
+    {
+        return ReviewSettings::tierModels('anthropic')['smartest'] ?? self::DEFAULT_MODEL;
+    }
+
+    public static function smallModel(): string
+    {
+        return ReviewSettings::tierModels('anthropic')['cheapest'] ?? self::SMALL_MODEL;
+    }
 
     protected const API = 'https://api.anthropic.com';
 
@@ -123,7 +137,7 @@ class AnthropicDriver implements ExplainsSetup, LlmDriver
     public function review(Connection $connection, string $instructions, string $material, ?string $model = null, ?string $effort = null): Answer
     {
         // A repository's setting may be an alias only Claude Code knows, such as "opus".
-        $model = is_string($model) && str_starts_with($model, 'claude-') ? $model : self::DEFAULT_MODEL;
+        $model = is_string($model) && str_starts_with($model, 'claude-') ? $model : self::defaultModel();
         // Not through a gateway, which may not know the parameter.
         $fallback = $connection->setting('base_url') === null && preg_match(self::FALLBACK_MODELS, $model) === 1;
 
@@ -180,14 +194,14 @@ class AnthropicDriver implements ExplainsSetup, LlmDriver
      */
     public function decides(Connection $connection, string $question, string $text): ?bool
     {
-        $answer = (new Decider($question))->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: self::SMALL_MODEL, timeout: 30);
+        $answer = (new Decider($question))->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: self::smallModel(), timeout: 30);
 
         return is_bool($answer['answer'] ?? null) ? $answer['answer'] : null;
     }
 
-    public function describes(Connection $connection, string $instructions, string $text): ?array
+    public function describes(Connection $connection, string $instructions, string $text, ?string $model = null): ?array
     {
-        $answer = (new Describer($instructions))->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: self::SMALL_MODEL, timeout: 60);
+        $answer = (new Describer($instructions))->prompt($text, provider: $this->provider($connection, $this->config($connection)), model: $model === null ? self::smallModel() : ReviewSettings::model('anthropic', $model), timeout: 60);
 
         return Describer::read($answer);
     }

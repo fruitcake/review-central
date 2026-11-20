@@ -185,7 +185,7 @@ abstract class ApiKeyDriver implements ExplainsSetup, LlmDriver
         $choices = [];
 
         foreach ($models as $tier => $model) {
-            $choices[$tier] = "{$tier}: now {$model}";
+            $choices[$tier] = "{$tier} (Laravel AI): now {$model}";
         }
 
         foreach ($models as $tier => $model) {
@@ -207,12 +207,12 @@ abstract class ApiKeyDriver implements ExplainsSetup, LlmDriver
         return is_bool($answer['answer'] ?? null) ? $answer['answer'] : null;
     }
 
-    public function describes(Connection $connection, string $instructions, string $text): ?array
+    public function describes(Connection $connection, string $instructions, string $text, ?string $model = null): ?array
     {
         $answer = (new Describer($instructions))->prompt(
             $text,
             provider: $this->provider($connection, ['driver' => $this->sdk(), 'key' => (string) $connection->credential('api_key')]),
-            model: $this->model($connection),
+            model: $model === null ? $this->model($connection) : ReviewSettings::model($this->sdk(), $model),
             timeout: 60,
         );
 

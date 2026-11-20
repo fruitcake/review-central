@@ -62,7 +62,7 @@ it('decides, locks and writes what the reviewer reads, without a container', fun
         ->and($context['settings'])->toMatchArray([
             'mode' => 'both', 'create_tasks' => true, 'review_drafts' => false, 'commit' => $this->sha, 'agent' => 'claude-code', 'stack' => ['laravel'],
             // What the server set, which the reviewer step applies.
-            'server_variables' => ['CLAUDE_REVIEW_MODEL' => 'claude-opus-5-5', 'CLAUDE_REVIEW_EFFORT' => 'high'],
+            'server_variables' => ['CLAUDE_REVIEW_MODEL' => 'claude-opus-5-5', 'CLAUDE_REVIEW_EFFORT' => 'high', 'REVIEW_DEFAULT_MODEL_ANTHROPIC' => 'claude-opus-5-5', 'REVIEW_DEFAULT_MODEL_OPENAI' => 'gpt-6.1-sol'],
         ])
         ->and($context)->not->toHaveKey('stack')
         // The ticket and the instructions are files of their own, and the context points at them.

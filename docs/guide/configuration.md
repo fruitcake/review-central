@@ -12,9 +12,9 @@ The usual Laravel settings apply as well: `APP_URL`, `APP_KEY`, the database (`D
 | `REVIEW_DIFF_ENABLED` | `true` | Whether the review from the diff can be picked. |
 | `REVIEW_DIFF_TIMEOUT` | `900` | Seconds the AI provider may take to answer a review from the diff. |
 | `REVIEW_DIFF_MAX_BYTES` | `600000` | The most diff one request carries; files past it are left out, and the review says which. |
-| `REVIEW_DIFF_OPENAI_MODEL` | `gpt-6.1-sol` | The OpenAI model when a repository names none. |
-| `REVIEW_TURN_NOTES` | `true` | Whether a small model writes, each time an open pull request's state changes, what the one at turn has to do and a summary. Off, the fixed rules' words show. |
-| `REVIEW_TURN_OPENAI_MODEL` | `REVIEW_DIFF_OPENAI_MODEL` | The OpenAI model that writes those notes. Anthropic's is its small model; another provider's is the model its connection names. |
+| `REVIEW_DIFF_OPENAI_MODEL` | — | The OpenAI model for the review from the diff when a repository names none; unset, the Laravel AI SDK's default for OpenAI. Anthropic's is the SDK's smartest. |
+| `REVIEW_TURN_NOTES` | `true` | Off turns the notes on whose turn off for the whole installation. A team turns them off, or picks their model, under Review defaults. |
+| `REVIEW_TURN_OPENAI_MODEL` | — | The OpenAI model that writes those notes; unset, the Laravel AI SDK's cheapest for OpenAI. Anthropic's is the SDK's cheapest; another provider's is the model its connection names. |
 | `REVIEW_DOCKER_ENABLED` | `false` | Whether Docker on the worker can be picked. Turn it on once the worker has Docker, gVisor and the reviewer's image. |
 
 ## Docker

@@ -126,7 +126,8 @@ class ReviewSettings
     public static function saveDefaults(Tenant $tenant, array $data): void
     {
         $setting = self::defaults($tenant);
-        $setting->fill(array_intersect_key($data, self::VARIABLES + ['providers' => true, 'follow_ups' => true]));
+        // The notes on whose turn are the team's alone, and no repository's.
+        $setting->fill(array_intersect_key($data, self::VARIABLES + ['providers' => true, 'follow_ups' => true, 'turn_notes' => true, 'turn_model' => true]));
         $setting->save();
     }
 
@@ -281,6 +282,13 @@ class ReviewSettings
                 $variables[$variable] = isset(self::TIERED[$field]) ? self::model(self::TIERED[$field], trim($value)) : trim($value);
             }
         }
+
+        // For a reviewer with no default model of its own, OpenCodeReview and Pi: the
+        // SDK's pick, Anthropic's smartest and OpenAI's default, read now.
+        $variables += array_filter([
+            'REVIEW_DEFAULT_MODEL_ANTHROPIC' => self::tierModels('anthropic')['smartest'] ?? null,
+            'REVIEW_DEFAULT_MODEL_OPENAI' => self::tierModels('openai')['default'] ?? null,
+        ]);
 
         return $variables;
     }

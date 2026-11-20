@@ -6,15 +6,19 @@ use App\Enums\ReviewEffort;
 use App\Enums\ReviewProvider;
 use App\Filament\CurrentTenant;
 use App\Models\ModelPrice;
+use App\Models\ReviewRun;
 use App\Models\ReviewSetting;
 use App\Services\Currency;
+use App\Services\ReviewCredentials;
 use App\Services\ReviewSettings;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Fieldset;
+use Filament\Schemas\Components\Text;
 use Filament\Schemas\Components\Utilities\Get;
+use Illuminate\Support\HtmlString;
 
 /**
  * Which reviewer runs, and at what model and effort: the tenant's defaults, and a
@@ -30,8 +34,12 @@ class ReviewSettingsForm
     public static function fields(?ReviewSetting $defaults = null, bool $withProviders = true): array
     {
         return [
+            // What runs as the form stands, before anything else: which reviewer,
+            // in which order, at which model and effort.
+            Text::make(fn (Get $get): HtmlString => self::summary($get, $defaults))->key('summary'),
             Repeater::make('providers')
-                ->label('Reviewers')
+                ->label('Reviewers, in order')
+                ->live()
                 ->schema([
                     Select::make('provider')
                         ->label('Reviewer')
@@ -62,11 +70,14 @@ class ReviewSettingsForm
                 ->defaultItems(0)
                 ->reorderable()
                 ->addActionLabel('Add reviewer')
-                ->helperText('Each pull request gets one of these reviewers, picked by share from the ones there is a key for, and keeps it for every push. A share of 0 is only used when nothing else can run. '
-                    .'A reviewer whose reviews have cost its monthly budget, across the tenant, is passed over for the rest of the month. So to use one reviewer until its budget is spent and another after that, give the first a share and a budget, and the second a share of 0. When every reviewer is over its budget the review still runs, as though none were set. '
-                    .($defaults === null ? 'Empty leaves it to the keys: Claude when there is an Anthropic key, Codex otherwise.' : 'Empty uses the defaults.')),
-            ...($withProviders ? [Fieldset::make('Claude')->columns(2)->schema(self::claudeFields($defaults)), Fieldset::make('Codex')->columns(2)->schema(self::codexFields($defaults))] : []),
-            Fieldset::make('OpenCodeReview')
+                ->helperText('Each pull request gets one of these, picked by share among those there is a key for, and keeps it for every push. One with a share of 0 is a fallback: it runs only when none with a share can, the first of them in this order. '
+                    .'One whose reviews have cost its monthly budget is passed over for the rest of the month: to use one until its budget is spent and another after, give the first a share and a budget and the second a share of 0. '
+                    .($defaults === null ? 'Empty leaves it to the keys: Claude Code with an Anthropic key, else Codex.' : 'Empty uses the defaults.')),
+            ...($withProviders ? [
+                Fieldset::make(ReviewProvider::ClaudeCode->text())->columns(2)->schema(self::claudeFields($defaults)),
+                Fieldset::make(ReviewProvider::CodexCli->text())->columns(2)->schema(self::codexFields($defaults)),
+            ] : []),
+            Fieldset::make(ReviewProvider::Ocr->text())
                 ->columns(2)
                 ->schema([
                     // No tier and no alias: OpenCodeReview picks its own provider and passes the name on as it is,
@@ -74,6 +85,20 @@ class ReviewSettingsForm
                     self::model($defaults, 'ocr_model', array_diff_key(self::claudeModels() + self::openAiModels(), array_flip([...ReviewSettings::TIERS, ...self::CLAUDE_ALIASES]))),
                     self::effort($defaults, 'ocr_effort'),
                 ]),
+            // The team's, for the pull request overview: not a repository's.
+            ...($defaults === null ? [Fieldset::make('Notes on whose turn')
+                ->columns(2)
+                ->schema([
+                    Select::make('turn_notes')
+                        ->label('Write them')
+                        ->options(['true' => 'On', 'false' => 'Off'])
+                        ->placeholder('On')
+                        ->helperText('Under Pull requests, a small model says in a sentence or two what the one at turn has to do, and sums up the pull request, each time its state changes. Off, the fixed rules\' words show.'),
+                    self::modelField('turn_model', ['cheapest' => 'cheapest (Laravel AI)', 'default' => 'default (Laravel AI)', 'smartest' => 'smartest (Laravel AI)'] + array_diff_key(self::claudeModels() + self::openAiModels(), array_flip([...ReviewSettings::TIERS, ...self::CLAUDE_ALIASES])))
+                        ->label('With model')
+                        ->placeholder('The provider\'s cheapest')
+                        ->helperText('A tier is read for the AI provider that writes them: the first of Anthropic, OpenAI, the others. A model by name has to be one of that provider.'),
+                ])] : []),
             Select::make('language')
                 ->label('Language')
                 ->options(ReviewSettings::LANGUAGES)
@@ -155,15 +180,136 @@ class ReviewSettingsForm
         ];
     }
 
+    /**
+     * Which reviewer a pull request gets as the form stands, and at what: the list
+     * in its order with each one's share and budget, or the one the keys decide on,
+     * and the model and effort it runs at.
+     */
+    protected static function summary(Get $get, ?ReviewSetting $defaults): HtmlString
+    {
+        $tenant = CurrentTenant::get();
+        $keys = app(ReviewCredentials::class)->reviewers($tenant);
+        $entries = array_values(array_filter((array) ($get('providers') ?? []), fn (mixed $entry): bool => is_array($entry) && filled($entry['provider'] ?? null)));
+
+        if ($entries === [] && $defaults !== null) {
+            return new HtmlString('<p class="rc-muted">No reviewers of its own: it uses the team\'s, from Review defaults, with the model and effort set below where they are.</p>');
+        }
+
+        if ($entries === []) {
+            $picked = match (true) {
+                in_array(ReviewProvider::ClaudeCode->value, $keys, true) => ReviewProvider::ClaudeCode,
+                in_array(ReviewProvider::CodexCli->value, $keys, true) => ReviewProvider::CodexCli,
+                default => null,
+            };
+
+            return new HtmlString($picked === null
+                ? '<p><strong>No reviewer can run:</strong> add an AI provider first.</p>'
+                : '<p><strong>Every pull request is reviewed by '.e($picked->text()).'</strong>, '.e(self::runsAt($get, $picked, $defaults)).'. None is listed, so the keys decide: Claude Code with an Anthropic key, else Codex.</p>');
+        }
+
+        $items = collect($entries)->map(function (array $entry) use ($get, $keys, $defaults): string {
+            $provider = ReviewProvider::tryFrom((string) $entry['provider']);
+            $share = (int) ($entry['share'] ?? 0);
+            $notes = array_filter([
+                $share === 0 ? 'only when none with a share can run' : null,
+                filled($entry['budget'] ?? null) ? 'up to '.Currency::showOwn((float) $entry['budget']).' a month' : null,
+                $provider !== null && ! in_array($provider->value, $keys, true) ? 'no key for it, so passed over' : null,
+            ]);
+
+            return '<li><strong>'.e($provider?->text() ?? (string) $entry['provider']).'</strong>'
+                .($share > 0 ? ' · share '.$share : '')
+                .($provider === null ? '' : ', '.e(self::runsAt($get, $provider, $defaults)))
+                .($notes === [] ? '' : ' <span class="rc-muted">('.e(implode('; ', $notes)).')</span>').'</li>';
+        })->implode('');
+
+        return new HtmlString('<p><strong>Each pull request is reviewed by one of these</strong>, by share, and keeps it for every push:</p><ul class="rc-summary-list">'.$items.'</ul>');
+    }
+
+    /**
+     * The model and effort a reviewer runs at, in words: as set, a tier with the
+     * model it is now, or what the defaults or the reviewer itself decide.
+     */
+    protected static function runsAt(Get $get, ReviewProvider $provider, ?ReviewSetting $defaults): string
+    {
+        [$model, $effort, $driver] = match ($provider) {
+            ReviewProvider::ClaudeCode => ['claude_model', 'claude_effort', 'anthropic'],
+            ReviewProvider::CodexCli => ['codex_model', 'codex_effort', 'openai'],
+            default => ['ocr_model', 'ocr_effort', null],
+        };
+
+        $value = fn (string $field): ?string => filled($get($field)) ? (string) $get($field) : (filled($defaults?->{$field}) ? (string) ($defaults->{$field} instanceof ReviewEffort ? $defaults->{$field}->value : $defaults->{$field}) : null);
+        $named = $value($model);
+        $tierModel = $named !== null && $driver !== null && in_array($named, ReviewSettings::TIERS, true) ? (ReviewSettings::tierModels($driver)[$named] ?? null) : null;
+
+        // Left to the reviewer, it is known only once a review ran: the newest says what it took.
+        $last = $named === null || $value($effort) === null ? self::lastRun($provider) : null;
+        $own = fn (?string $used): string => 'not set, '.$provider->text().' picks'.($used === null ? '' : " (the last review with it used {$used})");
+
+        // An effort left empty everywhere is the platform's, which the precheck sets.
+        $chosen = $value($effort) ?? self::platformEffort($provider);
+
+        return 'model '.($named === null ? $own($last?->model) : $named.($tierModel === null ? '' : " (Laravel AI's, now {$tierModel})"))
+            .', effort '.($chosen === null ? $own($last?->effort) : (ReviewEffort::tryFrom($chosen)?->text() ?? $chosen).($value($effort) === null ? " (the platform's default)" : ''));
+    }
+
+    /**
+     * The effort the precheck gives a reviewer whose effort nobody set.
+     */
+    protected static function platformEffort(ReviewProvider $provider): ?string
+    {
+        $effort = config("review.default_effort.{$provider->value}");
+
+        return is_string($effort) && $effort !== '' ? $effort : null;
+    }
+
+    /**
+     * The team's newest review by this reviewer that says what model it ran on.
+     */
+    protected static function lastRun(ReviewProvider $provider): ?ReviewRun
+    {
+        $tenant = CurrentTenant::find();
+
+        return $tenant === null ? null : ReviewRun::query()
+            ->where('tenant_id', $tenant->getKey())
+            ->where('agent', $provider->value)
+            ->whereNotNull('model')
+            ->latest('started_at')
+            ->first(['model', 'effort']);
+    }
+
     protected static function placeholder(?ReviewSetting $defaults, string $field): string
     {
         $default = $defaults?->{$field};
 
+        // An effort left empty is the platform's default, which the precheck sets.
+        $provider = match (true) {
+            str_starts_with($field, 'claude_') => ReviewProvider::ClaudeCode,
+            str_starts_with($field, 'codex_') => ReviewProvider::CodexCli,
+            str_starts_with($field, 'ocr_') => ReviewProvider::Ocr,
+            default => null,
+        };
+        $platform = str_ends_with($field, '_effort') && $provider !== null ? self::platformEffort($provider) : null;
+        if ($platform !== null && ! $default instanceof ReviewEffort && blank($default)) {
+            $text = 'Not set: '.(ReviewEffort::tryFrom($platform)?->text() ?? $platform).", the platform's default";
+
+            return $defaults === null ? $text : 'As the team: '.lcfirst($text);
+        }
+
+        // Left empty: not set, so the reviewer picks itself, the same way every
+        // time; as opposed to the Laravel AI SDK's default, a tier picked by name.
+        $auto = 'Not set: '.match (true) {
+            str_starts_with($field, 'claude_advisor') => 'no advisor',
+            str_starts_with($field, 'claude_') => 'Claude Code picks',
+            str_starts_with($field, 'codex_') => 'Codex picks',
+            str_starts_with($field, 'ocr_') => 'OpenCodeReview picks',
+            default => 'the reviewer picks',
+        };
+
         return match (true) {
-            $defaults === null => 'The reviewer decides',
-            $default instanceof ReviewEffort => 'Default: '.$default->text(),
-            is_string($default) && $default !== '' => 'Default: '.$default,
-            default => 'Default: the reviewer decides',
+            $defaults === null => $auto,
+            $default instanceof ReviewEffort => 'As the team: '.$default->text(),
+            is_string($default) && $default !== '' => 'As the team: '.$default,
+            default => 'As the team: '.lcfirst($auto),
         };
     }
 
@@ -196,6 +342,7 @@ class ReviewSettingsForm
         };
 
         return Select::make($field)
+            ->live()
             ->label('Model')
             ->searchable()
             ->options($choices)
@@ -251,7 +398,7 @@ class ReviewSettingsForm
         $tiers = [];
 
         foreach ($models as $tier => $model) {
-            $tiers[$tier] = "{$tier}: now {$model}";
+            $tiers[$tier] = "{$tier} (Laravel AI): now {$model}";
         }
 
         foreach ($models as $tier => $model) {
@@ -282,6 +429,7 @@ class ReviewSettingsForm
     protected static function effort(?ReviewSetting $defaults, string $field): Select
     {
         return Select::make($field)
+            ->live()
             ->label('Effort')
             ->options(collect(ReviewEffort::cases())->mapWithKeys(fn (ReviewEffort $effort): array => [$effort->value => $effort->text()])->all())
             ->placeholder(self::placeholder($defaults, $field));
@@ -295,7 +443,7 @@ class ReviewSettingsForm
     public static function state(?ReviewSetting $setting): array
     {
         return $setting === null ? [] : collect($setting->attributesToArray())
-            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes'])
+            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'turn_notes', 'turn_model'])
             ->all();
     }
 }

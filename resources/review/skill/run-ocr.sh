@@ -89,17 +89,15 @@ if [ -z "$PROVIDER" ]; then
   esac
 fi
 
-# OCR has no default model and fails without one. OpenAI gets the model the Codex
-# review is configured with, so comparing the two compares the reviewer rather than
-# the model; Anthropic gets Opus, which led OCR's own benchmark and which OCR's
-# small token use keeps affordable.
+# OCR has no default model and fails without one. It gets the one the review server
+# sends as the Laravel AI SDK's pick: Anthropic's smartest, which led OCR's own
+# benchmark and which OCR's small token use keeps affordable, and OpenAI's default.
+# The names after them are what the SDK named when this was written, for a step run
+# without the server, as on a developer's machine.
 if [ -z "$MODEL" ]; then
   case "$PROVIDER" in
-    anthropic) MODEL=claude-opus-5-5 ;;
-    openai*)
-      MODEL=$(grep -m1 -E '^[[:space:]]*model[[:space:]]*=' "$HERE/codex-config.toml" 2>/dev/null \
-        | sed -E 's/^[^=]*=[[:space:]]*"?([^"]*)"?.*/\1/') || MODEL=""
-      ;;
+    anthropic) MODEL=${REVIEW_DEFAULT_MODEL_ANTHROPIC:-claude-opus-5-5} ;;
+    openai*) MODEL=${REVIEW_DEFAULT_MODEL_OPENAI:-gpt-6.1-sol} ;;
   esac
 fi
 

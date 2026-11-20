@@ -95,8 +95,9 @@ return [
         // The most bytes of diff one request carries; files past it are left out
         // and the review says which.
         'max_bytes' => (int) env('REVIEW_DIFF_MAX_BYTES', 600_000),
-        // The OpenAI model when a repository names none. Anthropic's is in its driver.
-        'openai_model' => env('REVIEW_DIFF_OPENAI_MODEL', 'gpt-6.1-sol'),
+        // The OpenAI model when a repository names none; unset, the Laravel AI
+        // SDK's default for OpenAI. Anthropic's is the SDK's smartest.
+        'openai_model' => env('REVIEW_DIFF_OPENAI_MODEL'),
     ],
 
     /*
@@ -106,9 +107,10 @@ return [
     */
     'turn' => [
         'notes' => (bool) env('REVIEW_TURN_NOTES', true),
-        // The OpenAI model it is written with. Anthropic's is its small model; any
-        // other provider's is the model its connection names.
-        'openai_model' => env('REVIEW_TURN_OPENAI_MODEL', env('REVIEW_DIFF_OPENAI_MODEL', 'gpt-6.1-sol')),
+        // The OpenAI model it is written with; unset, the Laravel AI SDK's cheapest
+        // for OpenAI. Anthropic's is the SDK's cheapest; any other provider's is the
+        // model its connection names.
+        'openai_model' => env('REVIEW_TURN_OPENAI_MODEL'),
     ],
 
     // The effort a reviewer runs at where neither the repository nor the tenant

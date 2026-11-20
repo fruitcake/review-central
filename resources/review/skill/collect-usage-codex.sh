@@ -73,10 +73,14 @@ echo "Reading usage from $(printf '%s\n' $FILES | wc -l | tr -d ' ') rollout(s).
 # Which of the two it was gets recorded and printed, because otherwise the answer to
 # "did it really run gpt-6-sol?" is the same either way: the rollout saying so, and
 # this script repeating the question back. They are not the same claim.
+# The model the review asked for: the one the config Codex ran with names, which
+# is where a trial's own model goes, else the one set for the review. Neither, and
+# Codex picked its own, which only the rollout can say.
 CONFIGURED_MODEL=""
 if [ -n "${REVIEW_AGENT_CONFIG:-}" ] && [ -f "${REVIEW_AGENT_CONFIG}" ]; then
   CONFIGURED_MODEL=$(grep -m1 -E '^ *model *=' "$REVIEW_AGENT_CONFIG" 2>/dev/null | sed -E 's/^[^=]*= *"?([^"]*)"?.*/\1/') || CONFIGURED_MODEL=""
 fi
+CONFIGURED_MODEL="${CONFIGURED_MODEL:-${CODEX_REVIEW_MODEL:-}}"
 
 # Per file, because total_token_usage is cumulative within a session: taking the
 # last entry of each and adding those up counts every token exactly once.
@@ -161,13 +165,13 @@ echo "Usage collected for $(jq -r '.usage | keys | join(", ")' "$OUT"): $(jq -r 
 if [ "$SOURCE" = "rollout" ]; then
   echo "The rollout named the model itself, so the attribution is the run's own."
 elif [ "$SOURCE" = "mixed" ]; then
-  echo "Note: some sessions named their model and some did not; the ones that did not are filed under ${CONFIGURED_MODEL:-unknown} because that is what codex-config.toml asked for."
+  echo "Note: some sessions named their model and some did not; the ones that did not are filed under ${CONFIGURED_MODEL:-unknown} because that is what the review asked for."
 else
   # Worth saying out loud: the tokens are real, the model name is our own config
   # read back. It is almost certainly right - Codex warned about that exact id, so
   # it received it, and a model it refused would have failed the run rather than
   # produced findings - but this run did not confirm it.
-  echo "Note: the rollout named no model, so these tokens are filed under ${CONFIGURED_MODEL:-unknown} because that is what codex-config.toml asked for, not because the run said so."
+  echo "Note: the rollout named no model, so these tokens are filed under ${CONFIGURED_MODEL:-unknown} because that is what the review asked for, not because the run said so."
 fi
 
 exit 0

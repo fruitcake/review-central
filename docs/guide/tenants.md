@@ -12,7 +12,7 @@ In the tenant's panel, at `/app/<tenant>`. Every connection form has **How to ge
    - **Bitbucket Cloud**: a workspace access token that may write pull requests. Under **Reviews**, a Bitbucket or GitHub connection can keep its reviews in Review Central and post nothing on the host: no comment, status, task or approval, whatever its token may do, so a token that may only read is enough. Each review is then on its own page only, and a question asked on the pull request is answered there.
    - **Git**: clones any other host over HTTPS, and posts nothing.
 
-   **AI providers**: add a key, with the model and effort Claude Code or Codex reviews at on it. "Test" checks the credentials.
+   **AI providers**: add a key. "Test" checks the credentials. Which reviewer runs on it, and at which model and effort, is set under **Review defaults**.
 
    | Provider | Used by |
    |---|---|

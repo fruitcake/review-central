@@ -5,9 +5,12 @@ use App\Enums\ReviewCommandAccess;
 use App\Filament\App\Pages\ReviewDefaults;
 use App\Filament\App\Resources\AiProviders\Pages\ManageAiProviders;
 use App\Filament\Components\ReviewSettingsForm;
+use App\Jobs\DescribePullRequest;
+use App\Llm\AnthropicDriver;
 use App\Models\Connection;
 use App\Models\ExchangeRate;
 use App\Models\ModelPrice;
+use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Models\Tenant;
@@ -139,43 +142,50 @@ it('leaves a reviewer without a budget alone, whatever it cost', function () {
     expect(($this->reviewer)())->toBe('claude-code');
 });
 
-it('sets the model and effort a reviewer runs at with the AI provider it runs on, and leaves the rest of the defaults alone', function () {
-    ReviewSettings::saveDefaults($this->tenant, ['ocr_model' => 'gpt-test', 'codex_model' => 'gpt-kept']);
+it('sets each reviewer\'s model and effort under Review defaults, and says what runs as the form stands', function () {
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->tenant->id]);
+    ReviewSettings::saveDefaults($this->tenant, ['ocr_model' => 'gpt-test']);
+
+    // Nothing listed: the keys decide, and the page says on which.
+    livewire(ReviewDefaults::class)
+        ->assertSee('Every pull request is reviewed by Claude Code')
+        ->fillForm([
+            'providers' => [['provider' => 'claude-code', 'share' => 100, 'budget' => '50'], ['provider' => 'codex-cli', 'share' => 0, 'budget' => null]],
+            'claude_model' => 'smartest', 'claude_effort' => 'high', 'codex_model' => 'gpt-kept',
+        ])
+        ->assertSee('Each pull request is reviewed by one of these')
+        ->assertSee("model smartest (Laravel AI's, now claude-opus-5-5), effort High")
+        ->assertSee('only when none with a share can run')
+        ->assertSee('no key for it')
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $defaults = ReviewSettings::defaults($this->tenant)->refresh();
+
+    expect($defaults->claude_model)->toBe('smartest')
+        ->and($defaults->claude_effort?->value)->toBe('high')
+        ->and($defaults->codex_model)->toBe('gpt-kept')
+        ->and($defaults->ocr_model)->toBe('gpt-test');
+});
+
+it('keeps the AI providers to their keys, and leaves the review defaults alone when one is added or changed', function () {
+    ReviewSettings::saveDefaults($this->tenant, ['claude_model' => 'claude-opus-5-5', 'claude_effort' => 'high', 'claude_max_budget' => 'none']);
     $anthropic = Connection::factory()->anthropic()->create(['tenant_id' => $this->tenant->id]);
 
     livewire(ManageAiProviders::class)
-        ->assertCanSeeTableRecords([$anthropic])
-        ->mountTableAction('edit', $anthropic)
-        ->assertTableActionDataSet(['defaults.claude_model' => null, 'defaults.claude_effort' => null])
-        ->setTableActionData(['defaults' => ['claude_model' => 'claude-opus-5-5', 'claude_effort' => 'high']])
-        ->callMountedTableAction()
+        ->callAction('create', ['driver' => 'anthropic', 'name' => 'Anthropic two', 'credentials' => ['api_key' => 'sk-ant-two']])
+        ->assertHasNoActionErrors()
+        ->callTableAction('edit', $anthropic, ['name' => 'Anthropic renamed'])
         ->assertHasNoTableActionErrors();
 
     $defaults = ReviewSettings::defaults($this->tenant)->refresh();
 
     expect($defaults->claude_model)->toBe('claude-opus-5-5')
         ->and($defaults->claude_effort?->value)->toBe('high')
-        ->and($defaults->codex_model)->toBe('gpt-kept')
-        ->and($defaults->ocr_model)->toBe('gpt-test')
-        ->and($anthropic->refresh()->credential('api_key') ?? $anthropic->credentials)->not->toBeEmpty();
+        ->and($defaults->claude_max_budget)->toBe('none')
+        ->and($anthropic->refresh()->name)->toBe('Anthropic renamed');
 
     $this->get('/app/acme/ai-providers')->assertOk()->assertSee('AI providers');
-    $this->get('/app/acme/source-control')->assertOk();
-});
-
-it('keeps the reviewer\'s settings when another key for its provider is added with the fields left empty', function () {
-    ReviewSettings::saveDefaults($this->tenant, ['claude_model' => 'claude-opus-5-5', 'claude_max_budget' => 'none']);
-
-    livewire(ManageAiProviders::class)
-        ->callAction('create', ['driver' => 'anthropic', 'name' => 'Anthropic two', 'credentials' => ['api_key' => 'sk-ant-two'], 'defaults' => ['claude_effort' => 'high']])
-        ->assertHasNoActionErrors();
-
-    $defaults = ReviewSettings::defaults($this->tenant)->refresh();
-
-    expect($defaults->claude_model)->toBe('claude-opus-5-5')
-        ->and($defaults->claude_max_budget)->toBe('none')
-        // What was filled in is taken.
-        ->and($defaults->claude_effort?->value)->toBe('high');
 });
 
 it('sets who may start a review by commenting /review, and asks for the accounts when only some may', function () {
@@ -212,7 +222,7 @@ it('offers the models it knows to pick from, newest first, and keeps one typed t
     // The aliases first, then the SDK's smartest, default and cheapest, then the
     // other IDs; no dated snapshot, no provider's prefix, no other provider's.
     expect(array_keys($claude))->toBe(['opus', 'sonnet', 'haiku', 'smartest', 'default', 'cheapest', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-opus-5'])
-        ->and($claude['smartest'])->toBe('smartest: now claude-opus-5-5')
+        ->and($claude['smartest'])->toBe('smartest (Laravel AI): now claude-opus-5-5')
         ->and($claude['claude-opus-5-5'])->toBe('claude-opus-5-5 (smartest)')
         ->and(array_keys(ReviewSettingsForm::openAiModels()))->toBe(['smartest', 'default', 'cheapest', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna']);
 
@@ -264,4 +274,43 @@ it('offers OpenCodeReview real model names only, which it passes on as they are'
             return array_intersect($options, ['opus', 'sonnet', 'haiku', 'smartest', 'default', 'cheapest']) === []
                 && in_array('claude-opus-5-5', $options, true);
         });
+});
+
+it('says what a reviewer left to itself ran on last, and takes the SDK\'s models where the API is asked directly', function () {
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->tenant->id]);
+
+    livewire(ReviewDefaults::class)->assertSee("model not set, Claude Code picks, effort High (the platform's default)");
+
+    $repository = Repository::factory()->create(['tenant_id' => $this->tenant->id]);
+    ReviewRun::query()->forceCreate([
+        'tenant_id' => $this->tenant->id, 'repository_id' => $repository->id, 'workspace' => 'acme', 'slug' => 'shop', 'branch' => 'x',
+        'commit' => str_repeat('a', 40), 'status' => ReviewRun::STATUS_FINISHED, 'started_at' => now(), 'agent' => 'claude-code', 'model' => 'claude-opus-5-5', 'effort' => 'xhigh',
+    ]);
+
+    livewire(ReviewDefaults::class)->assertSee("model not set, Claude Code picks (the last review with it used claude-opus-5-5), effort High (the platform's default)");
+
+    $tiers = ReviewSettings::tierModels('anthropic');
+
+    expect(AnthropicDriver::defaultModel())->toBe($tiers['smartest'])
+        ->and(AnthropicDriver::smallModel())->toBe($tiers['cheapest']);
+});
+
+it('lets a team turn the notes on whose turn off, and pick the model they are written with', function () {
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->tenant->id]);
+    $repository = Repository::factory()->create(['tenant_id' => $this->tenant->id]);
+    $record = OpenPullRequest::query()->forceCreate(['repository_id' => $repository->id, 'pull_request_id' => 7, 'title' => 'Export']);
+    config(['review.turn.notes' => true]);
+
+    expect(DescribePullRequest::wanted($record))->toBeTrue();
+
+    livewire(ReviewDefaults::class)
+        ->fillForm(['turn_notes' => 'false', 'turn_model' => 'smartest'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $defaults = ReviewSettings::defaults($this->tenant)->refresh();
+
+    expect($defaults->turn_notes)->toBe('false')
+        ->and($defaults->turn_model)->toBe('smartest')
+        ->and(DescribePullRequest::wanted($record->refresh()))->toBeFalse();
 });
