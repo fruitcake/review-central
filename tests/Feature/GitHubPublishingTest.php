@@ -9,6 +9,7 @@ use App\Runners\Container\Checkout;
 use App\Services\Connections;
 use App\SourceControl\GitHubClient;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
@@ -28,7 +29,7 @@ beforeEach(function () {
     $this->sha = str_repeat('a', 40);
 
     // What GitHub holds: comments of both kinds, reviews, threads and statuses.
-    $this->github = (object) ['issueComments' => [], 'reviewComments' => [], 'reviews' => [], 'threads' => [], 'minimized' => [], 'statuses' => [], 'hooks' => [], 'orgHooks' => null, 'pull' => [], 'next' => 3_000_000_000, 'graphqlFails' => false];
+    $this->github = (object) ['issueComments' => [], 'reviewComments' => [], 'reviews' => [], 'threads' => [], 'minimized' => [], 'statuses' => [], 'hooks' => [], 'orgHooks' => null, 'pull' => [], 'next' => 3_000_000_000, 'graphqlFails' => false, 'mutationsRefused' => false];
 
     $this->pull = fn (array $more = []): array => array_replace_recursive([
         'number' => 12, 'title' => 'Add the export', 'body' => 'Adds the export.', 'state' => 'open', 'draft' => false, 'merged_at' => null,
@@ -53,6 +54,11 @@ beforeEach(function () {
 
             if ($g->graphqlFails) {
                 return Http::response(['errors' => [['message' => 'Resource not accessible by personal access token']]]);
+            }
+
+            // A GitHub App without Contents write: it may read the threads, not resolve them.
+            if ($g->mutationsRefused && str_starts_with(trim($query), 'mutation')) {
+                return Http::response(['errors' => [['type' => 'FORBIDDEN', 'message' => 'Resource not accessible by integration']]]);
             }
 
             if (str_contains($query, 'resolveReviewThread') || str_contains($query, 'unresolveReviewThread')) {
@@ -345,6 +351,34 @@ it('still says a finding was fixed when GitHub will not resolve its thread', fun
     $this->fileReview(['findings' => []] + $report(9, 'fixed', 'PASSED'))->assertOk();
 
     expect(collect($this->github->threads)->first()['resolved'])->toBeTrue();
+});
+
+it('says a finding is fixed on its first line, and leaves its thread open without a word where GitHub refuses to resolve it', function () {
+    Exceptions::fake();
+    $report = fn (int $build, string $status, string $result): array => [
+        'branch' => 'feature/export', 'commit' => $this->sha, 'build' => $build, 'pull_request_id' => 12, 'result' => $result, 'summary' => 'Reviewed.',
+        'findings' => [[
+            'id' => 'F1', 'status' => $status, 'severity' => 'HIGH', 'category' => 'correctness', 'confidence' => 9,
+            'title' => 'The export skips the last row', 'details' => 'The loop ends one early.', 'path' => 'app/Export.php', 'line' => 12,
+        ]],
+    ];
+
+    $this->fileReview($report(7, 'new', 'FAILED'))->assertOk();
+    $finding = $this->github->reviewComments[0]['body'];
+
+    $this->github->mutationsRefused = true;
+    $this->fileReview($report(8, 'fixed', 'PASSED'))->assertOk()->assertJsonPath('publish.comments.not_resolved', 1);
+
+    $fixed = $this->github->reviewComments[0]['body'];
+
+    // The status on its first line, as the description lists it; the rest as it was.
+    expect(strtok($fixed, "\n"))->toBe(strtok($finding, "\n").' · ✅ Fixed')
+        ->and(substr($fixed, strpos($fixed, "\n")))->toContain('The export skips the last row')
+        ->and(collect($this->github->threads)->first()['resolved'])->toBeFalse()
+        ->and(collect($this->github->reviewComments)->last()['body'])->toStartWith('Fixed in');
+
+    // A permission left out on purpose: nothing for the application's log.
+    Exceptions::assertNothingReported();
 });
 
 it('resolves a settled finding\'s open thread only where nobody but the review wrote under it', function () {

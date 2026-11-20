@@ -678,7 +678,6 @@ class ReviewPublisher
                         );
                         $counts[$settledNow ? 'resolved' : 'reopened']++;
                     } catch (Throwable $exception) {
-                        report($exception);
                         $counts = self::unresolved($counts, $exception);
                     }
                 }
@@ -757,7 +756,6 @@ class ReviewPublisher
                 $repository->sourceControl()->resolvePullRequestComment($pullRequestId, (int) $commentId);
                 $counts['resolved']++;
             } catch (Throwable $exception) {
-                report($exception);
                 $counts = self::unresolved($counts, $exception);
             }
         }
@@ -775,10 +773,25 @@ class ReviewPublisher
      */
     protected static function unresolved(array $counts, Throwable $exception): array
     {
+        // A GitHub App or token without Contents write is refused this, and that is a choice
+        // made on purpose: the finding's first line and the reply say it is done.
+        if (! self::refusedByPermission($exception)) {
+            report($exception);
+        }
+
         $counts['not_resolved'] = ($counts['not_resolved'] ?? 0) + 1;
         $counts['resolve_error'] ??= mb_substr($exception->getMessage(), 0, 300);
 
         return $counts;
+    }
+
+    /**
+     * Whether the host refused for want of a permission, rather than failed.
+     */
+    public static function refusedByPermission(Throwable $exception): bool
+    {
+        // "by integration" for an app, "by personal access token" for a token.
+        return str_contains($exception->getMessage(), 'Resource not accessible by');
     }
 
     /**
@@ -1181,12 +1194,13 @@ class ReviewPublisher
     public function findingBody(array $finding, ?string $existingRaw = null, bool $allowSuggestion = true): string
     {
         // Once a finding is settled its comment is history, and history is not
-        // rewritten. The reply underneath says what became of it and the thread is
-        // resolved, so restating it in the comment would say the same thing twice,
-        // in whatever words the latest run happened to use. Only the marker moves,
-        // and a marker is invisible: the comment reads exactly as it did.
-        if (in_array(strtolower((string) ($finding['status'] ?? 'new')), self::RESOLVED, true) && $existingRaw !== null) {
-            return $this->withMarker($existingRaw, $finding);
+        // rewritten. The reply underneath says what became of it, so restating it
+        // in the comment would say the same thing twice, in whatever words the
+        // latest run happened to use. Only its first line takes the status, as the
+        // description lists it, so the comment says it is done where a thread
+        // cannot be resolved; and the marker moves, which is invisible.
+        if (in_array($status = strtolower((string) ($finding['status'] ?? 'new')), self::RESOLVED, true) && $existingRaw !== null) {
+            return $this->withMarker($this->withStatus($existingRaw, $finding, $status), $finding);
         }
 
         $details = $this->details($finding);
@@ -1213,6 +1227,25 @@ class ReviewPublisher
             // the friction this removes.
             .($prompt === '' ? '' : "\n\n**Prompt for a coding agent:**\n\n".self::fenced($prompt, 'text'))
             ."\n\n".$this->marker($finding);
+    }
+
+    /**
+     * A settled finding's comment with its status on the first line, `F1 · HIGH ·
+     * ✅ Fixed`, where that line is the finding's heading: one a person wrote over,
+     * or a comment from before headings, is left as it is.
+     *
+     * @param  array<string, mixed>  $finding
+     */
+    protected function withStatus(string $raw, array $finding, string $status): string
+    {
+        $id = trim((string) ($finding['id'] ?? ''));
+        $first = strtok($raw, "\n");
+
+        if ($id === '' || $first === false || ! str_starts_with($first, $id.' · ')) {
+            return $raw;
+        }
+
+        return $this->heading($finding).' · '.(self::STATUS_LABELS[$status] ?? ucfirst($status)).substr($raw, strlen($first));
     }
 
     /**
