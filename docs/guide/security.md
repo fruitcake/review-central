@@ -7,7 +7,7 @@ Review Central holds credentials for source control, ticket trackers and AI prov
 | Runner | What leaves your server | What runs the pull request's code |
 |---|---|---|
 | `diff` | The diff, the pull request's title and description, its ticket, its comments and earlier findings, sent to your AI provider. | Nothing. |
-| `docker` | What the reviewer sends to your AI provider while it reads the checkout. | A throwaway container under gVisor, holding the tenant's AI provider keys. |
+| `docker` | What the reviewer sends to your AI provider while it reads the checkout. | A throwaway container under gVisor, holding the key of the AI provider that runs the reviewer. |
 | `cloudflare` | The checkout, into a Cloudflare sandbox, and what the reviewer sends to your AI provider. | The sandbox, holding placeholders for the AI provider keys: the Worker puts the keys in on the way to the provider, so the reviewer never has them. |
 
 No runner starts a server from the checkout or runs Composer scripts or plugins. The reviewer never gets a credential for the repository's host or for this server.
