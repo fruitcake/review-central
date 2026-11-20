@@ -46,6 +46,16 @@ Add two lifecycle rules:
 
 Not under `review/snapshots/`, where the Worker notes its snapshot.
 
+## Or deploy it from review-central
+
+Steps 1 to 3 can also be left to review-central itself, from the machine that runs its reviews' queue (Node 20 or later):
+
+1. In the Cloudflare dashboard, [create an API token](https://dash.cloudflare.com/profile/api-tokens) for the account with **Workers Scripts**, **Containers** and **Workers R2 Storage**: Edit, and **Account Settings**: Read. For the bucket's own keys: R2 → Manage API tokens → Create API token, with Object Read & Write on the bucket.
+2. Under **Admin → Settings → Cloudflare sandboxes**, set the account ID, that token, and the bucket's keys. The Worker's name and the bucket's default to `review-central-sandbox` and `review-central`.
+3. On **Admin → Setup**, press **Deploy the Worker**. On the reviews' queue it installs Wrangler, makes the bucket when it is not there, deploys the Worker with those names, and gives it a token it makes. The Worker's address and that token are kept under Settings; the setup page shows how the deploy went, with what Wrangler printed.
+
+Press it again after an update: the setup page says when the Worker runs an older version. The same from a shell is `php artisan review:deploy-worker`, which also takes `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` from the environment. What `.env` sets always goes before what is under Settings.
+
 ## 2. The Worker
 
 Pick a long random token. It is the only thing between the internet and a machine that runs commands, so treat it as a password.
