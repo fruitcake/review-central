@@ -87,6 +87,15 @@
                     @endif
                 </div>
             </div>
+            {{-- What the scores in the columns are of, also while another attempt runs or after one failed. --}}
+            @if ($analysed !== null)
+                <p class="rc-muted">
+                    The scores are of {{ implode(', ', $analysed) }}.
+                    @if ($analysed !== $analysable)
+                        The reviews to analyse are {{ implode(', ', $analysable) ?: 'none' }} now: analyse again to judge those.
+                    @endif
+                </p>
+            @endif
             @if ($comparison->analysis_status === ReviewComparison::ANALYSIS_RUNNING)
                 <p class="rc-muted">The model is reading the reviews.</p>
             @elseif ($comparison->analysis_status === ReviewComparison::ANALYSIS_FAILED)
@@ -94,14 +103,6 @@
             @elseif ($comparison->analysis === null)
                 <p class="rc-muted">{{ $done ? 'Analyse has one model judge the findings of the reviews not left out together: which hold, which are false, and who missed what.' : 'Once every review not left out has ended, Analyse has one model judge their findings together.' }}</p>
             @else
-                @if ($analysed !== null)
-                    <p class="rc-muted">
-                        Of {{ implode(', ', $analysed) }}.
-                        @if ($analysed !== $analysable)
-                            The reviews to analyse are {{ implode(', ', $analysable) ?: 'none' }} now: analyse again to judge those. The scores stay as this analysis gave them.
-                        @endif
-                    </p>
-                @endif
                 @if (filled($comparison->analysis['summary'] ?? null))
                     <p>{{ $comparison->analysis['summary'] }}</p>
                 @endif

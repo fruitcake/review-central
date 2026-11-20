@@ -421,7 +421,7 @@ it('keeps looking while a left-out review still runs, keeps the scores an analys
 
     livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])
         ->assertSeeHtml('wire:poll.15s')
-        ->assertSee('Of A, B.')
+        ->assertSee('The scores are of A, B.')
         ->assertSee('The reviews to analyse are A now');
 });
 
@@ -457,4 +457,20 @@ it('saves a setup\'s place before its trial starts, so its job never waits on a 
     app(ReviewComparisons::class)->add($comparison, [['runner' => null, 'provider' => 'claude-code', 'model' => null, 'effort' => null, 'verify' => false]], true);
 
     expect($comparison->rows[0]['build'])->toBe(53);
+});
+
+it('says what the scores are of after a later attempt failed, and for an analysis from before labels were kept', function () {
+    ($this->run)(51, [['id' => 'F1', 'title' => 'From B']]);
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [['build' => 51]], 'excluded' => ['B'],
+        // An old analysis, and a retry that failed since.
+        'analysis' => ['summary' => 'Old.', 'findings' => []],
+        'analysis_status' => ReviewComparison::ANALYSIS_FAILED, 'analysis_error' => 'Timed out',
+    ]);
+
+    livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])
+        ->assertSee('The scores are of A, B.')
+        ->assertSee('The reviews to analyse are A now')
+        ->assertSee('It failed: Timed out');
 });

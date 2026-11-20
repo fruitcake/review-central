@@ -136,7 +136,9 @@ class ViewReviewComparison extends ViewRecord
             'done' => $comparison->done(),
             'settled' => $comparison->settled(),
             // What the analysis read, against what would be read now.
-            'analysed' => $comparison->analysis['labels'] ?? null,
+            // What the saved scores are of, whatever became of a later attempt; an
+            // analysis from before labels were kept read every review there was.
+            'analysed' => $comparison->analysis === null ? null : ($comparison->analysis['labels'] ?? array_map('strval', $comparison->columns()->filter(fn (array $column): bool => $column['run'] !== null)->keys()->all())),
             'analysable' => ReviewComparisons::analysable($comparison),
         ];
     }
