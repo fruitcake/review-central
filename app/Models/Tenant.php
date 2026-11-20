@@ -136,6 +136,14 @@ class Tenant extends Model
     }
 
     /**
+     * @return HasMany<OpenFinding, $this>
+     */
+    public function openFindings(): HasMany
+    {
+        return $this->hasMany(OpenFinding::class);
+    }
+
+    /**
      * @return HasMany<ReviewRun, $this>
      */
     public function reviewRuns(): HasMany

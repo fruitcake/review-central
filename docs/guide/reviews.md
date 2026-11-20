@@ -86,6 +86,16 @@ Where the tenant has an AI provider, a small model also writes it in a sentence 
 
 Approvals and requests for changes reach Review Central through the webhook events listed under [Setting up a tenant](./tenants). `php artisan review:sync-pull-requests` reads every listed pull request from its host again, for those from before and for a delivery that was missed; it runs every night by itself.
 
+### Open findings
+
+When a pull request is merged into the main branch while its last review still had findings open (new or open, and not called *Not a problem* or *Wrong* by anyone in the team), they stay under **Open findings** in the sidebar, per repository. Trials do not count. The list shows each finding with its pull request, file and line, and where it stands:
+
+- **Not checked yet**: kept at the merge.
+- **Still there**, **Resolved** or **Unclear**: what the last check said, with its one-sentence reason.
+- **Closed**: closed by someone, with why.
+
+Under **Review defaults → Open findings after a merge** a team can have them checked **weekly** or **monthly** (off by default: kept, not checked). A small model, with the AI provider that writes the notes on whose turn, reads each finding's file as it is on the main branch, one request per file, and says whether the problem is still there. A finding whose file is gone is resolved; one without a file is not checked. An admin can also check findings now, all or a selection, and close or reopen them.
+
 ## A security review of a branch
 
 **Security review**, under Reviews, has the reviewer read a whole branch for security problems as it stands, rather than one pull request's change: pick the repository and the branch, such as the default one. Nothing is posted; the report shows under the *Security* view. It reads far more than a pull request's review, so it takes longer and costs more. It needs a runner that reads the code, a Cloudflare sandbox or Docker, and an Anthropic connection, since Claude Code is its reviewer. Its model and effort are set with `SECURITY_REVIEW_MODEL` and the variables beside it in the [configuration](./configuration).
@@ -115,7 +125,7 @@ The admin panel opens on **Platform**: every tenant with its connections, reposi
 
 ### Comparing setups
 
-On a review of a pull request, **Compare with** (for the tenant's admins) adds a row for each setup to try: runner, reviewer, model, effort and the second check, up to five. Each row starts a trial of the pull request as it is now, and **Comparisons** in the sidebar shows them side by side with the review it started from, labelled A, B, C and on: each one's outcome, cost, time and findings. A setup that cannot be tried says why, and the others still run.
+On a review of a pull request, **Compare with** (for the tenant's admins) adds a row for each setup to try: runner, reviewer, model (picked from the same list as under Review defaults, or typed), effort and the second check, up to ten. Each row starts a trial of the pull request as it is now, and **Comparisons** in the sidebar shows them side by side with the review it started from, labelled A, B, C and on: each one's outcome, cost, time and findings. A setup that cannot be tried says why, and the others still run. **Add setups** on the comparison adds more later; an analysis made before keeps to the reviews it read until it is run again. **Leave out** on a column moves it to the end, faded: it is not waited for, analysed or scored until **Bring back**.
 
 Once every review has ended, **Analyse** has one model, picked with its AI provider (a Laravel AI tier or a model by name; the provider's smartest when none), read the pull request's diff and every review's findings. It groups the findings that are about the same issue, says of each whether it holds, is a false positive or cannot be settled from the diff, and which reviews raised it. Each column then shows how many of its findings hold, how many are false positives or unclear, and how many issues that hold it missed. The analysis is one request with the whole diff, and its cost shows with it.
 

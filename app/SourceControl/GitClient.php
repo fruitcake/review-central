@@ -64,6 +64,11 @@ class GitClient implements SourceControl
         return null;
     }
 
+    public function fileOnMainBranch(string $path): string|false|null
+    {
+        return null;
+    }
+
     public function cloneAccess(): array
     {
         return [

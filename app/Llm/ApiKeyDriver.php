@@ -15,6 +15,7 @@ use App\Llm\Agents\Comparer;
 use App\Llm\Agents\Decider;
 use App\Llm\Agents\Describer;
 use App\Llm\Agents\DiffReviewer;
+use App\Llm\Agents\FindingChecker;
 use App\Models\Connection;
 use App\Runners\Diff\Answer;
 use App\Runners\Diff\ReportSchema;
@@ -229,6 +230,16 @@ abstract class ApiKeyDriver implements ExplainsSetup, LlmDriver
             provider: $this->provider($connection, ['driver' => $this->sdk(), 'key' => (string) $connection->credential('api_key')]),
             model: $this->model($connection),
             timeout: 30,
+        );
+    }
+
+    public function checks(Connection $connection, string $text): AgentResponse
+    {
+        return (new FindingChecker)->prompt(
+            $text,
+            provider: $this->provider($connection, ['driver' => $this->sdk(), 'key' => (string) $connection->credential('api_key')]),
+            model: $this->model($connection),
+            timeout: 60,
         );
     }
 

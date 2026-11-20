@@ -66,6 +66,12 @@ interface LlmDriver extends ConnectionDriver
     public function classifies(Connection $connection, string $text): AgentResponse;
 
     /**
+     * Whether findings from earlier reviews are still in a file, from a small model:
+     * the FindingChecker's structured output, with the tokens and model it took.
+     */
+    public function checks(Connection $connection, string $text): AgentResponse;
+
+    /**
      * Several reviews of one pull request judged together, by the model asked for:
      * the Comparer's structured output, with the tokens and model it took.
      *

@@ -143,7 +143,7 @@ class ReviewSettings
     {
         $setting = self::defaults($tenant);
         // The notes on whose turn are the team's alone, and no repository's.
-        $setting->fill(array_intersect_key($data, self::VARIABLES + self::STRATEGY_FIELDS + ['providers' => true, 'follow_ups' => true, 'max_rounds' => true, 'turn_notes' => true, 'turn_model' => true]));
+        $setting->fill(array_intersect_key($data, self::VARIABLES + self::STRATEGY_FIELDS + ['providers' => true, 'follow_ups' => true, 'max_rounds' => true, 'turn_notes' => true, 'turn_model' => true, 'findings_check' => true]));
         $setting->save();
     }
 

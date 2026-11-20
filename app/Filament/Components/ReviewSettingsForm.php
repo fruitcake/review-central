@@ -14,6 +14,7 @@ use App\Services\Currency;
 use App\Services\ReviewCredentials;
 use App\Services\ReviewFollowUps;
 use App\Services\ReviewSettings;
+use Closure;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -102,7 +103,15 @@ class ReviewSettingsForm
                         ->label('With model')
                         ->placeholder('The provider\'s cheapest')
                         ->helperText('A tier is read for the AI provider that writes them: the first of Anthropic, OpenAI, the others. A model by name has to be one of that provider.'),
-                ])] : []),
+                ]),
+                Fieldset::make('Open findings after a merge')
+                    ->schema([
+                        Select::make('findings_check')
+                            ->label('Check them against the main branch')
+                            ->options(['weekly' => 'Weekly', 'monthly' => 'Monthly'])
+                            ->placeholder('Off: kept, not checked')
+                            ->helperText('A pull request merged with findings still open leaves them under Open findings. Checked, a small model reads each one\'s file on the main branch, one request per file, and says whether it is still there, resolved, or cannot be told from the file.'),
+                    ])] : []),
             Select::make('language')
                 ->label('Language')
                 ->options(ReviewSettings::LANGUAGES)
@@ -409,13 +418,16 @@ class ReviewSettingsForm
     /**
      * A model field of any form: picked from the choices given, or typed.
      *
-     * @param  array<string, string>  $choices  model => label
+     * @param  array<string, string>|Closure(Get): array<string, string>  $choices  model => label, or a closure that takes the form's Get and gives them, for choices that hang on the rest of the form
      */
-    public static function modelField(string $field, array $choices): Select
+    public static function modelField(string $field, array|Closure $choices): Select
     {
-        $search = function (string $term) use ($choices): array {
-            $term = trim($term);
-            $found = collect($choices)->filter(fn (string $label, string $model): bool => str_contains(mb_strtolower($model.' '.$label), mb_strtolower($term)))->take(50)->all();
+        // The choices may hang on the rest of the form, such as the reviewer picked.
+        $list = fn (Get $get): array => $choices instanceof Closure ? $choices($get) : $choices;
+
+        $search = function (string $search, Get $get) use ($list): array {
+            $term = trim($search);
+            $found = collect($list($get))->filter(fn (string $label, string $model): bool => str_contains(mb_strtolower($model.' '.$label), mb_strtolower($term)))->take(50)->all();
 
             // What was typed, as a model of its own, where it is a name a model can have.
             return preg_match(self::MODEL_NAME, $term) === 1 && ! array_key_exists($term, $found)
@@ -427,15 +439,16 @@ class ReviewSettingsForm
             ->live()
             ->label('Model')
             ->searchable()
-            ->options($choices)
+            // A fixed list as it is, so it needs no request to the server to show.
+            ->options($choices instanceof Closure ? $list : $choices)
             ->getSearchResultsUsing($search)
             // One saved before, or typed, that no list holds: shown as it is.
-            ->getOptionLabelUsing(fn (?string $value): ?string => $value === null ? null : ($choices[$value] ?? $value))
+            ->getOptionLabelUsing(fn (?string $value, Get $get): ?string => $value === null ? null : ($list($get)[$value] ?? $value))
             ->rule('regex:'.self::MODEL_NAME);
     }
 
     /** The names only Claude Code knows a model by. */
-    protected const CLAUDE_ALIASES = ['opus', 'sonnet', 'haiku'];
+    public const CLAUDE_ALIASES = ['opus', 'sonnet', 'haiku'];
 
     /** What a model's name can be: an ID, an alias, or a gateway's provider/model. */
     protected const MODEL_NAME = '/^[A-Za-z0-9._:\/@-]{1,255}$/';
@@ -525,7 +538,7 @@ class ReviewSettingsForm
     public static function state(?ReviewSetting $setting): array
     {
         return $setting === null ? [] : collect($setting->attributesToArray())
-            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'max_rounds', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model'])
+            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'max_rounds', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model', 'findings_check'])
             ->all();
     }
 }
