@@ -25,6 +25,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\FiltersLayout;
@@ -157,6 +158,7 @@ class ReviewRunResource extends Resource
                 ->options(fn (Runners $runners): array => $runners->options())
                 ->placeholder('As the repository would')
                 ->live()
+                ->afterStateUpdated(fn (Get $get, Set $set) => self::keepModel($get, $set))
                 ->helperText('Docker and a Cloudflare sandbox run a reviewer that reads the repository. The diff alone sends only the pull request\'s diff to the AI provider: no clone and no reviewer to choose; the model and effort below then name the provider\'s own.'),
             Select::make('provider')
                 ->label('Reviewer')
@@ -164,6 +166,7 @@ class ReviewRunResource extends Resource
                 ->placeholder('As the repository would get')
                 // The models to pick from follow the reviewer.
                 ->live()
+                ->afterStateUpdated(fn (Get $get, Set $set) => self::keepModel($get, $set))
                 ->visible(fn (Get $get): bool => $get('runner') !== DiffRunner::NAME),
             ReviewSettingsForm::modelField('model', fn (Get $get): array => self::trialModels($get('runner') === DiffRunner::NAME ? null : $get('provider')))
                 ->placeholder('The reviewer\'s own')
@@ -182,6 +185,20 @@ class ReviewRunResource extends Resource
             ->label('Review as though nobody had')
             ->default(true)
             ->helperText('Leaves out the comments and earlier findings on the pull request, from this review and from people. Turn it off to try a follow-up review instead.');
+    }
+
+    /**
+     * Clears a tier or an alias the reviewer or runner now picked has no use for: one
+     * that is not in its list. A model by name stays.
+     */
+    protected static function keepModel(Get $get, Set $set): void
+    {
+        $model = $get('model');
+
+        if (in_array($model, [...ReviewSettings::TIERS, ...ReviewSettingsForm::CLAUDE_ALIASES], true)
+            && ! array_key_exists($model, self::trialModels($get('runner') === DiffRunner::NAME ? null : $get('provider')))) {
+            $set('model', null);
+        }
     }
 
     /**

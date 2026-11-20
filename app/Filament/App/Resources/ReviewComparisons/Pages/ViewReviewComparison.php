@@ -88,7 +88,8 @@ class ViewReviewComparison extends ViewRecord
                 ->modalSubmitActionLabel('Analyse')
                 ->action(function (array $data): void {
                     $this->record->update(['analysis_status' => ReviewComparison::ANALYSIS_RUNNING, 'analysis_error' => null]);
-                    AnalyzeReviewComparison::dispatch($this->record->getKey(), (int) $data['connection'], filled($data['model'] ?? null) ? (string) $data['model'] : null);
+                    // The reviews it reads are the ones that can be read now.
+                    AnalyzeReviewComparison::dispatch($this->record->getKey(), (int) $data['connection'], filled($data['model'] ?? null) ? (string) $data['model'] : null, ReviewComparisons::analysable($this->record));
 
                     Notification::make()->title('The analysis is started')->body('This page shows it when it is done.')->success()->send();
                 }),

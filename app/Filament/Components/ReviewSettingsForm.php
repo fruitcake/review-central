@@ -402,7 +402,7 @@ class ReviewSettingsForm
     /**
      * A model field of any form: picked from the choices given, or typed.
      *
-     * @param  array<string, string>  $choices  model => label
+     * @param  array<string, string>|Closure(Get): array<string, string>  $choices  model => label, or a closure that takes the form's Get and gives them, for choices that hang on the rest of the form
      */
     public static function modelField(string $field, array|Closure $choices): Select
     {
@@ -423,7 +423,8 @@ class ReviewSettingsForm
             ->live()
             ->label('Model')
             ->searchable()
-            ->options($list)
+            // A fixed list as it is, so it needs no request to the server to show.
+            ->options($choices instanceof Closure ? $list : $choices)
             ->getSearchResultsUsing($search)
             // One saved before, or typed, that no list holds: shown as it is.
             ->getOptionLabelUsing(fn (?string $value, Get $get): ?string => $value === null ? null : ($list($get)[$value] ?? $value))

@@ -23,7 +23,10 @@ class AnalyzeReviewComparison implements ShouldQueue
 
     public int $tries = 1;
 
-    public function __construct(public int $comparisonId, public int $connectionId, public ?string $model = null)
+    /**
+     * @param  array<int, string>|null  $labels  the reviews it reads, taken when it was asked for
+     */
+    public function __construct(public int $comparisonId, public int $connectionId, public ?string $model = null, public ?array $labels = null)
     {
         // The queue the reviews run on, whose workers wait long enough for one
         // request with a whole diff; the default one gives up on a job sooner.
@@ -47,7 +50,7 @@ class AnalyzeReviewComparison implements ShouldQueue
             return;
         }
 
-        $comparisons->analyze($comparison, $connection, $this->model);
+        $comparisons->analyze($comparison, $connection, $this->model, $this->labels);
     }
 
     /**

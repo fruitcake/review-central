@@ -12,6 +12,7 @@ use App\Models\ModelPrice;
 use App\Models\ReviewComparison;
 use App\Models\ReviewRun;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
@@ -54,17 +55,45 @@ class ReviewComparisons
      */
     public function add(ReviewComparison $comparison, array $rows, bool $ignoreExisting): int
     {
-        $room = ReviewComparison::MAX_ROWS - count($comparison->rows);
-        $run = $comparison->reviewRun;
+        // Under a lock on the comparison: two additions at once each see the other's
+        // rows, so neither overwrites a paid trial, and the most holds.
+        return DB::transaction(function () use ($comparison, $rows, $ignoreExisting): int {
+            $locked = ReviewComparison::query()->whereKey($comparison->getKey())->lockForUpdate()->firstOrFail();
+            $room = ReviewComparison::MAX_ROWS - count($locked->rows);
+            $run = $locked->reviewRun;
 
-        if ($room <= 0 || $run === null) {
-            return 0;
-        }
+            if ($room <= 0 || $run === null) {
+                return 0;
+            }
 
-        $added = $this->trials($run, array_slice(array_values($rows), 0, $room), $ignoreExisting);
-        $comparison->update(['rows' => [...array_values($comparison->rows), ...$added]]);
+            $analysis = $locked->analysis;
 
-        return count($added);
+            // An analysis from before labels were kept read every review there was.
+            if ($analysis !== null && ! isset($analysis['labels'])) {
+                $analysis['labels'] = array_map('strval', $locked->columns()->filter(fn (array $column): bool => $column['run'] !== null)->keys()->all());
+            }
+
+            $added = $this->trials($run, array_slice(array_values($rows), 0, $room), $ignoreExisting);
+            $locked->update(['rows' => [...array_values($locked->rows), ...$added], 'analysis' => $analysis]);
+            $comparison->setRawAttributes($locked->getAttributes(), true);
+
+            return count($added);
+        });
+    }
+
+    /**
+     * The reviews an analysis started now reads: the ones not left out that have
+     * ended. Taken when it is asked for, so a setup added while it waits is not
+     * read by it, nor scored by it.
+     *
+     * @return array<int, string>
+     */
+    public static function analysable(ReviewComparison $comparison): array
+    {
+        return array_map('strval', $comparison->active()
+            ->filter(fn (array $column): bool => $column['run'] !== null && ! in_array($column['run']->status, [ReviewRun::STATUS_QUEUED, ReviewRun::STATUS_RUNNING, ReviewRun::STATUS_PENDING], true))
+            ->keys()
+            ->all());
     }
 
     /**
@@ -97,7 +126,10 @@ class ReviewComparisons
      * Judges the findings of every column together with the model asked for, and
      * keeps what it made of them; a failure is kept as the reason.
      */
-    public function analyze(ReviewComparison $comparison, Connection $connection, ?string $model): void
+    /**
+     * @param  array<int, string>|null  $labels  the reviews to read, as taken when it was asked for; null for those that can be now
+     */
+    public function analyze(ReviewComparison $comparison, Connection $connection, ?string $model, ?array $labels = null): void
     {
         $driver = $connection->driver();
 
@@ -108,7 +140,7 @@ class ReviewComparisons
         }
 
         try {
-            [$text, $ids, $labels] = $this->material($comparison);
+            [$text, $ids, $labels] = $this->material($comparison, $labels ?? self::analysable($comparison));
             $response = $driver->compares($connection, $text, $model);
             $analysis = Comparer::read($response, $ids);
 
@@ -135,14 +167,19 @@ class ReviewComparisons
     /**
      * What the judging model reads, and the ids of the findings in it.
      *
+     * @param  array<int, string>  $labels  the reviews to read
      * @return array{0: string, 1: array<int, string>, 2: array<int, string>} the text, the ids of the findings in it, and the reviews' labels
      */
-    protected function material(ReviewComparison $comparison): array
+    protected function material(ReviewComparison $comparison, array $labels): array
     {
         $source = $comparison->repository->sourceControl();
         $pullRequest = $source->getPullRequest((string) $comparison->pull_request_id) ?? [];
-        // Only the columns not left out.
-        $columns = $comparison->active()->filter(fn (array $column): bool => $column['run'] !== null);
+        // Only the reviews asked for that are still not left out.
+        $columns = $comparison->active()->filter(fn (array $column, string $label): bool => $column['run'] !== null && in_array($label, $labels, true));
+
+        if ($columns->isEmpty()) {
+            throw new RuntimeException('None of the reviews it was to read is still in the comparison.');
+        }
 
         // The diff read is the open pull request's as it is now. A review of another
         // commit is judged against code it did not read, so it is said with it; when

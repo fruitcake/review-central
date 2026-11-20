@@ -3,6 +3,7 @@
 use App\Exceptions\ReviewTrialRefused;
 use App\Filament\App\Resources\ReviewComparisons\Pages\ListReviewComparisons;
 use App\Filament\App\Resources\ReviewComparisons\Pages\ViewReviewComparison;
+use App\Filament\App\Resources\ReviewRuns\Pages\ListReviewRuns;
 use App\Filament\App\Resources\ReviewRuns\Pages\ViewReviewRun;
 use App\Filament\App\Resources\ReviewRuns\ReviewRunResource;
 use App\Jobs\AnalyzeReviewComparison;
@@ -321,4 +322,77 @@ it('leaves a column out, at the end and out of the analysis, and brings it back'
     livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])->call('toggleColumn', 'B');
 
     expect($comparison->refresh()->excluded)->toBe(['C']);
+});
+
+it('clears a tier or alias the reviewer or runner picked next has no use for, and keeps a model by name', function () {
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    Connection::factory()->openai()->create(['tenant_id' => $this->repository->tenant_id]);
+
+    livewire(ListReviewRuns::class)
+        ->mountAction('try')
+        ->fillForm(['provider' => 'claude-code', 'model' => 'opus'])
+        // Codex has no Claude alias.
+        ->fillForm(['provider' => 'codex-cli'])
+        ->assertSchemaStateSet(['model' => null])
+        ->fillForm(['provider' => 'claude-code', 'model' => 'smartest'])
+        // A tier still means something for Codex.
+        ->fillForm(['provider' => 'codex-cli'])
+        ->assertSchemaStateSet(['model' => 'smartest'])
+        // The diff alone takes models by name only.
+        ->fillForm(['runner' => 'diff'])
+        ->assertSchemaStateSet(['model' => null])
+        ->fillForm(['model' => 'claude-opus-5-5', 'runner' => null])
+        ->assertSchemaStateSet(['model' => 'claude-opus-5-5']);
+});
+
+it('adds setups under a lock, keeping what another addition added meanwhile and an old analysis to what it read', function () {
+    ($this->run)(51, []);
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [['build' => 51]],
+        // From before an analysis kept the reviews it read.
+        'analysis_status' => ReviewComparison::ANALYSIS_FINISHED, 'analysis' => ['summary' => 'Old.', 'findings' => []],
+    ]);
+    $stale = ReviewComparison::query()->find($comparison->id);
+    // Another addition, in between.
+    ReviewComparison::query()->whereKey($comparison->id)->update(['rows' => json_encode([['build' => 51], ['build' => 52]])]);
+    $this->mock(ReviewTrial::class)->shouldReceive('begin')->once()->andReturn(['repository' => $this->repository, 'build' => 53]);
+
+    expect(app(ReviewComparisons::class)->add($stale, [['runner' => null, 'provider' => 'claude-code', 'model' => null, 'effort' => null, 'verify' => false]], true))->toBe(1);
+
+    $comparison->refresh();
+    expect(array_column($comparison->rows, 'build'))->toBe([51, 52, 53])
+        ->and($comparison->analysis['labels'])->toBe(['A', 'B']);
+});
+
+it('reads the reviews that could be read when the analysis was asked for, not a setup added while it waited', function () {
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570/diff' => Http::response("diff --git a/app/Export.php b/app/Export.php\n+x\n"),
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570' => Http::response(['id' => 570, 'title' => 'Add the export']),
+    ]);
+    Queue::fake();
+    $connection = Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [],
+    ]);
+
+    livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])->callAction('analyze', ['connection' => $connection->id]);
+
+    $job = null;
+    Queue::assertPushed(AnalyzeReviewComparison::class, function (AnalyzeReviewComparison $pushed) use (&$job): bool {
+        $job = $pushed;
+
+        return $pushed->labels === ['A'];
+    });
+
+    // B is added and ends before the worker gets to it.
+    $comparison->update(['rows' => [['build' => 51]]]);
+    ($this->run)(51, [['id' => 'F1', 'title' => 'Late from B']]);
+    Comparer::fake([['summary' => 'A alone.', 'findings' => []]]);
+    $job->handle(app(ReviewComparisons::class));
+
+    Comparer::assertPrompted(fn ($prompt): bool => ! str_contains($prompt->prompt, 'Late from B'));
+    expect($comparison->refresh()->analysis['labels'])->toBe(['A'])
+        ->and(array_keys(ReviewComparisons::scores($comparison)))->toBe(['A']);
 });
