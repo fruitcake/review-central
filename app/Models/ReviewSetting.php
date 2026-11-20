@@ -35,6 +35,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $strategy off, record or apply: whether pull requests are classified, and whether that decides their effort and model
  * @property string|null $strategy_effort the effort a simple pull request runs at; normal and complex ones a step and two higher
  * @property string|null $strategy_model the model tier a simple pull request runs at: cheapest, default or smartest
+ * @property int|null $max_rounds Follow-up rounds that may add findings; null inherits, five where nothing sets it
  * @property int|null $follow_ups Reviews a container job carries on with after its own; null inherits.
  * @property CarbonInterface|null $created_at
  * @property CarbonInterface|null $updated_at
@@ -52,6 +53,7 @@ class ReviewSetting extends Model
         return [
             'providers' => 'array',
             'follow_ups' => 'integer',
+            'max_rounds' => 'integer',
             'claude_effort' => ReviewEffort::class,
             'codex_effort' => ReviewEffort::class,
             'ocr_effort' => ReviewEffort::class,

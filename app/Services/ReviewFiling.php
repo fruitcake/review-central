@@ -88,6 +88,12 @@ class ReviewFiling
         }
 
         $findings = isset($validated['findings']) ? $this->findings($validated['findings']) : null;
+        $summary = $validated['summary'] ?? null;
+
+        // The rules for follow-up rounds, where the review did not keep to them itself.
+        if ($findings !== null) {
+            ['findings' => $findings, 'summary' => $summary] = app(ReviewFollowUps::class)->apply($run, $findings, $summary);
+        }
 
         // Kept with the result it decides, so whoever reads the run later can tell
         // which of its findings held the merge.
@@ -96,7 +102,7 @@ class ReviewFiling
         $run->finish(
             $status,
             $this->result($validated['result'] ?? null, $findings, $validated['fail_on'] ?? null),
-            $validated['summary'] ?? null,
+            $summary,
             $findings,
             $timed,
             // The step's own measurement, used only when the server has no start of

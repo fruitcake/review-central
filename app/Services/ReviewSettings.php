@@ -109,6 +109,17 @@ class ReviewSettings
         ];
     }
 
+    /**
+     * The follow-up rounds a pull request's review may add findings in: the
+     * repository's own number, or the team's, or five.
+     */
+    public static function maxRounds(Repository $repository): int
+    {
+        $own = $repository->reviewSetting->max_rounds ?? self::defaults($repository->tenant)->max_rounds;
+
+        return max(0, (int) ($own ?? ReviewFollowUps::MAX_ROUNDS));
+    }
+
     /** The most reviews one container job carries on with after its own. */
     public const MAX_FOLLOW_UPS = 2;
 
@@ -132,7 +143,7 @@ class ReviewSettings
     {
         $setting = self::defaults($tenant);
         // The notes on whose turn are the team's alone, and no repository's.
-        $setting->fill(array_intersect_key($data, self::VARIABLES + self::STRATEGY_FIELDS + ['providers' => true, 'follow_ups' => true, 'turn_notes' => true, 'turn_model' => true]));
+        $setting->fill(array_intersect_key($data, self::VARIABLES + self::STRATEGY_FIELDS + ['providers' => true, 'follow_ups' => true, 'max_rounds' => true, 'turn_notes' => true, 'turn_model' => true]));
         $setting->save();
     }
 
@@ -152,7 +163,7 @@ class ReviewSettings
      */
     public static function saveFor(Repository $repository, array $data): void
     {
-        $data = array_intersect_key($data, self::VARIABLES + self::STRATEGY_FIELDS + ['providers' => true, 'follow_ups' => true]);
+        $data = array_intersect_key($data, self::VARIABLES + self::STRATEGY_FIELDS + ['providers' => true, 'follow_ups' => true, 'max_rounds' => true]);
 
         if (array_filter($data, fn (mixed $value): bool => filled($value)) === []) {
             $repository->reviewSetting()->delete();

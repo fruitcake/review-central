@@ -12,6 +12,7 @@ use App\Models\ReviewRun;
 use App\Models\ReviewSetting;
 use App\Services\Currency;
 use App\Services\ReviewCredentials;
+use App\Services\ReviewFollowUps;
 use App\Services\ReviewSettings;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -134,6 +135,13 @@ class ReviewSettingsForm
                     default => 'Off',
                 })
                 ->helperText('Up to five new findings that would block the merge are each checked once more, in a fresh session that did not write them. Each check adds to the review\'s time and cost.'),
+            TextInput::make('max_rounds')
+                ->label('Follow-up rounds with new findings')
+                ->integer()
+                ->minValue(0)
+                ->maxValue(50)
+                ->placeholder(fn (): string => $defaults !== null && $defaults->max_rounds !== null ? "Default: {$defaults->max_rounds}" : (string) ReviewFollowUps::MAX_ROUNDS)
+                ->helperText('After this many reviews of a pull request after its first, nothing new is recorded: the open findings are still checked, and what the review would add goes under Open questions for a person. From the third follow-up on, a new finding below HIGH no longer holds the merge. Against a review, a fix, a review on and on.'),
             Select::make('follow_ups')
                 ->label('New commit during a review')
                 ->options([0 => 'Start a fresh review for it', 1 => 'Carry on with it, once', 2 => 'Carry on with it, up to twice'])
@@ -517,7 +525,7 @@ class ReviewSettingsForm
     public static function state(?ReviewSetting $setting): array
     {
         return $setting === null ? [] : collect($setting->attributesToArray())
-            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model'])
+            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'max_rounds', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model'])
             ->all();
     }
 }

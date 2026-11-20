@@ -28,6 +28,16 @@ Under **Review defaults → By pull request** a team can have each pull request 
 
 The model works the same along *cheapest*, *default* (the default start) and *smartest*, the Laravel AI SDK's tiers. What it picks replaces every reviewer's effort (Pi's in a trial too), and Claude Code's and Codex's model; OpenCodeReview keeps its model. A review from the diff alone runs at it the same way. A trial that names its own model or effort runs at those. When the classification fails, the review runs at what is set and the log says why. A repository can set all three for itself under **Review settings**. The summary at the top of Review defaults says what each complexity runs at.
 
+### Follow-up rounds
+
+A review of a pull request after its first is a follow-up: it re-checks the open findings and looks for new ones only in what changed since. So a review, a fix and another review do not go on for ever, the review server holds every follow-up to three rules, whatever the reviewer itself does:
+
+- Once the review says it is **not converging** (the new findings sit in the fixes for the previous ones), only new HIGH and CRITICAL findings are kept. The rest are listed under *Open questions* in the summary, for a person.
+- From the **third follow-up** on, a new finding below HIGH is still reported but no longer holds the merge, in later rounds neither.
+- After **Follow-up rounds with new findings** (Review defaults, or a repository's own Review settings; five unless set), nothing new is recorded at all. The open findings are still checked, and what the review would add goes under *Open questions*.
+
+Trials are not rounds of a pull request's review and are left alone.
+
 ## What the reviewer reads in the repository
 
 A team writes down how its code works, and what counts as a defect there, in the repository itself. The reviewer reads these files where they exist, and they win over its general rules:

@@ -48,4 +48,6 @@ def blocks($fail_on):
     # A number, or the string the model wrote it as: "5" sorts above 8 in jq.
     and ((.confidence // 10) | if type == "number" then . else (tonumber? // 10) end) >= 8
     and (.introduced != false)
+    # Set by the review server on a late follow-up's finding below HIGH.
+    and (.advisory != true)
     and reaches(.severity; threshold($fail_on; ((.category // "") | ascii_downcase)));
