@@ -122,8 +122,9 @@ class TicketResource extends Resource
                         // Nothing else reads its tickets now.
                         $connection = Connection::query()->find($record->connection_id);
 
+                        // Outright, with its token: only a host's connection is kept.
                         if ($connection !== null && ! $connection->ticketSources()->exists()) {
-                            $connection->delete();
+                            $connection->remove();
                         }
                     }),
             ]);

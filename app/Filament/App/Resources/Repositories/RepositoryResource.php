@@ -15,6 +15,7 @@ use App\Models\Tenant;
 use App\Runners\Runners;
 use App\Services\Currency;
 use App\Services\RepositoryReadiness;
+use App\Services\RepositorySetup;
 use App\Services\ReviewSettings;
 use App\Services\ReviewStack;
 use BackedEnum;
@@ -54,9 +55,11 @@ class RepositoryResource extends Resource
             ->components([
                 Select::make('connection_id')
                     ->label('Connection')
-                    // Editing, only those that reach the same host: GitHub with a token and as the app.
+                    // Editing, only those that reach the same host, GitHub with a token and as
+                    // the app, and the repository's owner there.
                     ->options(fn (?Repository $record): array => self::connections()->get()
-                        ->filter(fn (Connection $connection): bool => $record === null || $connection->sameHostAs($record->integration))
+                        ->filter(fn (Connection $connection): bool => $record === null
+                            || ($connection->sameHostAs($record->integration) && $connection->reachesOwner($record->workspace)))
                         ->pluck('name', 'id')->all())
                     // One connection is the usual case, and then there is nothing to choose.
                     ->default(fn (): ?int => self::connections()->count() === 1 ? self::connections()->value('id') : null)
@@ -175,7 +178,9 @@ class RepositoryResource extends Resource
 
                             Notification::make()->title('Saved')->success()->send();
                         }),
-                    EditAction::make(),
+                    EditAction::make()
+                        // Moved where a removed copy of it is, the two change places.
+                        ->using(fn (Repository $record, array $data, RepositorySetup $setup): Repository => $setup->update($record, $data)),
                     DeleteAction::make()
                         ->label('Remove')
                         ->modalHeading('Remove the repository?')

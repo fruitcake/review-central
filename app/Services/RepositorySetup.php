@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\Connection;
 use App\Models\Repository;
 use App\Models\Tenant;
+use Illuminate\Support\Facades\DB;
 use Throwable;
 
 /**
@@ -49,16 +50,55 @@ class RepositorySetup
             ->where('workspace', (string) ($connection->setting('workspace') ?? $data['workspace'] ?? ''))
             ->where('slug', (string) ($data['slug'] ?? ''))
             ->get()
-            ->first(fn (Repository $repository): bool => $repository->integration->sameHostAs($connection));
+            // The one on this connection first: it needs no move, which another
+            // removed copy here would be in the way of.
+            ->sortByDesc(fn (Repository $repository): bool => $repository->connection_id === $connection->getKey())
+            ->first(fn (Repository $repository): bool => $repository->integration->sameHostAs($connection) && $connection->reachesOwner($repository->workspace));
 
         if ($removed !== null) {
-            $removed->restore();
-            $removed->update(['connection_id' => $connection->getKey()]);
+            // Back and moved in one save, so a move that fails brings nothing back.
+            $removed->forceFill(['connection_id' => $connection->getKey(), 'deleted_at' => null])->save();
 
             return $removed;
         }
 
         return Repository::query()->create(['tenant_id' => $tenant->getKey(), 'connection_id' => $connection->getKey()] + $this->complete($data, $connection));
+    }
+
+    /**
+     * Saves an edit. A repository moved to a connection where a removed copy of it
+     * is, as when it was added there once and removed again, changes places with
+     * that copy: the database holds one per connection, removed or not, and both
+     * keep their history.
+     *
+     * @param  array<string, mixed>  $data  as the form sent it
+     */
+    public function update(Repository $repository, array $data): Repository
+    {
+        return DB::transaction(function () use ($repository, $data): Repository {
+            $from = $repository->connection_id;
+            $to = (int) ($data['connection_id'] ?? $from);
+            $slug = (string) ($data['slug'] ?? $repository->slug);
+
+            $removed = $to === $from ? null : Repository::onlyTrashed()
+                ->where('connection_id', $to)
+                ->where('workspace', $repository->workspace)
+                ->where('slug', $slug)
+                ->first();
+
+            if ($removed === null) {
+                $repository->update($data);
+
+                return $repository;
+            }
+
+            // Out of the way for a moment, under a name no repository has.
+            $removed->forceFill(['slug' => "{$slug}~{$removed->getKey()}"])->save();
+            $repository->update($data);
+            $removed->forceFill(['connection_id' => $from, 'slug' => $slug])->save();
+
+            return $repository;
+        });
     }
 
     /**
