@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 
@@ -983,11 +984,28 @@ it('keeps a trial\'s session apart from the branch\'s, and forgets a branch\'s w
 
     $home = app(ReviewSessions::class)->home($this->repository, 'feature/export');
     File::put("{$home}/.review-session", "session-one\n");
+    File::put("{$trialHome}/.review-session", "trial-session\n");
+
+    // The trial is on record as a custom run of the branch, with its build.
+    ReviewRun::query()->updateOrCreate(
+        ['repository_id' => $this->repository->id, 'build_number' => 41],
+        ['tenant_id' => $this->repository->tenant_id, 'workspace' => 'acme', 'slug' => $this->repository->slug, 'branch' => 'feature/export',
+            'commit' => str_repeat('a', 40), 'custom' => true, 'kind' => 'pull-request', 'status' => ReviewRun::STATUS_UNPUBLISHED, 'started_at' => now()],
+    );
+
+    // And its archive on the sessions disk, as another worker would have it.
+    config(['review.container.sessions.disk' => 'sessions']);
+    Storage::fake('sessions');
+    $archive = "review/sessions/{$this->repository->id}/".substr(hash('sha256', ReviewSessions::forTrial('feature/export', 41)), 0, 32).'.tar.gz';
+    Storage::disk('sessions')->put($archive, 'archive');
 
     Queue::fake();
     deliver('pullrequest:fulfilled', pullRequestPayload(['state' => 'MERGED']))->assertOk();
 
-    expect(File::isDirectory($home))->toBeFalse();
+    // Merged: the branch's session goes, and so do those of the trials on it.
+    expect(File::isDirectory($home))->toBeFalse()
+        ->and(File::isDirectory($trialHome))->toBeFalse();
+    Storage::disk('sessions')->assertMissing($archive);
 });
 
 it('keeps a branch\'s home while a review of it still runs, when its pull request is merged', function () {

@@ -255,13 +255,26 @@ class ReviewSessions
             return;
         }
 
-        $directory = $this->directory($repository, $branch);
+        // The branch's own session, and those of the trials on it: each holds the
+        // reviewer's transcript of the code, which has no use once it is merged.
+        $trials = ReviewRun::query()
+            ->where('repository_id', $repository->getKey())
+            ->where('branch', $branch)
+            ->where('custom', true)
+            ->where('kind', 'pull-request')
+            ->whereNotNull('build_number')
+            ->pluck('build_number')
+            ->map(fn (int $build): string => self::forTrial($branch, $build));
 
-        if ($directory !== null) {
-            File::deleteDirectory($directory);
+        foreach ([$branch, ...$trials] as $session) {
+            $directory = $this->directory($repository, $session);
+
+            if ($directory !== null) {
+                File::deleteDirectory($directory);
+            }
+
+            rescue(fn () => $this->disk()?->delete($this->key($repository, $session)), null, false);
         }
-
-        rescue(fn () => $this->disk()?->delete($this->key($repository, $branch)), null, false);
     }
 
     /**
