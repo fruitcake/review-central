@@ -24,7 +24,7 @@
                 <section @class(['rc-card', 'rc-pad', 'rc-excluded' => $excluded]) aria-labelledby="rc-col-{{ $label }}">
                     <div class="rc-card-head">
                         <div>
-                            <h2 id="rc-col-{{ $label }}">{{ $label }}{{ $label === 'A' ? ' · the review it started from' : '' }}{{ $excluded ? ' · left out' : '' }}</h2>
+                            <h2 id="rc-col-{{ $label }}">{{ $label }}{{ $label === 'A' ? ' · started from' : '' }}{{ $excluded ? ' · left out' : '' }}</h2>
                             <span class="rc-muted">
                                 @if ($run !== null)
                                     {{ ReviewComparisons::setup($run) }}
@@ -52,12 +52,13 @@
                             <dt>Cost</dt><dd>{{ $run->cost === null ? '—' : Currency::show((float) $run->cost) }}</dd>
                             <dt>Took</dt><dd>{{ $run->duration_seconds === null ? '—' : RunPresenter::duration((int) $run->duration_seconds) }}</dd>
                             <dt>Commit</dt><dd class="rc-mono">{{ substr($run->commit, 0, 12) }}</dd>
-                            @isset($scores[$label])
+                            {{-- Scores only from an analysis: before one, a row of noughts says nothing. --}}
+                            @if ($comparison->analysis !== null && isset($scores[$label]))
                                 <dt>Holds</dt><dd>{{ $scores[$label]['valid'] }}</dd>
                                 <dt>False positives</dt><dd>{{ $scores[$label]['false_positive'] }}</dd>
                                 <dt>Unclear</dt><dd>{{ $scores[$label]['unclear'] }}</dd>
                                 <dt>Missed</dt><dd>{{ $scores[$label]['missed'] }}</dd>
-                            @endisset
+                            @endif
                         </dl>
                         <a href="{{ ReviewRunResource::getUrl('view', ['record' => $run]) }}">Open the review</a>
                         <ol>

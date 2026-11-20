@@ -68,7 +68,7 @@ it('starts a trial for each setup from a review, and shows them side by side wit
     ($this->run)(51, [['id' => 'F1', 'severity' => 'LOW', 'title' => 'Export is slow']], attributes: ['agent' => 'codex-cli', 'model' => 'gpt-test', 'effort' => 'xhigh']);
 
     livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])
-        ->assertSee('A · the review it started from')
+        ->assertSee('A · started from')
         ->assertSee('Export leaks invoices')
         ->assertSee('codex-cli · gpt-test · effort xhigh')
         ->assertSee('Export is slow')
@@ -473,4 +473,15 @@ it('says what the scores are of after a later attempt failed, and for an analysi
         ->assertSee('The scores are of A, B.')
         ->assertSee('The reviews to analyse are A now')
         ->assertSee('It failed: Timed out');
+});
+
+it('shows no scores before an analysis', function () {
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [],
+    ]);
+
+    livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])
+        ->assertSee('A · started from')
+        ->assertDontSee('False positives');
 });
