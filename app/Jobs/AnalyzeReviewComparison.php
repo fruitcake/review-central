@@ -24,10 +24,20 @@ class AnalyzeReviewComparison implements ShouldQueue
     public int $tries = 1;
 
     /**
+     * The reviews it reads, taken when it was asked for. A property with a default
+     * of its own, so a job queued before it existed still reads as null.
+     *
+     * @var array<int, string>|null
+     */
+    public ?array $labels = null;
+
+    /**
      * @param  array<int, string>|null  $labels  the reviews it reads, taken when it was asked for
      */
-    public function __construct(public int $comparisonId, public int $connectionId, public ?string $model = null, public ?array $labels = null)
+    public function __construct(public int $comparisonId, public int $connectionId, public ?string $model = null, ?array $labels = null)
     {
+        $this->labels = $labels;
+
         // The queue the reviews run on, whose workers wait long enough for one
         // request with a whole diff; the default one gives up on a job sooner.
         $this->onConnection(config('review.container.connection') ?: null)

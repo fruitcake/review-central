@@ -498,3 +498,20 @@ it('says a setup could not be started when starting it fails, rather than leave 
     expect($comparison->rows[0]['error'])->toBe('It could not be started: The queue is down')
         ->and($comparison->done())->toBeTrue();
 });
+
+it('lets go of a place whose trial never started, and reads a job queued before it knew which reviews to read', function () {
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [['provider' => 'codex-cli', 'reserved_at' => now()->subMinutes(11)->toIso8601String()]],
+    ]);
+
+    expect($comparison->done())->toBeTrue();
+    livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])->assertSee('It was not started');
+
+    $comparison->update(['rows' => [['provider' => 'codex-cli', 'reserved_at' => now()->toIso8601String()]]]);
+    expect($comparison->refresh()->done())->toBeFalse();
+
+    // As a worker restores a job serialised before the property existed.
+    $old = (new ReflectionClass(AnalyzeReviewComparison::class))->newInstanceWithoutConstructor();
+    expect($old->labels)->toBeNull();
+});

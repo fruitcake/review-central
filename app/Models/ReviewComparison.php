@@ -23,7 +23,7 @@ use Illuminate\Support\Facades\DB;
  * @property int $pull_request_id
  * @property int|null $review_run_id
  * @property int|null $user_id
- * @property array<int, array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool, ignore_existing?: bool, build?: int|null, repository_id?: int, error?: string|null}> $rows
+ * @property array<int, array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool, ignore_existing?: bool, build?: int|null, repository_id?: int, error?: string|null, reserved_at?: string}> $rows
  * @property array<int, string>|null $excluded the labels of the columns left out
  * @property string|null $analysis_status running, finished or failed
  * @property string|null $analysis_model
@@ -80,7 +80,7 @@ class ReviewComparison extends Model
      * The columns: the review it was started from, labelled A, then each setup's
      * run as B, C and on, or null for one whose run has not started or could not.
      *
-     * @return Collection<string, array{label: string, run: ReviewRun|null, row: array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool, ignore_existing?: bool, build?: int|null, repository_id?: int, error?: string|null}|null}>
+     * @return Collection<string, array{label: string, run: ReviewRun|null, row: array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool, ignore_existing?: bool, build?: int|null, repository_id?: int, error?: string|null, reserved_at?: string}|null}>
      */
     public function columns(): Collection
     {
@@ -111,7 +111,7 @@ class ReviewComparison extends Model
     /**
      * The columns not left out: what is analysed, scored and waited for.
      *
-     * @return Collection<string, array{label: string, run: ReviewRun|null, row: array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool, ignore_existing?: bool, build?: int|null, repository_id?: int, error?: string|null}|null}>
+     * @return Collection<string, array{label: string, run: ReviewRun|null, row: array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool, ignore_existing?: bool, build?: int|null, repository_id?: int, error?: string|null, reserved_at?: string}|null}>
      */
     public function active(): Collection
     {
@@ -144,9 +144,7 @@ class ReviewComparison extends Model
      */
     public function settled(): bool
     {
-        return $this->columns()->every(fn (array $column): bool => $column['run'] === null
-            ? ($column['row']['error'] ?? null) !== null
-            : ! in_array($column['run']->status, [ReviewRun::STATUS_QUEUED, ReviewRun::STATUS_RUNNING, ReviewRun::STATUS_PENDING], true));
+        return $this->columns()->every(fn (array $column): bool => self::ended($column));
     }
 
     /**
@@ -154,9 +152,43 @@ class ReviewComparison extends Model
      */
     public function done(): bool
     {
-        return $this->active()->every(fn (array $column): bool => $column['run'] === null
-            ? ($column['row']['error'] ?? null) !== null
-            : ! in_array($column['run']->status, [ReviewRun::STATUS_QUEUED, ReviewRun::STATUS_RUNNING, ReviewRun::STATUS_PENDING], true));
+        return $this->active()->every(fn (array $column): bool => self::ended($column));
+    }
+
+    /** How long a setup's place waits for its trial to start before it is let go, in minutes. */
+    public const RESERVATION_MINUTES = 10;
+
+    /**
+     * Why a column has no review: the reason its trial could not start, or that it
+     * never started within the time a place is kept; null while it may still come.
+     *
+     * @param  array{label: string, run: ReviewRun|null, row: array<string, mixed>|null}  $column
+     */
+    public static function notStarted(array $column): ?string
+    {
+        if ($column['run'] !== null || $column['row'] === null) {
+            return null;
+        }
+
+        if (is_string($column['row']['error'] ?? null)) {
+            return $column['row']['error'];
+        }
+
+        $reserved = $column['row']['reserved_at'] ?? null;
+
+        return ! isset($column['row']['build']) && is_string($reserved) && now()->subMinutes(self::RESERVATION_MINUTES)->isAfter($reserved)
+            ? 'It was not started: what was starting it stopped first. Add it again.'
+            : null;
+    }
+
+    /**
+     * @param  array{label: string, run: ReviewRun|null, row: array<string, mixed>|null}  $column
+     */
+    protected static function ended(array $column): bool
+    {
+        return $column['run'] === null
+            ? self::notStarted($column) !== null
+            : ! in_array($column['run']->status, [ReviewRun::STATUS_QUEUED, ReviewRun::STATUS_RUNNING, ReviewRun::STATUS_PENDING], true);
     }
 
     /**

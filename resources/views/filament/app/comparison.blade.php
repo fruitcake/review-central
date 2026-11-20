@@ -36,7 +36,7 @@
                         @if ($run !== null)
                             @php($outcome = RunPresenter::outcome($run))
                             <span class="rc-chip rc-chip-{{ $outcome['tone'] }}">{{ $outcome['label'] }}</span>
-                        @elseif (($column['row']['error'] ?? null) !== null)
+                        @elseif (ReviewComparison::notStarted($column) !== null)
                             <span class="rc-chip rc-chip-failed">Not started</span>
                         @else
                             <span class="rc-chip rc-chip-running">Waiting</span>
@@ -46,7 +46,7 @@
                     <button type="button" class="rc-link-button" wire:click="toggleColumn(@js($label))">{{ $excluded ? 'Bring back' : 'Leave out' }}</button>
 
                     @if ($run === null)
-                        <p class="rc-muted">{{ $column['row']['error'] ?? 'Its review has not started yet.' }}</p>
+                        <p class="rc-muted">{{ ReviewComparison::notStarted($column) ?? 'Its review has not started yet.' }}</p>
                     @else
                         <dl class="rc-details">
                             <dt>Cost</dt><dd>{{ $run->cost === null ? '—' : Currency::show((float) $run->cost) }}</dd>

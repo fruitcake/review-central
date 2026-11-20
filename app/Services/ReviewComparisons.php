@@ -73,7 +73,8 @@ class ReviewComparisons
             }
 
             $existing = array_values($locked->rows);
-            $new = array_slice(array_values($rows), 0, $room);
+            // Each place says when it was taken, so one whose start never came is let go.
+            $new = array_map(fn (array $row): array => $row + ['reserved_at' => now()->toIso8601String()], array_slice(array_values($rows), 0, $room));
             $locked->update(['rows' => [...$existing, ...$new], 'analysis' => $analysis]);
 
             return array_combine(range(count($existing), count($existing) + count($new) - 1), $new);
@@ -98,12 +99,13 @@ class ReviewComparisons
                 $started = $row + ['error' => 'It could not be started: '.Str::limit($exception->getMessage(), 300)];
             }
 
+            // Tried again where the database was busy: only the saving, never the paid trial.
             DB::transaction(function () use ($comparison, $index, $started): void {
                 $locked = ReviewComparison::query()->whereKey($comparison->getKey())->lockForUpdate()->firstOrFail();
                 $saved = array_values($locked->rows);
                 $saved[$index] = $started;
                 $locked->update(['rows' => $saved]);
-            });
+            }, 5);
         }
 
         $comparison->refresh();
