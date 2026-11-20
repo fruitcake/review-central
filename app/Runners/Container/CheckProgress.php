@@ -41,7 +41,10 @@ class CheckProgress
             ->with('repository.integration')
             ->first();
 
-        if ($run === null || $run->status !== ReviewRun::STATUS_RUNNING) {
+        // Only the pull request's own review: the check is its. A trial on the same
+        // commit stays off the pull request, and a security review's findings are
+        // not for whoever reads it.
+        if ($run === null || $run->status !== ReviewRun::STATUS_RUNNING || $run->custom || $run->kind !== 'pull-request') {
             return;
         }
 

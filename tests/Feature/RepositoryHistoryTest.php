@@ -3,6 +3,7 @@
 use App\Models\Connection;
 use App\Models\Repository;
 use App\Models\ReviewRun;
+use App\Models\TicketSource;
 use App\Services\RepositorySetup;
 
 beforeEach(function () {
@@ -62,4 +63,50 @@ it('deletes a connection of another kind outright', function () {
     $llm->remove();
 
     expect(Connection::withTrashed()->find($llm->id))->toBeNull();
+});
+
+it('moves a repository to where a removed copy of it is by changing places with that copy', function () {
+    $token = Connection::factory()->gitHubSource()->create(['tenant_id' => $this->repository->tenant_id, 'settings' => ['workspace' => 'acme']]);
+    $app = Connection::factory()->create(['tenant_id' => $this->repository->tenant_id, 'driver' => 'github-app', 'settings' => ['workspace' => 'acme']]);
+    $live = Repository::factory()->create(['tenant_id' => $this->repository->tenant_id, 'connection_id' => $token->id, 'workspace' => 'acme', 'slug' => 'site']);
+    $removed = Repository::factory()->create(['tenant_id' => $this->repository->tenant_id, 'connection_id' => $app->id, 'workspace' => 'acme', 'slug' => 'site']);
+    $removed->delete();
+
+    app(RepositorySetup::class)->update($live, ['connection_id' => $app->id, 'name' => 'Site']);
+
+    expect($live->refresh()->only(['connection_id', 'slug', 'name']))->toBe(['connection_id' => $app->id, 'slug' => 'site', 'name' => 'Site'])
+        ->and($live->trashed())->toBeFalse()
+        ->and(Repository::withTrashed()->find($removed->id)->only(['connection_id', 'slug']))->toBe(['connection_id' => $token->id, 'slug' => 'site'])
+        ->and(Repository::withTrashed()->find($removed->id)->trashed())->toBeTrue();
+});
+
+it('brings back the removed copy on the chosen connection before one on another', function () {
+    $token = Connection::factory()->gitHubSource()->create(['tenant_id' => $this->repository->tenant_id, 'settings' => ['workspace' => 'acme']]);
+    $app = Connection::factory()->create(['tenant_id' => $this->repository->tenant_id, 'driver' => 'github-app', 'settings' => ['workspace' => 'acme']]);
+    $onToken = Repository::factory()->create(['tenant_id' => $this->repository->tenant_id, 'connection_id' => $token->id, 'workspace' => 'acme', 'slug' => 'site']);
+    $onApp = Repository::factory()->create(['tenant_id' => $this->repository->tenant_id, 'connection_id' => $app->id, 'workspace' => 'acme', 'slug' => 'site']);
+    $onToken->delete();
+    $onApp->delete();
+
+    $back = app(RepositorySetup::class)->add($onApp->tenant, $app, ['slug' => 'site', 'review_stack' => []]);
+
+    expect($back->id)->toBe($onApp->id)
+        ->and($onToken->refresh()->trashed())->toBeTrue();
+});
+
+it('moves a repository only to a connection that reaches its owner', function () {
+    $any = Connection::factory()->gitHubSource()->create(['tenant_id' => $this->repository->tenant_id, 'settings' => []]);
+    $acme = Connection::factory()->create(['tenant_id' => $this->repository->tenant_id, 'driver' => 'github-app', 'settings' => ['workspace' => 'Acme']]);
+    $other = Connection::factory()->create(['tenant_id' => $this->repository->tenant_id, 'driver' => 'github-app', 'settings' => ['workspace' => 'other-org']]);
+
+    expect($any->reachesOwner('other-org'))->toBeTrue()
+        ->and($acme->reachesOwner('acme'))->toBeTrue()
+        ->and($other->reachesOwner('acme'))->toBeFalse();
+});
+
+it('keeps a ticket source for a removed repository for that repository', function () {
+    $source = TicketSource::factory()->create(['tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id]);
+    $this->repository->delete();
+
+    expect($source->refresh()->repository?->slug)->toBe('shop');
 });
