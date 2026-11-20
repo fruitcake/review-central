@@ -285,7 +285,8 @@ class PlatformSettings
                     continue;
                 }
 
-                $value = Crypt::encryptString((string) $value);
+                // Pasted, often with a space or a line break that would make it another key.
+                $value = Crypt::encryptString(trim((string) $value));
             }
 
             PlatformSetting::query()->updateOrCreate(['key' => $key], ['value' => $value]);

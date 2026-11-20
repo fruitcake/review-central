@@ -34,7 +34,12 @@ class CloudflareTest
 
         if (filled(config("filesystems.disks.{$disk}.key")) && $bucket !== '') {
             $check = $this->setup->cloudflareBucket($disk, $bucket);
-            $lines[] = ['ok' => $check['state'] === SetupCheck::OK, 'title' => 'Bucket', 'detail' => $check['detail'].($check['fix'] === null ? '' : ' '.$check['fix'])];
+            $settings = app(PlatformSettings::class);
+            $from = fn (string $setting): string => ($variable = $settings->setByEnvironment($setting)) === null ? 'Settings' : "{$variable} in .env";
+            // A key and a secret that are not of one token answer with a signature that does not match.
+            $origin = ' The key ID '.substr((string) config("filesystems.disks.{$disk}.key"), 0, 8).'… is from '.$from(PlatformSettings::R2_ACCESS_KEY_ID)
+                .', the secret from '.$from(PlatformSettings::R2_SECRET_ACCESS_KEY).'.';
+            $lines[] = ['ok' => $check['state'] === SetupCheck::OK, 'title' => 'Bucket', 'detail' => $check['detail'].($check['fix'] === null ? '' : ' '.$check['fix']).($check['state'] === SetupCheck::OK ? '' : $origin)];
         }
 
         if (filled(config('review.cloudflare.url')) && filled(config('review.cloudflare.token'))) {

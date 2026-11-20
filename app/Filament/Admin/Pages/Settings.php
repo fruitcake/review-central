@@ -193,9 +193,13 @@ class Settings extends Page
                             ->helperText('Made by the deploy when it is not there.')),
                         self::overridable(TextInput::make(PlatformSettings::R2_ACCESS_KEY_ID)
                             ->label('Bucket access key ID')
+                            ->regex('/^\s*[a-f0-9]{32}\s*$/')
+                            ->validationMessages(['regex' => 'The Access Key ID Cloudflare shows once the token is made: 32 characters, 0 to 9 and a to f.'])
                             ->helperText('R2 → Manage API tokens → Create API token, with Object Read & Write on the bucket only: in a custom token, Workers R2 Storage Bucket Item with Read and Edit both.')),
                         self::overridable(TextInput::make(PlatformSettings::R2_SECRET_ACCESS_KEY)
                             ->label('Bucket secret access key')
+                            ->regex('/^\s*[a-f0-9]{64}\s*$/')
+                            ->validationMessages(['regex' => 'The Secret Access Key Cloudflare shows once the token is made: 64 characters, 0 to 9 and a to f. Not the token value above it.'])
                             ->password()
                             ->revealable()
                             ->autocomplete('off')
