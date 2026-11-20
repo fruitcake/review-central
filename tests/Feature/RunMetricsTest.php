@@ -1,12 +1,15 @@
 <?php
 
+use App\Filament\Admin\Pages\Platform;
 use App\Models\Repository;
 use App\Models\ReviewRun;
+use App\Models\User;
 use App\Runners\Container\CloudflareSandbox;
 use App\Runners\Container\RunLog;
 use App\Services\Capacity;
 use App\Services\PlatformSettings;
 use App\Services\RunMetrics;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Support\Facades\File;
 
 beforeEach(function () {
@@ -87,7 +90,7 @@ it('advises the size the sandboxes\' own measurements fit', function () {
 
     expect($sizing)->toMatchArray(['instance' => 'standard-2', 'runs' => 6, 'peak_memory_mb' => 780, 'starved_percent' => 0, 'suggested' => 'basic'])
         ->and($sizing['advice'])->toContain('basic (1 GiB) fits as well and costs')
-        ->and(app(Capacity::class)->report(now()->subDays(30))['advice'])->toContain(['tone' => 'changes', 'label' => 'Change size', 'title' => 'Sandbox size', 'body' => $sizing['advice']]);
+        ->and(app(Capacity::class)->report(now()->subDays(30))['advice'])->toContain(['tone' => 'changes', 'label' => 'Change size', 'title' => 'Sandbox size', 'body' => $sizing['advice'], 'apply' => 'basic', 'settings' => true]);
 });
 
 it('advises a bigger size when the steps around the model are short of processor', function () {
@@ -108,6 +111,34 @@ it('advises a bigger size when the steps around the model are short of processor
         ->and($sizing['advice'])->toContain('basic is short of processor');
 });
 
+it('waits after a change of size, and never sends it back to a size that was short of processor', function () {
+    $repository = Repository::factory()->create();
+    $starved = ['peak_memory_mb' => 500, 'steps' => [['name' => 'composer', 'seconds' => 60, 'starved_percent' => 84], ['name' => 'reviewer', 'seconds' => 200, 'starved_percent' => 0]]];
+    $roomy = ['peak_memory_mb' => 500, 'steps' => [['name' => 'composer', 'seconds' => 60, 'starved_percent' => 5], ['name' => 'reviewer', 'seconds' => 200, 'starved_percent' => 0]]];
+
+    foreach (range(1, 5) as $build) {
+        sandboxRun($repository, $build, 'standard-1', $starved);
+    }
+
+    config(['review.cloudflare.instance' => 'standard-1']);
+    expect(app(Capacity::class)->sizing())->suggested->toBe('standard-2')->measuring->toBeFalse();
+
+    // Moved up: nothing yet of standard-2's processor, so no advice to go back down.
+    config(['review.cloudflare.instance' => 'standard-2']);
+    sandboxRun($repository, 6, 'standard-2', $roomy);
+
+    expect(app(Capacity::class)->sizing())->suggested->toBe('standard-2')->measuring->toBeTrue()
+        ->and(app(Capacity::class)->report(now()->subDays(30))['advice'])->toContain(['tone' => 'neutral', 'label' => 'Measuring', 'title' => 'Sandbox size', 'body' => app(Capacity::class)->sizing()['advice']]);
+
+    // Measured: its memory alone would fit basic, but standard-1 was already short of processor.
+    foreach (range(7, 10) as $build) {
+        sandboxRun($repository, $build, 'standard-2', $roomy);
+    }
+
+    expect(app(Capacity::class)->sizing())->suggested->toBe('standard-2')->measuring->toBeFalse()
+        ->and(app(Capacity::class)->sizing()['advice'])->toContain('standard-2 (6 GiB) fits');
+});
+
 it('runs sandboxes in the size picked under Settings, where the environment picks none', function () {
     expect(CloudflareSandbox::instance())->toBe('standard-1');
 
@@ -119,4 +150,50 @@ it('runs sandboxes in the size picked under Settings, where the environment pick
     config(['review.cloudflare.instance' => 'huge']);
 
     expect(CloudflareSandbox::instance())->toBe('standard-1');
+});
+
+it('sums up each step of the reviews in a sandbox, per size', function () {
+    $repository = Repository::factory()->create();
+
+    foreach ([[1, 40, 300], [2, 60, 500], [3, 50, 400]] as [$build, $composer, $reviewer]) {
+        sandboxRun($repository, $build, 'standard-2', ['peak_memory_mb' => 700, 'steps' => [
+            ['name' => 'composer', 'seconds' => $composer, 'peak_memory_mb' => 600 + $build, 'starved_percent' => 10],
+            ['name' => 'reviewer', 'seconds' => $reviewer, 'peak_memory_mb' => 400, 'starved_percent' => 0],
+        ]]);
+    }
+    sandboxRun($repository, 4, 'standard-1', ['peak_memory_mb' => 700, 'steps' => [['name' => 'composer', 'seconds' => 90, 'starved_percent' => 80]]]);
+
+    $sizes = collect(app(Capacity::class)->sandboxSteps(now()->subDays(7)))->keyBy('size');
+
+    expect($sizes->keys()->sort()->values()->all())->toBe(['standard-1', 'standard-2'])
+        ->and($sizes['standard-2']['runs'])->toBe(3)
+        ->and($sizes['standard-2']['steps'])->toBe([
+            ['name' => 'composer', 'runs' => 3, 'average' => 50, 'p90' => 60, 'peak_memory_mb' => 603, 'starved_percent' => 10],
+            ['name' => 'reviewer', 'runs' => 3, 'average' => 400, 'p90' => 500, 'peak_memory_mb' => 400, 'starved_percent' => 0],
+        ])
+        ->and($sizes['standard-1']['steps'][0])->toMatchArray(['average' => 90, 'starved_percent' => 80]);
+});
+
+it('applies the advised size from the Platform page', function () {
+    $this->actingAs(User::factory()->create(['is_admin' => true]));
+    Filament\Facades\Filament::setCurrentPanel(Filament\Facades\Filament::getPanel('admin'));
+
+    foreach (range(1, 5) as $build) {
+        sandboxRun(Repository::factory()->create(), $build, 'standard-1', ['peak_memory_mb' => 500, 'steps' => [['name' => 'composer', 'seconds' => 60, 'starved_percent' => 84], ['name' => 'reviewer', 'seconds' => 200, 'starved_percent' => 0]]]);
+    }
+
+    Pest\Livewire\livewire(Platform::class)
+        ->assertSee(['Use standard-2', 'Open Settings', 'Waited for processor', 'composer']);
+
+    Pest\Livewire\livewire(Platform::class)
+        ->callAction(TestAction::make('applySize')->arguments(['size' => 'standard-2']))
+        ->assertNotified('Sandboxes run on standard-2 from the next review on');
+
+    expect(CloudflareSandbox::instance())->toBe('standard-2');
+
+    // Only a size there is.
+    Pest\Livewire\livewire(Platform::class)
+        ->callAction(TestAction::make('applySize')->arguments(['size' => 'huge']));
+
+    expect(CloudflareSandbox::instance())->toBe('standard-2');
 });

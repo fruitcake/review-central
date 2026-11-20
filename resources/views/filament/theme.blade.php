@@ -269,6 +269,7 @@
     .rc-advice { display: flex; flex-direction: column; gap: 8px; }
     .rc-advice-item { display: flex; gap: 12px; align-items: flex-start; background: var(--rc-ground); border-radius: 0; padding: 12px 14px; }
     .rc-advice-item > span:last-child { display: flex; flex-direction: column; gap: 2px; }
+    .rc-advice-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 8px; }
     .rc-figures-plain { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
     .rc-figures-plain .rc-figure { display: flex; flex-direction: column; border: 1px solid var(--rc-border); border-radius: 0; }
     .rc-chart-short { height: 120px; position: relative; margin-top: 12px; }
