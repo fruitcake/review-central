@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Connections\LlmDriver;
 use App\Enums\ConnectionKind;
+use App\Enums\ReviewsFrom;
 use App\Jobs\AnswerReviewQuestion;
 use App\Llm\AnthropicDriver;
 use App\Llm\OpenAiDriver;
@@ -217,7 +218,13 @@ class ReviewQuestions
         // A reply that may be for someone else counts once it turns out to be for the reviewer.
         // A fork's pull request that may not be reviewed by itself is not answered
         // either: the answer reads its code in the same sandbox.
+        // Nor, where only the trusted accounts' pull requests are reviewed by
+        // themselves, anyone else's question: it would spend the budget as a
+        // /review of theirs would, which is refused too.
         $refusal = ReviewRequest::forkRefusal($repository, $pullRequest)
+            ?? ($repository->reviews_from === ReviewsFrom::Trusted && ! $repository->tenant->trusts($event->commentAuthorId, $event->commentAuthorNickname)
+                ? 'On this repository only the accounts this team trusts ask the reviewer. Someone in the team can ask it on the review\'s page in Review Central.'
+                : null)
             ?? $this->refusal($repository, (int) $pullRequest['id'], count: $addressing === self::ADDRESSED);
 
         if ($refusal !== null) {

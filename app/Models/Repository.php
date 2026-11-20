@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Connections\SourceControlDriver;
+use App\Enums\ReviewsFrom;
 use App\Runners\ReviewRunner;
 use App\Runners\Runners;
 use App\SourceControl\SourceControl;
@@ -25,6 +26,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property string|null $name
  * @property string|null $review_runner
  * @property bool $reviews_enabled
+ * @property ReviewsFrom $reviews_from Whose pull requests are reviewed by themselves, while reviews_enabled
  * @property array<int, string>|null $review_stack
  * @property array<int, string>|null $review_available_providers
  * @property CarbonInterface|null $review_available_at
@@ -37,6 +39,11 @@ class Repository extends Model
 
     protected $guarded = [];
 
+    /** @var array<string, mixed> */
+    protected $attributes = [
+        'reviews_from' => 'everyone',
+    ];
+
     /**
      * @return array<string, string>
      */
@@ -44,6 +51,7 @@ class Repository extends Model
     {
         return [
             'reviews_enabled' => 'boolean',
+            'reviews_from' => ReviewsFrom::class,
             'review_stack' => 'array',
             'review_available_providers' => 'array',
             'review_available_at' => 'datetime',

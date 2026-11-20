@@ -513,7 +513,12 @@ class GitHubClient implements SourceControl
             'source' => ['branch' => ['name' => $branch], 'commit' => ['hash' => (string) ($pull['head']['sha'] ?? '')]],
             'destination' => ['branch' => ['name' => (string) ($pull['base']['ref'] ?? '')], 'commit' => ['hash' => (string) ($pull['base']['sha'] ?? '')]],
             'merge_commit' => isset($pull['merge_commit_sha']) && isset($pull['merged_at']) ? ['hash' => (string) $pull['merge_commit_sha']] : null,
-            'author' => ['display_name' => (string) ($pull['user']['login'] ?? '')],
+            // As Bitbucket names them: the ID and the name signed in with.
+            'author' => [
+                'display_name' => (string) ($pull['user']['login'] ?? ''),
+                'account_id' => is_numeric($pull['user']['id'] ?? null) ? (string) $pull['user']['id'] : null,
+                'nickname' => is_string($pull['user']['login'] ?? null) ? $pull['user']['login'] : null,
+            ],
             'updated_on' => $pull['updated_at'] ?? null,
             // Whether its branch is in this repository: one from a fork is not.
             'from_fork' => $fork,

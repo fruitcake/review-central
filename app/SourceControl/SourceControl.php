@@ -16,7 +16,7 @@ use Illuminate\Http\Client\RequestException;
  *
  *  - pull request: id, title, description, state (OPEN, MERGED, DECLINED), draft,
  *    updated_on, source.branch.name, source.commit.hash, destination.branch.name,
- *    author.display_name, links.html.href
+ *    author.display_name, author.account_id, author.nickname, links.html.href
  *  - comment: id, content.raw, created_on, updated_on, deleted, user.display_name,
  *    user.account_id, user.nickname, inline.path, inline.to, parent.id, resolution
  *  - task: id, state (UNRESOLVED, RESOLVED), content.raw, comment.id
