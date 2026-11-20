@@ -4,6 +4,7 @@ use App\Exceptions\ReviewTrialRefused;
 use App\Filament\App\Resources\ReviewComparisons\Pages\ListReviewComparisons;
 use App\Filament\App\Resources\ReviewComparisons\Pages\ViewReviewComparison;
 use App\Filament\App\Resources\ReviewRuns\Pages\ViewReviewRun;
+use App\Filament\App\Resources\ReviewRuns\ReviewRunResource;
 use App\Jobs\AnalyzeReviewComparison;
 use App\Llm\Agents\Comparer;
 use App\Models\Connection;
@@ -13,6 +14,7 @@ use App\Models\ReviewRun;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\ReviewComparisons;
+use App\Services\ReviewSettings;
 use App\Services\ReviewTrial;
 use Filament\Facades\Filament;
 use Illuminate\Support\Facades\Http;
@@ -234,4 +236,16 @@ it('runs the analysis on the reviews\' queue, and leaves it to try again when it
         ->and($comparison->analysis_error)->toContain('Timed out');
 
     livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])->assertActionEnabled('analyze');
+});
+
+it('picks a trial\'s model from the reviewer\'s list, and gives the reviewer the model a tier is now', function () {
+    $anthropic = ReviewSettings::tierModels('anthropic');
+
+    expect(ReviewRunResource::trialModels('claude-code'))->toHaveKeys(['opus', 'smartest', $anthropic['smartest']])
+        ->and(ReviewRunResource::trialModels('codex-cli'))->toHaveKey('smartest')->not->toHaveKey('opus')
+        // A tier is read for one provider, so not for another reviewer or none.
+        ->and(ReviewRunResource::trialModels(null))->not->toHaveKeys(['smartest', 'opus'])
+        ->and(ReviewRunResource::trialOptions(['provider' => 'claude-code', 'model' => 'smartest'])['model'])->toBe($anthropic['smartest'])
+        ->and(ReviewRunResource::trialOptions(['provider' => 'codex-cli', 'model' => 'default'])['model'])->toBe(ReviewSettings::tierModels('openai')['default'])
+        ->and(ReviewRunResource::trialOptions(['provider' => 'pi', 'model' => 'google/gemini-3-pro'])['model'])->toBe('google/gemini-3-pro');
 });

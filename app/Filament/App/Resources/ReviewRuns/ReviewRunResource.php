@@ -3,8 +3,10 @@
 namespace App\Filament\App\Resources\ReviewRuns;
 
 use App\Enums\ReviewEffort;
+use App\Enums\ReviewProvider;
 use App\Filament\App\Resources\ReviewRuns\Pages\ListReviewRuns;
 use App\Filament\App\Resources\ReviewRuns\Pages\ViewReviewRun;
+use App\Filament\Components\ReviewSettingsForm;
 use App\Filament\CurrentTenant;
 use App\Filament\LocalTime;
 use App\Filament\RunPresenter;
@@ -13,12 +15,12 @@ use App\Runners\DiffRunner;
 use App\Runners\Runners;
 use App\Services\Currency;
 use App\Services\ReviewCredentials;
+use App\Services\ReviewSettings;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Component;
@@ -160,12 +162,12 @@ class ReviewRunResource extends Resource
                 ->label('Reviewer')
                 ->options(fn (ReviewCredentials $credentials): array => $credentials->trialReviewers(CurrentTenant::get()))
                 ->placeholder('As the repository would get')
+                // The models to pick from follow the reviewer.
+                ->live()
                 ->visible(fn (Get $get): bool => $get('runner') !== DiffRunner::NAME),
-            TextInput::make('model')
-                ->maxLength(100)
-                ->regex('/^[\\w.:\\/-]+$/')
+            ReviewSettingsForm::modelField('model', fn (Get $get): array => self::trialModels($get('runner') === DiffRunner::NAME ? null : $get('provider')))
                 ->placeholder('The reviewer\'s own')
-                ->helperText('As the reviewer names it, such as claude-opus-5-5 or sonnet. For Pi, a provider can go in front: google/gemini-3-pro.'),
+                ->helperText('Pick one, or type the name as the reviewer takes it. A Laravel AI tier is read for Claude Code or Codex when the trial starts. For Pi, a provider can go in front: google/gemini-3-pro.'),
             Select::make('effort')
                 ->options(collect(ReviewEffort::cases())->mapWithKeys(fn (ReviewEffort $effort): array => [$effort->value => $effort->text()]))
                 ->placeholder('The reviewer\'s own'),
@@ -183,6 +185,23 @@ class ReviewRunResource extends Resource
     }
 
     /**
+     * The models to pick from for a reviewer: Claude Code's aliases and Anthropic's
+     * models, Codex's OpenAI models, both with the Laravel AI tiers; for another
+     * reviewer, or none picked, the models by name only, a tier being read for one
+     * provider.
+     *
+     * @return array<string, string>
+     */
+    public static function trialModels(?string $provider): array
+    {
+        return match ($provider) {
+            ReviewProvider::ClaudeCode->value => ReviewSettingsForm::claudeModels(),
+            ReviewProvider::CodexCli->value => ReviewSettingsForm::openAiModels(),
+            default => array_diff_key(ReviewSettingsForm::claudeModels() + ReviewSettingsForm::openAiModels(), array_flip([...ReviewSettings::TIERS, ...ReviewSettingsForm::CLAUDE_ALIASES])),
+        };
+    }
+
+    /**
      * @param  array<string, mixed>  $data  what the trial fields gave
      * @return array{runner: string|null, provider: string|null, model: string|null, effort: string|null, verify: bool, ignore_existing: bool}
      */
@@ -191,7 +210,12 @@ class ReviewRunResource extends Resource
         return [
             'runner' => filled($data['runner'] ?? null) ? (string) $data['runner'] : null,
             'provider' => filled($data['provider'] ?? null) ? (string) $data['provider'] : null,
-            'model' => filled($data['model'] ?? null) ? (string) $data['model'] : null,
+            'model' => match (true) {
+                ! filled($data['model'] ?? null) => null,
+                // A tier is a name only the review server knows: the reviewer gets the model it is now.
+                in_array($data['model'], ReviewSettings::TIERS, true) && in_array($data['provider'] ?? null, [ReviewProvider::ClaudeCode->value, ReviewProvider::CodexCli->value], true) => ReviewSettings::model($data['provider'] === ReviewProvider::CodexCli->value ? 'openai' : 'anthropic', (string) $data['model']),
+                default => (string) $data['model'],
+            },
             'effort' => filled($data['effort'] ?? null) ? (string) $data['effort'] : null,
             'verify' => (bool) ($data['verify'] ?? false),
             'ignore_existing' => (bool) ($data['ignore_existing'] ?? true),
