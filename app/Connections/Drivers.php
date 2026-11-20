@@ -34,8 +34,9 @@ class Drivers
         $options = [];
 
         foreach (config("review.drivers.{$kind->value}", []) as $driver => $class) {
-            if (is_string($driver)) {
-                $options[$driver] = $this->get($kind, $driver)->label();
+            // One that needs this installation to be registered somewhere, and is not.
+            if (is_string($driver) && ! (($found = $this->get($kind, $driver)) instanceof NeedsSetup && ! $found->isSetUp())) {
+                $options[$driver] = $found->label();
             }
         }
 

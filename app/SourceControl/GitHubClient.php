@@ -41,6 +41,11 @@ class GitHubClient implements SourceControl
     /** The name a review's commit status goes by; a later one of the same name replaces it. */
     public const STATUS_CONTEXT = 'AI Review';
 
+    /** The button on a check that waits, and what GitHub sends back when it is pressed. */
+    public const APPROVE_LABEL = 'Approve and review';
+
+    public const APPROVE_ACTION = 'approve-review';
+
     /** What an issue comment written as a reply says its parent is. */
     public const PARENT_MARKER = '/\[\/\/\]:\s*#\s*\(ai-reply-to (\d+)\)/';
 
@@ -56,11 +61,24 @@ class GitHubClient implements SourceControl
      */
     protected array $threads = [];
 
+    /**
+     * @param  string|null  $appAccountId  set when the token is a GitHub App's: the id of its <slug>[bot] account
+     */
     public function __construct(
         protected string $owner,
         protected string $name,
         protected ?string $token = null,
+        protected ?string $appAccountId = null,
     ) {}
+
+    /**
+     * Whether this reaches GitHub as the app: then the review's state is a check
+     * run, with its report and its findings in the diff, rather than a commit status.
+     */
+    public function isApp(): bool
+    {
+        return $this->token !== null && $this->appAccountId !== null;
+    }
 
     /**
      * Only with a token: without one nothing can be written, and the repository
@@ -84,6 +102,11 @@ class GitHubClient implements SourceControl
     {
         if ($this->token === null) {
             return null;
+        }
+
+        // An app's token has no user of its own to ask about.
+        if ($this->appAccountId !== null) {
+            return $this->appAccountId;
         }
 
         return $this->account ??= rescue(fn (): ?string => is_numeric($id = $this->request(8)->get(self::API.'/user')->json('id')) ? (string) $id : null, null, false);
@@ -437,6 +460,20 @@ class GitHubClient implements SourceControl
             return;
         }
 
+        if ($this->isApp()) {
+            $this->checkRun($commit, [
+                'details_url' => $url,
+                'output' => ['title' => mb_substr($description, 0, 255), 'summary' => $description],
+            ] + match ($state) {
+                BuildState::InProgress => ['status' => 'in_progress'],
+                BuildState::Successful => ['status' => 'completed', 'conclusion' => 'success'],
+                BuildState::Failed => ['status' => 'completed', 'conclusion' => 'failure'],
+                BuildState::Stopped => ['status' => 'completed', 'conclusion' => 'cancelled'],
+            }, keepReport: $state !== BuildState::InProgress);
+
+            return;
+        }
+
         $this->request(15)->post($this->url("statuses/{$commit}"), [
             'context' => self::STATUS_CONTEXT,
             'state' => match ($state) {
@@ -452,14 +489,151 @@ class GitHubClient implements SourceControl
     }
 
     /**
-     * A report on a commit is a check run, which only a GitHub App may create. The
-     * findings are on the pull request as comments, and the status says how it ended.
+     * A report on a commit is a check run, which only a GitHub App may create. With
+     * a token the findings are on the pull request as comments, and the status says
+     * how it ended; as the app the report is the check's summary, beside its state.
      */
-    public function putCommitReport(string $commit, array $report): void {}
+    public function putCommitReport(string $commit, array $report): void
+    {
+        if (! $this->isApp()) {
+            return;
+        }
 
+        $data = collect(is_array($report['data'] ?? null) ? $report['data'] : [])
+            ->filter(fn (mixed $row): bool => is_array($row) && isset($row['title']))
+            ->map(fn (array $row): string => '| '.$row['title'].' | '.($row['value'] ?? '').' |')
+            ->implode("\n");
+
+        $this->checkRun($commit, ['output' => [
+            'title' => mb_substr((string) ($report['title'] ?? 'AI Review'), 0, 255),
+            'summary' => mb_substr((string) ($report['details'] ?? ''), 0, 65000) ?: 'The review wrote no summary.',
+            'text' => $data === '' ? '' : "| | |\n|---|---|\n{$data}",
+        ]]);
+    }
+
+    /**
+     * The findings in the diff, as the check run's annotations: GitHub takes fifty a
+     * call, and keeps adding them to what the check already has.
+     */
     public function addCommitReportAnnotations(string $commit, array $annotations): ?int
     {
+        if (! $this->isApp()) {
+            return null;
+        }
+
+        $existing = $this->findCheckRun($commit);
+        $output = [
+            'title' => (string) ($existing['output']['title'] ?? 'AI Review'),
+            'summary' => (string) ($existing['output']['summary'] ?? '') ?: 'The review\'s findings.',
+        ];
+
+        foreach (array_chunk(array_map(self::checkAnnotation(...), $annotations), 50) as $batch) {
+            $this->checkRun($commit, ['output' => $output + ['annotations' => $batch]]);
+        }
+
         return null;
+    }
+
+    /**
+     * Asks for someone in the team to start the review, on the pull request's own
+     * page: as the app, a check that needs action, with a button that starts it.
+     * Otherwise a commit status that waits, leading to where it is started.
+     */
+    public function requestApproval(string $commit, string $url, string $description): void
+    {
+        if (! $this->isApp()) {
+            $this->setBuildStatus($commit, BuildState::InProgress, $url, $description);
+
+            return;
+        }
+
+        $this->checkRun($commit, [
+            'status' => 'completed',
+            'conclusion' => 'action_required',
+            'details_url' => $url,
+            'output' => [
+                'title' => 'Waiting for approval',
+                'summary' => $description.'. A trusted account of the team can start it with "'.self::APPROVE_LABEL.'" above, or in Review Central.',
+            ],
+            'actions' => [[
+                'label' => self::APPROVE_LABEL,
+                'description' => 'Review this pull request with AI',
+                'identifier' => self::APPROVE_ACTION,
+            ]],
+        ]);
+    }
+
+    /**
+     * A Bitbucket annotation as a check run's.
+     *
+     * @param  array<string, mixed>  $annotation
+     * @return array<string, mixed>
+     */
+    protected static function checkAnnotation(array $annotation): array
+    {
+        $line = is_int($annotation['line'] ?? null) && $annotation['line'] > 0 ? $annotation['line'] : 1;
+
+        return [
+            'path' => (string) ($annotation['path'] ?? ''),
+            'start_line' => $line,
+            'end_line' => $line,
+            'annotation_level' => match ($annotation['severity'] ?? null) {
+                'HIGH', 'CRITICAL' => 'failure',
+                'MEDIUM' => 'warning',
+                default => 'notice',
+            },
+            'title' => mb_substr((string) ($annotation['title'] ?? ''), 0, 255),
+            'message' => mb_substr((string) ($annotation['details'] ?? $annotation['summary'] ?? ''), 0, 64000),
+        ];
+    }
+
+    /**
+     * The app's check run on a commit, by its name: the newest, when there is one.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function findCheckRun(string $commit): ?array
+    {
+        $runs = $this->request(10)->get($this->url("commits/{$commit}/check-runs"), ['check_name' => self::STATUS_CONTEXT, 'filter' => 'latest', 'per_page' => 1])
+            ->throw()->json('check_runs');
+
+        return is_array($runs) && is_array($runs[0] ?? null) ? $runs[0] : null;
+    }
+
+    /**
+     * Changes the commit's check run, or starts a new one: one per commit for each
+     * time the review is asked for, so the pull request shows one check. A state
+     * that ends a check keeps the report already in it.
+     *
+     * @param  array<string, mixed>  $fields
+     */
+    protected function checkRun(string $commit, array $fields, bool $keepReport = false): void
+    {
+        $existing = $this->findCheckRun($commit);
+        $finished = ($existing['status'] ?? null) === 'completed';
+
+        // A finished check is not set going again: a new state starts a new one,
+        // which GitHub then shows in its place.
+        if (is_array($existing) && isset($existing['id']) && ! ($finished && isset($fields['status']))) {
+            if ($keepReport && filled($existing['output']['summary'] ?? null)) {
+                $fields['output'] = ['title' => $fields['output']['title'] ?? (string) ($existing['output']['title'] ?? ''), 'summary' => (string) $existing['output']['summary']]
+                    + (filled($existing['output']['text'] ?? null) ? ['text' => (string) $existing['output']['text']] : []);
+            }
+
+            // Its button goes once the review runs or ends.
+            if (isset($fields['status']) && ($fields['conclusion'] ?? null) !== 'action_required') {
+                $fields += ['actions' => []];
+            }
+
+            $this->request(15)->patch($this->url("check-runs/{$existing['id']}"), $fields)->throw();
+
+            return;
+        }
+
+        // Only a report, with no check to put it on: it stands as a finished one.
+        $fields += isset($fields['status']) ? [] : ['status' => 'completed', 'conclusion' => 'neutral'];
+
+        $this->request(15)->post($this->url('check-runs'), ['name' => self::STATUS_CONTEXT, 'head_sha' => $commit] + $fields)->throw();
     }
 
     public function cloneAccess(): array

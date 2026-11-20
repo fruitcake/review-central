@@ -13,6 +13,7 @@ use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Models\Tenant;
 use App\Runners\Container\ReviewSessions;
+use App\SourceControl\GitHubClient;
 use App\SourceControl\PullRef;
 use App\SourceControl\WebhookEvent;
 use Illuminate\Http\Client\RequestException;
@@ -310,8 +311,9 @@ class ReviewRequest
 
     /**
      * Marks the pull request as waiting for someone to start its review, and shows
-     * that on its head as the review's build status, which leads to the overview.
-     * The review's own status replaces it once it starts.
+     * that on its head as the review's build status, which leads to the overview;
+     * as a GitHub App, as a check with a button that starts it. The review's own
+     * status replaces it once it starts.
      *
      * @param  array{repository_id: mixed, pull_request_id: int}  $key
      */
@@ -319,13 +321,16 @@ class ReviewRequest
     {
         OpenPullRequest::query()->where($key)->where('commit', $commit)->update(['awaiting_approval' => true]);
 
+        $url = PullRequestResource::getUrl('index', panel: 'app', tenant: $repository->tenant);
+        $description = 'Waiting for someone in the team to start the review in Review Central';
+
         try {
-            $repository->sourceControl()->setBuildStatus(
-                $commit,
-                BuildState::InProgress,
-                PullRequestResource::getUrl('index', panel: 'app', tenant: $repository->tenant),
-                'Waiting for someone in the team to start the review in Review Central',
-            );
+            $sourceControl = $repository->sourceControl();
+
+            // As a GitHub App: a check with a button that starts it, on GitHub itself.
+            $sourceControl instanceof GitHubClient
+                ? $sourceControl->requestApproval($commit, $url, $description)
+                : $sourceControl->setBuildStatus($commit, BuildState::InProgress, $url, $description);
         } catch (Throwable $exception) {
             // Best effort: the pull request is listed either way.
             report($exception);
