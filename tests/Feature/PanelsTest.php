@@ -499,7 +499,7 @@ it('adds a ticket service and the references it answers as one, and keeps it off
     // Deleting the last source that reads a connection deletes the connection.
     livewire(ManageTickets::class)->callTableAction('delete', $source);
 
-    expect(Connection::query()->whereKey($source->connection_id)->exists())->toBeFalse();
+    expect(Connection::withTrashed()->whereKey($source->connection_id)->exists())->toBeFalse();
 });
 
 it('links a repository and a review to their place on the host', function () {

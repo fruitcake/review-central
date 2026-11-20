@@ -184,13 +184,22 @@ class ReviewTrial
      */
     protected function repository(Tenant $tenant, Connection $connection, PullRequestLink $link): Repository
     {
+        // A removed one too: it comes back for the trial, with its history, and
+        // reviews nothing by itself until someone turns that on again.
         $repository = $tenant->repositories()
+            ->withTrashed()
             ->where('connection_id', $connection->getKey())
             // As it was saved: with the connection's own workspace, which may be
             // written otherwise than in the address.
             ->where('workspace', (string) ($connection->setting('workspace') ?? $link->workspace))
             ->where('slug', $link->slug)
             ->first();
+
+        // Not saved yet: start() saves it once the trial is accepted, so one that
+        // is refused leaves it removed.
+        if ($repository?->trashed()) {
+            $repository->forceFill(['deleted_at' => null, 'reviews_enabled' => false]);
+        }
 
         if ($repository !== null) {
             return $repository;

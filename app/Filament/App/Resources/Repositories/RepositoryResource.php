@@ -15,6 +15,7 @@ use App\Models\Tenant;
 use App\Runners\Runners;
 use App\Services\Currency;
 use App\Services\RepositoryReadiness;
+use App\Services\RepositorySetup;
 use App\Services\ReviewSettings;
 use App\Services\ReviewStack;
 use BackedEnum;
@@ -54,15 +55,20 @@ class RepositoryResource extends Resource
             ->components([
                 Select::make('connection_id')
                     ->label('Connection')
-                    ->options(fn (): array => self::connections()->pluck('name', 'id')->all())
+                    // Editing, only those that reach the same host, GitHub with a token and as
+                    // the app, and the repository's owner there.
+                    ->options(fn (?Repository $record): array => self::connections()->get()
+                        ->filter(fn (Connection $connection): bool => $record === null
+                            || ($connection->sameHostAs($record->integration) && $connection->reachesOwner($record->workspace)))
+                        ->pluck('name', 'id')->all())
                     // One connection is the usual case, and then there is nothing to choose.
                     ->default(fn (): ?int => self::connections()->count() === 1 ? self::connections()->value('id') : null)
                     ->required()
                     ->live()
-                    ->afterStateUpdated(fn (Set $set) => $set('slug', null))
-                    // The workspace comes with the connection, and a repository does not move to another.
-                    ->disabledOn('edit')
-                    ->helperText('The source control connection the review reads and comments with. Add one under Source control first.'),
+                    ->afterStateUpdated(fn (Set $set, string $operation) => $operation === 'create' ? $set('slug', null) : null)
+                    ->helperText(fn (string $operation): string => $operation === 'edit'
+                        ? 'The connection the review reads and comments with. It can move to another one to the same host, such as from GitHub with a token to the GitHub App, and keeps its history.'
+                        : 'The source control connection the review reads and comments with. Add one under Source control first.'),
                 Select::make('slug')
                     ->label('Repository')
                     ->required()
@@ -78,7 +84,8 @@ class RepositoryResource extends Resource
                     })
                     // The name in the address is what is stored, and it is its own label.
                     ->getOptionLabelUsing(fn (mixed $value): ?string => is_string($value) && preg_match('/^[\w.-]{1,255}$/', $value) === 1 ? $value : null)
-                    ->unique(ignoreRecord: true, modifyRuleUsing: fn (Unique $rule, Get $get): Unique => $rule->where('connection_id', $get('connection_id')))
+                    // A removed one is not in the way: adding it again brings it back.
+                    ->unique(ignoreRecord: true, modifyRuleUsing: fn (Unique $rule, Get $get): Unique => $rule->where('connection_id', $get('connection_id'))->whereNull('deleted_at'))
                     ->disabled(fn (Get $get): bool => blank($get('connection_id')))
                     ->helperText('Searched in the connection\'s workspace. Its stack is detected when it is added.'),
                 TextInput::make('name')->maxLength(255)->helperText('Optional, for the lists here.')->visibleOn('edit'),
@@ -171,8 +178,13 @@ class RepositoryResource extends Resource
 
                             Notification::make()->title('Saved')->success()->send();
                         }),
-                    EditAction::make(),
-                    DeleteAction::make()->modalDescription('Deletes the repository with its review history.'),
+                    EditAction::make()
+                        // Moved where a removed copy of it is, the two change places.
+                        ->using(fn (Repository $record, array $data, RepositorySetup $setup): Repository => $setup->update($record, $data)),
+                    DeleteAction::make()
+                        ->label('Remove')
+                        ->modalHeading('Remove the repository?')
+                        ->modalDescription('Nothing is reviewed on it any more, and it leaves this list. Its reviews, questions and pull requests are kept, and adding it again brings it back with them.'),
                 ]),
             ]);
     }

@@ -237,13 +237,15 @@ class ConnectionResource extends Resource
                         if ($record->repositories()->exists()) {
                             Notification::make()
                                 ->title('This connection is still in use')
-                                ->body('Remove its repositories first.')
+                                ->body('Remove its repositories first, or move them to another connection to the same host. Their history stays either way.')
                                 ->danger()
                                 ->send();
 
                             $action->halt();
                         }
-                    }),
+                    })
+                    // A source control connection is kept for the history of its removed repositories.
+                    ->using(fn (Connection $record) => $record->remove()),
             ]);
     }
 
