@@ -40,6 +40,27 @@ class ReviewSessions
     protected const RESUMES = '.review-resumes';
 
     /**
+     * What a trial's session is kept under: its own, apart from the branch's, so a
+     * question on its page goes on from where it ended, and the pull request's own
+     * reviews never resume a session nobody saw. The Composer cache stays shared:
+     * that is per repository and not the reviewer's.
+     */
+    public static function forTrial(string $branch, int $build): string
+    {
+        return "{$branch}#trial-{$build}";
+    }
+
+    /**
+     * What the session of a run is kept under: its branch's, or its own for a trial.
+     */
+    public static function forRun(ReviewRun $run): string
+    {
+        return $run->custom && $run->kind === 'pull-request' && $run->build_number !== null
+            ? self::forTrial($run->branch, $run->build_number)
+            : $run->branch;
+    }
+
+    /**
      * The home for a branch, made when it is not there, or null when none is kept.
      */
     public function home(Repository $repository, string $branch): ?string

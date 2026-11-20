@@ -967,13 +967,19 @@ it('resumes the session of the last review of a branch from a fresh clone, a few
         ->and(File::isDirectory($home))->toBeTrue();
 });
 
-it('keeps no session for a trial, and forgets a branch\'s when its pull request is merged', function () {
+it('keeps a trial\'s session apart from the branch\'s, and forgets a branch\'s when its pull request is merged', function () {
     Http::fake(['api.bitbucket.org/*' => Http::response([])]);
 
     $steps = fakeSteps();
     app(ContainerReview::class)->run($this->repository, 'feature/export', null, 41, trial: new Trial(pullRequestId: 570, destination: 'main'));
 
-    expect(implode(' ', stepRunning($steps, 'run-review.sh')['command']))->not->toContain(':/home/reviewer');
+    // A home of its own, kept for questions about the trial: never the branch's.
+    $trialHome = app(ReviewSessions::class)->home($this->repository, ReviewSessions::forTrial('feature/export', 41));
+    $branchHome = app(ReviewSessions::class)->home($this->repository, 'feature/export');
+    $volumes = implode(' ', stepRunning($steps, 'run-review.sh')['command']);
+
+    expect($volumes)->toContain("{$trialHome}:/home/reviewer")
+        ->and($volumes)->not->toContain("{$branchHome}:/home/reviewer");
 
     $home = app(ReviewSessions::class)->home($this->repository, 'feature/export');
     File::put("{$home}/.review-session", "session-one\n");

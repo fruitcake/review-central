@@ -46,10 +46,19 @@ class QuestionAnswer
             File::deleteDirectory($directory);
             File::deleteDirectory($home);
 
-            $resumed = $this->sessions->copy($repository, $question->branch, $home) !== null;
+            // A trial's own session for a question on its page, else the branch's.
+            $resumed = $this->sessions->copy($repository, $question->run === null ? $question->branch : ReviewSessions::forRun($question->run), $home) !== null;
             File::ensureDirectoryExists($home, 0700);
 
             $this->checkout->clone($repository, $question->branch, null, $directory);
+
+            // The branch it merges into, so the reviewer can see the change itself and
+            // not only the code as it is. Without it, it still answers from the code.
+            $destination = $this->destination($question);
+
+            if ($destination !== null) {
+                rescue(fn () => $this->checkout->prepareRange($repository, $directory, $destination, null), null, false);
+            }
 
             // The mount point of the scripts, the worker's own whatever the branch has there.
             foreach (["{$directory}/.review", "{$directory}/.review/skill", "{$directory}/review-answer.json"] as $path) {
@@ -108,6 +117,59 @@ class QuestionAnswer
      * the session it answers from is the review's and not the thread's.
      */
     protected function asked(ReviewQuestion $question): string
+    {
+        return $this->review($question).$this->question($question);
+    }
+
+    /**
+     * The review the question is about, as the reviewer needs it to answer even
+     * without the session it ended in: a trial keeps none, and an old or reset one
+     * is gone. Its summary and its findings, with the branch to diff against.
+     */
+    protected function review(ReviewQuestion $question): string
+    {
+        $run = $question->run;
+        $destination = $this->destination($question);
+        $lines = [];
+
+        if ($destination !== null) {
+            $lines[] = "The pull request merges {$question->branch} into {$destination}: `git diff origin/{$destination}...HEAD` shows its change.";
+        }
+
+        if ($run !== null) {
+            $lines[] = ($run->custom ? 'The review it is about was a trial, not posted on the pull request,' : 'The review it is about')
+                .' ran on commit '.substr($run->commit, 0, 12).'.';
+
+            if (filled($run->summary)) {
+                $lines[] = "Its summary:\n".mb_substr((string) $run->summary, 0, 2000);
+            }
+
+            $findings = collect($run->findings ?? [])->filter(fn (array $finding): bool => isset($finding['id']))->take(25);
+
+            if ($findings->isNotEmpty()) {
+                $lines[] = "Its findings:\n".$findings->map(fn (array $finding): string => '- '.$finding['id']
+                    .' ('.strtolower((string) ($finding['severity'] ?? '')).', '.($finding['status'] ?? 'new').') '
+                    .($finding['title'] ?? '')
+                    .(isset($finding['path']) ? ' — '.$finding['path'].(isset($finding['line']) ? ':'.$finding['line'] : '') : '')
+                    .(filled($finding['details'] ?? null) ? "\n  ".mb_substr(preg_replace('/\s+/', ' ', (string) $finding['details']) ?? '', 0, 800) : ''))
+                    ->implode("\n");
+            }
+        }
+
+        return $lines === [] ? '' : implode("\n\n", $lines)."\n\n";
+    }
+
+    /**
+     * The branch the pull request merges into, as its review recorded it.
+     */
+    protected function destination(ReviewQuestion $question): ?string
+    {
+        $destination = $question->run?->context['pull_request']['destination_branch'] ?? null;
+
+        return is_string($destination) && preg_match('#^[\w./-]+$#', $destination) === 1 ? $destination : null;
+    }
+
+    protected function question(ReviewQuestion $question): string
     {
         $earlier = $question->follows;
 
