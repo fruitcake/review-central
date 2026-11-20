@@ -4,6 +4,7 @@
 
     $time = fn (?array $spread, string $key): string => $spread === null ? '—' : (string) RunPresenter::duration($spread[$key]);
     $percent = fn (?int $value): string => $value === null ? '—' : "{$value}%";
+    $seconds = fn (?int $value): string => RunPresenter::duration($value) ?? '—';
     $trend = $capacity['trend'];
     $tallest = max(1, ...array_map(fn (array $slice): int => max($slice['running'] + $slice['waiting'] + $slice['held'], $slice['workers']), $trend ?: [['running' => 0, 'waiting' => 0, 'held' => 0, 'workers' => 1]]));
 @endphp
@@ -98,7 +99,15 @@
                 @foreach ($capacity['advice'] as $advice)
                     <div class="rc-advice-item">
                         <span class="rc-chip rc-chip-{{ $advice['tone'] }}">{{ $advice['label'] ?? ($advice['tone'] === 'approved' ? 'No action' : ($advice['tone'] === 'neutral' ? 'Waiting for data' : 'Upgrade')) }}</span>
-                        <span><strong>{{ $advice['title'] }}</strong><span class="rc-muted">{{ $advice['body'] }}</span></span>
+                        <span>
+                            <strong>{{ $advice['title'] }}</strong><span class="rc-muted">{{ $advice['body'] }}</span>
+                            @if (filled($advice['apply'] ?? null) || ($advice['settings'] ?? false))
+                                <span class="rc-advice-actions">
+                                    @if (filled($advice['apply'] ?? null)) {{ ($this->applySizeAction)(['size' => $advice['apply']]) }} @endif
+                                    @if ($advice['settings'] ?? false) <a href="{{ $settings }}#cloudflare">Open Settings</a> @endif
+                                </span>
+                            @endif
+                        </span>
                     </div>
                 @endforeach
             </div>
@@ -135,6 +144,33 @@
                     <span class="rc-figure-note rc-tone-neutral">average · peak {{ $percent($capacity['memory']['peak']) }} · disk {{ $percent($capacity['disk']) }}</span>
                 </div>
             </div>
+
+            @foreach ($capacity['sandbox_steps'] as $size)
+                <div class="rc-scroll">
+                    <table class="rc-table">
+                        <caption class="rc-muted">
+                            Cloudflare sandbox <strong>{{ $size['size'] }}</strong>{{ $size['size'] === $capacity['sizing']['instance'] ? ' (now)' : '' }} · {{ $size['runs'] }} {{ $size['runs'] === 1 ? 'review' : 'reviews' }}
+                            · review {{ $seconds($size['seconds']) }} on average · sandbox {{ $seconds($size['sandbox_seconds']) }}
+                            @if ($size['cost'] !== null) · {{ \App\Services\Currency::show($size['cost']) }} a review in the sandbox @endif
+                        </caption>
+                        <thead><tr><th>Step</th><th class="rc-num">Average</th><th class="rc-num">9 in 10 within</th><th class="rc-num">Most memory</th><th class="rc-num">Waited for processor</th><th class="rc-num">Reviews</th></tr></thead>
+                        <tbody>
+                            @forelse ($size['steps'] as $step)
+                                <tr>
+                                    <td>{{ $step['name'] }}</td>
+                                    <td class="rc-num">{{ $seconds($step['average']) }}</td>
+                                    <td class="rc-num">{{ $seconds($step['p90']) }}</td>
+                                    <td class="rc-num">{{ $step['peak_memory_mb'] === null ? '—' : number_format($step['peak_memory_mb'] / 1024, 1).' GB' }}</td>
+                                    <td class="rc-num">{{ $step['starved_percent'] === null ? '—' : $step['starved_percent'].'%' }}</td>
+                                    <td class="rc-num">{{ $step['runs'] }}</td>
+                                </tr>
+                            @empty
+                                <tr><td colspan="6" class="rc-muted">No steps measured for these reviews.</td></tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+            @endforeach
 
             @if ($trend !== [])
                 <div>

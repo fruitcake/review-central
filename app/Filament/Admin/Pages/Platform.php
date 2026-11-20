@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace App\Filament\Admin\Pages;
 
 use App\Filament\Admin\Resources\Tenants\TenantResource;
+use App\Runners\Container\CloudflareSandbox;
 use App\Services\Capacity;
 use App\Services\PlatformOverview;
+use App\Services\PlatformSettings;
 use BackedEnum;
 use Filament\Actions\Action;
+use Filament\Notifications\Notification;
 use Filament\Pages\Dashboard;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Contracts\Support\Htmlable;
@@ -53,6 +56,33 @@ class Platform extends Dashboard
         ];
     }
 
+    /**
+     * Runs sandboxes on the size the advice names, as Settings would.
+     */
+    public function applySizeAction(): Action
+    {
+        return Action::make('applySize')
+            ->label(fn (array $arguments): string => 'Use '.($arguments['size'] ?? 'it'))
+            ->size('sm')
+            ->requiresConfirmation()
+            ->modalHeading(fn (array $arguments): string => 'Run sandboxes on '.($arguments['size'] ?? '').'?')
+            ->modalDescription('From the next review on. What it costs per second changes with it.')
+            ->disabled(fn (): bool => app(PlatformSettings::class)->setByEnvironment(PlatformSettings::CLOUDFLARE_INSTANCE) !== null)
+            ->tooltip(fn (): ?string => ($variable = app(PlatformSettings::class)->setByEnvironment(PlatformSettings::CLOUDFLARE_INSTANCE)) === null ? null : "{$variable} in .env sets it")
+            ->action(function (array $arguments, PlatformSettings $settings): void {
+                $size = (string) ($arguments['size'] ?? '');
+
+                if (! isset(CloudflareSandbox::INSTANCES[$size])) {
+                    return;
+                }
+
+                $settings->save([PlatformSettings::CLOUDFLARE_INSTANCE => $size]);
+                $settings->applyCloudflare();
+
+                Notification::make()->title("Sandboxes run on {$size} from the next review on")->success()->send();
+            });
+    }
+
     protected function period(): int
     {
         return isset(self::PERIODS[$this->days]) ? $this->days : 7;
@@ -69,6 +99,7 @@ class Platform extends Dashboard
             'platform' => app(PlatformOverview::class)->for($since),
             'capacity' => app(Capacity::class)->report($since),
             'horizon' => config('review.container.connection') ? url(config('horizon.path', 'horizon')) : null,
+            'settings' => Settings::getUrl(),
         ];
     }
 }

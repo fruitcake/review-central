@@ -126,9 +126,26 @@ it('advises a bigger server when reviews wait and the server is full, and names 
 });
 
 it('names the processors when nothing waits but the load is at its limit', function () {
+    $repository = Repository::factory()->create(['review_runner' => 'docker']);
     ($this->sample)(1, ['running' => 1, 'load' => 3.9]);
 
     expect(array_column(app(Capacity::class)->report(now()->subDay())['advice'], 'title'))->toBe(['The processors are the limit']);
+
+    // Moved to Cloudflare since: the load of the reviews on Docker before says nothing of now.
+    $repository->update(['review_runner' => 'cloudflare']);
+
+    expect(array_column(app(Capacity::class)->report(now()->subDay())['advice'], 'title'))->toBe(['The installation has room']);
+});
+
+it('counts only the load while reviews ran on Docker', function () {
+    Repository::factory()->create(['review_runner' => 'docker']);
+    ($this->sample)(2, ['running' => 0, 'load' => 3.9]);
+    ($this->sample)(1, ['running' => 1, 'load' => 1.0]);
+
+    $report = app(Capacity::class)->report(now()->subDay());
+
+    expect($report['docker']['cpu_peak'])->toBe(25)
+        ->and(array_column($report['advice'], 'title'))->toBe(['The installation has room']);
 });
 
 it('advises more workers, not a bigger server, when the waiting reviews run in Cloudflare sandboxes', function () {

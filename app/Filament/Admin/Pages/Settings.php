@@ -149,7 +149,7 @@ class Settings extends Page
                             ->label('Show "developed by Fruitcake"')
                             ->helperText('A small credit at the foot of the sidebar.'),
                     ]),
-                Section::make('Cloudflare sandboxes')
+                Section::make('Cloudflare sandboxes')->id('cloudflare')
                     ->key('cloudflare')
                     ->description(new HtmlString('To run reviewers in a Cloudflare sandbox, deployed from here: <strong>Deploy the Worker</strong> on the Setup page then makes the bucket, deploys the Worker and keeps its address and token. The account needs the Workers Paid plan. What the environment sets (CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, R2_*, REVIEW_CLOUDFLARE_*) goes before these.'))
                     ->columns(2)
