@@ -257,9 +257,17 @@
     .rc-turn-history ol { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; border-left: 2px solid var(--rc-border); }
     .rc-turn-history li { display: flex; gap: 10px; align-items: baseline; padding-left: 12px; font-size: 13px; }
     .rc-turn-history li .rc-muted { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-size: 12px; }
-    .rc-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+    /* Five side by side on a wide screen: narrow cards, and paths that break anywhere. */
+    .rc-compare { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+    .rc-compare .rc-card { padding: 14px 16px; gap: 10px; min-width: 0; }
+    .rc-compare .rc-card h2 { font-size: 15px; }
+    .rc-compare .rc-card-head { flex-direction: column; gap: 6px; }
+    .rc-compare .rc-details { font-size: 12px; gap: 4px 12px; }
+    .rc-compare .rc-mono, .rc-compare strong, .rc-compare .rc-muted { overflow-wrap: anywhere; }
     .rc-compare ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
     .rc-compare li { display: flex; flex-direction: column; gap: 2px; border-top: 1px solid var(--rc-border); padding-top: 8px; }
+    .rc-excluded { opacity: .55; }
+    .rc-link-button { align-self: flex-start; background: none; border: 0; padding: 0; font-size: 13px; font-weight: 600; color: var(--rc-ink); text-decoration: underline; text-decoration-color: var(--rc-accent); text-underline-offset: 3px; cursor: pointer; }
     .rc-verdict-valid { color: var(--rc-accent-text); }
     .rc-verdict-false_positive { color: var(--rc-danger-text); }
     .rc-steps { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
