@@ -33,6 +33,11 @@ class BitbucketDriver implements ExplainsSetup, SourceControlDriver
         'pullrequest:fulfilled',
         'pullrequest:rejected',
         'pullrequest:comment_created',
+        // Whose turn it is.
+        'pullrequest:approved',
+        'pullrequest:unapproved',
+        'pullrequest:changes_request_created',
+        'pullrequest:changes_request_removed',
     ];
 
     public function label(): string
@@ -192,6 +197,46 @@ class BitbucketDriver implements ExplainsSetup, SourceControlDriver
         return $pullRequest + ['from_fork' => is_string($source) && is_string($destination) && strcasecmp($source, $destination) !== 0];
     }
 
+    /**
+     * The pull request's participants with what the delivery is about as their
+     * newest word: the snapshot it carries may predate it.
+     *
+     * @param  array<string, mixed>  $pullRequest
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    protected static function withReview(array $pullRequest, string $event, array $payload): array
+    {
+        [$review, $state] = match ($event) {
+            'pullrequest:approved' => [$payload['approval'] ?? null, Reviewers::APPROVED],
+            'pullrequest:unapproved' => [$payload['approval'] ?? null, null],
+            'pullrequest:changes_request_created' => [$payload['changes_request'] ?? null, Reviewers::CHANGES_REQUESTED],
+            'pullrequest:changes_request_removed' => [$payload['changes_request'] ?? null, null],
+            default => [null, null],
+        };
+
+        if (! is_array($review) || ! is_array($review['user'] ?? null)) {
+            return $pullRequest;
+        }
+
+        $key = Reviewers::key(Reviewers::person($review['user']));
+        $participants = array_values(array_filter(
+            (array) ($pullRequest['participants'] ?? []),
+            fn (mixed $participant): bool => ! is_array($participant) || ! is_array($participant['user'] ?? null) || Reviewers::key(Reviewers::person($participant['user'])) !== $key,
+        ));
+        $was = collect((array) ($pullRequest['participants'] ?? []))->first(fn (mixed $participant): bool => is_array($participant) && is_array($participant['user'] ?? null) && Reviewers::key(Reviewers::person($participant['user'])) === $key);
+
+        $participants[] = [
+            'user' => $review['user'],
+            'role' => is_array($was) ? ($was['role'] ?? 'PARTICIPANT') : 'PARTICIPANT',
+            'approved' => $state === Reviewers::APPROVED,
+            'state' => $state,
+            'participated_on' => $review['date'] ?? null,
+        ];
+
+        return ['participants' => $participants] + $pullRequest;
+    }
+
     public function webhookHelp(): string
     {
         return 'Starts a review on a /review comment, when a draft is marked ready, and on every new commit of a pull request. "Add it for me" adds it for every repository of the workspace. By hand it goes on each repository, under Repository settings, Webhooks, with the pull request events Created, Updated, Merged, Declined and Comment created.';
@@ -218,11 +263,12 @@ class BitbucketDriver implements ExplainsSetup, SourceControlDriver
             match ($event) {
                 'pullrequest:comment_created' => WebhookEvent::COMMENT_CREATED,
                 'pullrequest:created', 'pullrequest:updated', 'pullrequest:fulfilled', 'pullrequest:rejected' => WebhookEvent::PULL_REQUEST_CHANGED,
+                'pullrequest:approved', 'pullrequest:unapproved', 'pullrequest:changes_request_created', 'pullrequest:changes_request_removed' => WebhookEvent::PULL_REQUEST_REVIEWED,
                 default => $event,
             },
             (string) $workspace,
             (string) $slug,
-            is_array($payload['pullrequest'] ?? null) ? self::withFork($payload['pullrequest']) : [],
+            is_array($payload['pullrequest'] ?? null) ? self::withReview(self::withFork($payload['pullrequest']), $event, $payload) : [],
             is_string($comment) ? $comment : null,
             is_numeric($payload['comment']['id'] ?? null) ? (int) $payload['comment']['id'] : null,
             is_string($payload['comment']['user']['display_name'] ?? null) ? $payload['comment']['user']['display_name'] : null,

@@ -13,6 +13,8 @@ The usual Laravel settings apply as well: `APP_URL`, `APP_KEY`, the database (`D
 | `REVIEW_DIFF_TIMEOUT` | `900` | Seconds the AI provider may take to answer a review from the diff. |
 | `REVIEW_DIFF_MAX_BYTES` | `600000` | The most diff one request carries; files past it are left out, and the review says which. |
 | `REVIEW_DIFF_OPENAI_MODEL` | `gpt-6.1-sol` | The OpenAI model when a repository names none. |
+| `REVIEW_TURN_NOTES` | `true` | Whether a small model writes, each time an open pull request's state changes, what the one at turn has to do and a summary. Off, the fixed rules' words show. |
+| `REVIEW_TURN_OPENAI_MODEL` | `REVIEW_DIFF_OPENAI_MODEL` | The OpenAI model that writes those notes. Anthropic's is its small model; another provider's is the model its connection names. |
 | `REVIEW_DOCKER_ENABLED` | `false` | Whether Docker on the worker can be picked. Turn it on once the worker has Docker, gVisor and the reviewer's image. |
 
 ## Docker

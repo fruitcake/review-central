@@ -48,4 +48,12 @@ interface LlmDriver extends ConnectionDriver
      * @return bool|null null when the provider gave neither
      */
     public function decides(Connection $connection, string $question, string $text): ?bool;
+
+    /**
+     * Where a pull request stands, in a few sentences from a small model: what the
+     * one at turn has to do, and what it changes and went through.
+     *
+     * @return array{next_step: string, summary: string}|null null when the provider gave no such answer
+     */
+    public function describes(Connection $connection, string $instructions, string $text): ?array;
 }

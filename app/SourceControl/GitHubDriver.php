@@ -31,7 +31,7 @@ class GitHubDriver implements ExplainsSetup, SourceControlDriver
      *
      * @var array<int, string>
      */
-    public const WEBHOOK_EVENTS = ['pull_request', 'issue_comment', 'pull_request_review_comment'];
+    public const WEBHOOK_EVENTS = ['pull_request', 'issue_comment', 'pull_request_review_comment', 'pull_request_review'];
 
     public function label(): string
     {
@@ -243,6 +243,15 @@ class GitHubDriver implements ExplainsSetup, SourceControlDriver
 
         if ($event === 'pull_request' && is_array($payload['pull_request'] ?? null)) {
             return new WebhookEvent(WebhookEvent::PULL_REQUEST_CHANGED, $owner, $name, GitHubClient::pullRequest($payload['pull_request']));
+        }
+
+        // An approval, a request for changes, or one dismissed: whose turn it is.
+        if ($event === 'pull_request_review' && is_array($payload['pull_request'] ?? null) && is_array($payload['review'] ?? null)
+            && in_array($payload['action'] ?? null, ['submitted', 'dismissed'], true)) {
+            return new WebhookEvent(WebhookEvent::PULL_REQUEST_REVIEWED, $owner, $name, GitHubClient::withReviews(
+                GitHubClient::pullRequest($payload['pull_request']),
+                [($payload['action'] === 'dismissed' ? ['state' => 'DISMISSED'] : []) + $payload['review']],
+            ));
         }
 
         if (! is_array($comment)) {

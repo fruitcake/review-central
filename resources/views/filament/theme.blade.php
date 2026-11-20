@@ -242,6 +242,19 @@
     .rc-details { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 0; font-size: 13px; }
     .rc-details dt { color: var(--rc-muted); }
     .rc-details dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+    /* Whose turn a pull request is: in the list, and in its details. */
+    .rc-turn { display: flex; flex-direction: column; gap: 2px; max-width: 34rem; white-space: normal; }
+    .rc-turn-who { font-weight: 700; color: var(--rc-ink); display: inline-flex; align-items: center; gap: 6px; }
+    .rc-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--rc-ink-soft); }
+    .rc-attention p { margin: 0; line-height: 1.5; }
+    .rc-turn-reviewer { display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
+    .rc-turn-reviewer + .rc-turn-reviewer { margin-top: 4px; }
+    .rc-turn-review { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+    .rc-turn-review p { margin: 0; }
+    .rc-turn-history summary { cursor: pointer; }
+    .rc-turn-history ol { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; border-left: 2px solid var(--rc-border); }
+    .rc-turn-history li { display: flex; gap: 10px; align-items: baseline; padding-left: 12px; font-size: 13px; }
+    .rc-turn-history li .rc-muted { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-size: 12px; }
     .rc-steps { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
     .rc-steps caption { text-align: left; padding-bottom: 4px; }
     .rc-steps th { text-align: left; font-weight: 500; color: var(--rc-muted); padding: 4px 0; }

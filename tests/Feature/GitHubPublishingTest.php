@@ -411,7 +411,7 @@ it('adds the webhook to the organisation, or to each repository when it may not'
     app(Connections::class)->installWebhook($this->connection);
 
     expect($this->github->orgHooks)->toHaveCount(1)
-        ->and($this->github->orgHooks[0])->toMatchArray(['name' => 'web', 'events' => ['pull_request', 'issue_comment', 'pull_request_review_comment']])
+        ->and($this->github->orgHooks[0])->toMatchArray(['name' => 'web', 'events' => ['pull_request', 'issue_comment', 'pull_request_review_comment', 'pull_request_review']])
         ->and($this->github->orgHooks[0]['config'])->toMatchArray(['url' => route('api.webhooks', ['key' => 'hook-gh']), 'content_type' => 'json', 'secret' => 'secret'])
         ->and($this->github->hooks)->toBe([]);
 
