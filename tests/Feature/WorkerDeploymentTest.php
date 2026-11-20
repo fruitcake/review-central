@@ -134,7 +134,7 @@ it('says why a deploy failed, with what Wrangler printed', function () {
     $result = app(WorkerDeployment::class)->deploy();
 
     expect($result['ok'])->toBeFalse()
-        ->and($result['error'])->toBe('Could not deploy the Worker (exit 1).')
+        ->and($result['error'])->toStartWith('Could not deploy the Worker (exit 1). The API token may not deploy it')
         ->and(Cache::get(WorkerDeployment::RESULT)['log'])->toContain('Authentication error')
         ->and(app(PlatformSettings::class)->text(PlatformSettings::CLOUDFLARE_URL))->toBeNull();
 });
@@ -226,4 +226,23 @@ it('tests the Cloudflare setup as it is in use, and says which settings the envi
         ->fillForm([PlatformSettings::R2_ACCESS_KEY_ID => 'not-a-key', PlatformSettings::R2_SECRET_ACCESS_KEY => 'the-token-value'])
         ->call('save')
         ->assertHasFormErrors([PlatformSettings::R2_ACCESS_KEY_ID => 'regex', PlatformSettings::R2_SECRET_ACCESS_KEY => 'regex']);
+});
+
+it('leaves a bucket it reaches be, and says what the token lacks when Cloudflare refuses it', function () {
+    cloudflareSettings([PlatformSettings::R2_ACCESS_KEY_ID => str_repeat('a', 32), PlatformSettings::R2_SECRET_ACCESS_KEY => str_repeat('b', 64)]);
+    Storage::fake('r2');
+    Process::fake([
+        "'node' '--version'" => Process::result('v22.11.0'),
+        "'npm' 'ci'*" => Process::result('added 80 packages'),
+        "'npx' 'wrangler' 'deploy'*" => Process::result(errorOutput: "\e[31m✘ \e[41;31m[\e[41;97mERROR\e[41;31m]\e[0m A request to the Cloudflare API failed.\n\n  Authentication error [code: 10000]", exitCode: 1),
+    ]);
+
+    $result = app(WorkerDeployment::class)->deploy();
+
+    Process::assertNotRan(fn ($process): bool => in_array('r2', (array) $process->command, true));
+
+    expect($result['error'])->toContain('Could not deploy the Worker (exit 1).', 'Workers Scripts: Edit')
+        ->and(Cache::get(WorkerDeployment::RESULT)['log'])->toContain('It is there, and this installation reaches it', '✘ [ERROR] A request')
+        // Plain text on the page.
+        ->and(Cache::get(WorkerDeployment::RESULT)['log'])->not->toContain("\e[");
 });
