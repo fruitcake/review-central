@@ -36,6 +36,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Auth\Access\Response;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -57,6 +58,15 @@ class RepositoryResource extends Resource
     public static function canDelete(Model $record): bool
     {
         return TenantRole::isAdmin();
+    }
+
+    /**
+     * Filament asks a delete action this, not canDelete(): without a policy it
+     * would let a member remove a repository.
+     */
+    public static function getDeleteAuthorizationResponse(Model $record): Response
+    {
+        return TenantRole::isAdmin() ? Response::allow() : Response::deny();
     }
 
     protected static ?string $model = Repository::class;

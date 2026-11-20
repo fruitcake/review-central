@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Concerns;
 
 use App\Filament\TenantRole;
+use Illuminate\Auth\Access\Response;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -32,5 +33,14 @@ trait ForTenantAdmins
     public static function canDelete(Model $record): bool
     {
         return TenantRole::isAdmin();
+    }
+
+    /**
+     * Filament asks a delete action this, not canDelete(): without a policy it
+     * would allow anyone.
+     */
+    public static function getDeleteAuthorizationResponse(Model $record): Response
+    {
+        return TenantRole::isAdmin() ? Response::allow() : Response::deny();
     }
 }

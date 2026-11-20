@@ -2,7 +2,11 @@
 
 use App\Filament\Admin\Resources\Tenants\Pages\ManageTenants;
 use App\Filament\App\Pages\Members;
+use App\Filament\App\Pages\Overview;
+use App\Filament\App\Resources\Repositories\Pages\ManageRepositories;
 use App\Filament\TenantRole;
+use App\Models\Connection;
+use App\Models\Repository;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Notifications\Invitation;
@@ -98,4 +102,32 @@ it('lets the platform\'s administrator say who a tenant\'s admins are', function
 
     expect(TenantRole::isAdmin($this->member->refresh(), $this->tenant))->toBeTrue()
         ->and(TenantRole::isAdmin($this->admin->refresh(), $this->tenant))->toBeFalse();
+});
+
+it('refuses a member what would change the team\'s keys or repositories', function () {
+    $repository = Repository::factory()->create(['tenant_id' => $this->tenant->id]);
+    $asana = Connection::query()->create(['tenant_id' => $this->tenant->id, 'kind' => 'tickets', 'driver' => 'asana', 'name' => 'Asana', 'credentials' => [], 'settings' => ['workspace' => '1200']]);
+    config(['services.asana.client_id' => 'asana-app', 'services.asana.client_secret' => 'asana-secret']);
+    $this->actingAs($this->member);
+    Filament::setTenant($this->tenant);
+
+    // Signing in would put the member's own tokens on the team's connection.
+    $this->get("/connections/{$asana->id}/oauth")->assertForbidden();
+
+    livewire(ManageRepositories::class)
+        ->assertTableActionHidden('delete', $repository);
+
+    expect($repository->fresh())->not->toBeNull();
+
+    // The overview sends them nowhere they are refused.
+    livewire(Overview::class)
+        ->assertActionHidden('addRepository')
+        ->assertSee('An admin of this team sets this up.')
+        ->assertDontSee('Add an AI provider');
+
+    // An admin may do all of it.
+    $this->actingAs($this->admin);
+    $this->get("/connections/{$asana->id}/oauth")->assertRedirect();
+    livewire(ManageRepositories::class)
+        ->assertTableActionVisible('delete', $repository);
 });

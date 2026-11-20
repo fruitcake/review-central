@@ -13,6 +13,7 @@ use App\Filament\App\Resources\AiProviders\AiProviderResource;
 use App\Filament\App\Resources\Connections\ConnectionResource;
 use App\Filament\App\Resources\SourceControl\SourceControlResource;
 use App\Filament\App\Resources\Tickets\TicketResource;
+use App\Filament\TenantRole;
 use App\Models\Connection;
 use App\Models\User;
 use Filament\Notifications\Notification;
@@ -100,6 +101,8 @@ class ConnectionOAuthController extends Controller
 
         abort_unless($user instanceof User, 403);
         abort_unless($user->canAccessTenant($connection->tenant), 404);
+        // Signing in puts that account's tokens on the connection: its keys, an admin's to change.
+        abort_unless(TenantRole::isAdmin($user, $connection->tenant), 403);
 
         $driver = $connection->driver();
 

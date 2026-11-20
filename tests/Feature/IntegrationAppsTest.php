@@ -196,7 +196,7 @@ it('names the installation\'s apps on a tenant\'s Apps page, .env\'s among them'
     config(['services.asana.client_id' => 'env-app', 'services.asana.client_secret' => 'env-secret']);
     asanaApp(['tenant_id' => $this->tenant->id, 'name' => 'Our Asana']);
     $user = User::factory()->create();
-    $user->tenants()->attach($this->tenant);
+    $user->tenants()->attach($this->tenant, ['role' => 'admin']);
     $this->actingAs($user);
     Filament::setTenant($this->tenant);
 
