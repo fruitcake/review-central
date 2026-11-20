@@ -105,6 +105,16 @@ class Report
             default => 'Not published: '.($publish['reason'] ?? 'no reason given').'.',
         });
 
+        // A thread that would not resolve reads as fixed and still open on the pull
+        // request; said here, with the host's reason, so it is not looked for in
+        // the application's log.
+        if (($publish['comments']['not_resolved'] ?? 0) > 0) {
+            $say(str_contains((string) ($publish['comments']['resolve_error'] ?? ''), 'Resource not accessible by')
+                // Optional, and left out on purpose where it is: no warning.
+                ? "{$publish['comments']['not_resolved']} finding thread(s) left open: the finding says it is done on its first line and in the reply. Resolving the thread too needs Contents: Read and write on the GitHub App or token, which is optional."
+                : "{$publish['comments']['not_resolved']} finding thread(s) could not be resolved on the pull request: ".($publish['comments']['resolve_error'] ?? 'no reason given'));
+        }
+
         if ($trial === null && $run !== null && $run->status === ReviewRun::STATUS_FINISHED) {
             $this->insights($repository, $run, $say);
         }
