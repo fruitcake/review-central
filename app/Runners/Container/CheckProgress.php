@@ -29,7 +29,7 @@ class CheckProgress
      * A line of the runner's own that starts a step: "12:03:01  ── review ──". By
      * name, as the reviewer can write a line of that shape too.
      */
-    protected const STEP = '/^\S+\s+── (precheck|review|report) ──$/u';
+    protected const STEP = '/^\S+\s+── ([a-z]+) ──$/u';
 
     /** How long whether a repository is public is believed, in seconds. */
     protected const VISIBILITY_SECONDS = 3600;
@@ -59,7 +59,7 @@ class CheckProgress
 
         $public = $this->public($run, $sourceControl);
         $lines = explode("\n", rtrim($this->log->tail($run)['text'] ?? ''));
-        $lines = array_slice($public ? array_values(preg_grep(self::STEP, $lines) ?: []) : $lines, -self::LINES);
+        $lines = array_slice($public ? array_values(array_filter($lines, fn (string $line): bool => preg_match(self::STEP, $line, $step) === 1 && in_array($step[1], RunLogWriter::PHASES, true))) : $lines, -self::LINES);
         $elapsed = RunPresenter::duration((int) $run->started_at->diffInSeconds(now()));
         $log = ReviewRunResource::getUrl('view', ['record' => $run], panel: 'app', tenant: $run->repository->tenant);
 

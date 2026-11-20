@@ -243,6 +243,8 @@ it('re-runs a review as a trial set up as it was, and posts it only when asked',
 });
 
 it('shows how long a run that is still going has taken, counting up', function () {
+    // Still: a second that passes while the page renders would make it 02:06.
+    $this->freezeTime();
     $user = User::factory()->create();
     $user->tenants()->attach($this->tenant);
     $this->actingAs($user);

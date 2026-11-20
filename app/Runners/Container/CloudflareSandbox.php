@@ -81,9 +81,13 @@ class CloudflareSandbox extends Sandbox
         $this->peakMemory = null;
         $this->seconds = null;
         $this->cost = null;
+        $this->samples = [];
 
         $files = $this->files();
-        $instance = (string) config('review.cloudflare.instance');
+        $instance = self::instance();
+        // What is paid for: the instance's share of a processor, and its memory.
+        $this->processors = isset(self::INSTANCES[$instance]) ? (float) config("review.cloudflare.instances.{$instance}.vcpu") : null;
+        $this->memoryMb = isset(self::INSTANCES[$instance]) ? (int) round((float) config("review.cloudflare.instances.{$instance}.memory_gib") * 1024) : null;
         // One sandbox per step, named for it and for this attempt: a second
         // delivery of the same job gets a sandbox and a place in the bucket of its
         // own, and cannot read or overwrite what the first one is still using.
@@ -93,6 +97,7 @@ class CloudflareSandbox extends Sandbox
         $archive = rtrim($workDirectory, '/').'-sandbox.tar';
 
         try {
+            $output?->__invoke('out', "##[phase] upload\n");
             $this->pack($archive, $workDirectory, $home);
             $stream = fopen("{$archive}.gz", 'r');
 
@@ -134,8 +139,12 @@ class CloudflareSandbox extends Sandbox
             ], $timeout, $output);
 
             if ($exit['kept']) {
+                $output?->__invoke('out', "##[phase] download\n");
                 $this->unpack($files, $kept, $workDirectory, $home);
             }
+
+            $this->samples = $exit['samples'];
+            $this->peakMemory = $this->samples === [] ? null : max(array_column($this->samples, 2)) * 1024 ** 2;
 
             $this->seconds = $exit['seconds'];
             $this->cost = self::estimate($instance, $exit['seconds']);
@@ -219,7 +228,7 @@ class CloudflareSandbox extends Sandbox
         $response = $this->client(3600)->post('prepare', [
             'setup' => $setup,
             'setupVersion' => self::setupVersion($setup),
-            'instance' => (string) config('review.cloudflare.instance'),
+            'instance' => self::instance(),
         ]);
 
         $answer = (array) $response->json();
@@ -227,6 +236,42 @@ class CloudflareSandbox extends Sandbox
         return $response->successful()
             ? ['ok' => true, 'made' => (bool) ($answer['made'] ?? false), 'seconds' => (int) ($answer['seconds'] ?? 0)]
             : ['ok' => false, 'error' => (string) ($answer['error'] ?? "The Worker answered {$response->status()}.")];
+    }
+
+    /** The sizes a sandbox comes in, as Cloudflare names them, smallest first. */
+    public const INSTANCES = ['lite' => 'lite', 'basic' => 'basic', 'standard-1' => 'standard-1', 'standard-2' => 'standard-2', 'standard-3' => 'standard-3', 'standard-4' => 'standard-4'];
+
+    /** The default size, when neither the environment nor the settings pick one. */
+    public const DEFAULT_INSTANCE = 'standard-1';
+
+    /**
+     * The size sandboxes run in: as the environment or the settings pick it.
+     */
+    public static function instance(): string
+    {
+        $instance = (string) config('review.cloudflare.instance');
+
+        return isset(self::INSTANCES[$instance]) ? $instance : self::DEFAULT_INSTANCE;
+    }
+
+    /**
+     * The Worker's samples as this application keeps them: when, processors busy,
+     * megabytes in use, and the share of the time it waited for a processor. What
+     * the Worker sends that is no sample is left out.
+     *
+     * @return list<array{0: int, 1: float, 2: int, 3: float}>
+     */
+    protected static function samples(mixed $samples): array
+    {
+        $kept = [];
+
+        foreach (is_array($samples) ? $samples : [] as $sample) {
+            if (is_array($sample) && count($sample) >= 3 && is_numeric($sample[0]) && is_numeric($sample[1]) && is_numeric($sample[2])) {
+                $kept[] = [(int) $sample[0], round((float) $sample[1], 2), (int) $sample[2], round((float) ($sample[3] ?? 0), 2)];
+            }
+        }
+
+        return $kept;
     }
 
     /**
@@ -283,7 +328,7 @@ class CloudflareSandbox extends Sandbox
      *
      * @param  array<string, mixed>  $spec
      * @param  Closure(string, string): void|null  $output
-     * @return array{exitCode: int, seconds: int, kept: bool}
+     * @return array{exitCode: int, seconds: int, kept: bool, samples: list<array{0: int, 1: float, 2: int, 3: float}>}
      */
     protected function ask(string $run, array $spec, int $timeout, ?Closure $output): array
     {
@@ -302,7 +347,7 @@ class CloudflareSandbox extends Sandbox
             } elseif ($event === 'error') {
                 throw new RuntimeException('The Cloudflare sandbox did not run the step: '.mb_substr(is_string($data) ? $data : (string) json_encode($data), 0, 500));
             } elseif ($event === 'exit' && is_array($data)) {
-                return ['exitCode' => (int) ($data['exitCode'] ?? 1), 'seconds' => (int) ($data['seconds'] ?? 0), 'kept' => ($data['kept'] ?? false) === true];
+                return ['exitCode' => (int) ($data['exitCode'] ?? 1), 'seconds' => (int) ($data['seconds'] ?? 0), 'kept' => ($data['kept'] ?? false) === true, 'samples' => self::samples($data['metrics']['samples'] ?? [])];
             }
         }
 

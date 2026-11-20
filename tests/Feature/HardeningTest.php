@@ -108,7 +108,7 @@ it('takes an address only when it is https and on the public internet', function
 
 it('keeps the most memory a running container was seen to use', function () {
     config(['review.container.sample_seconds' => 0]);
-    $seen = ['512.3MiB / 4GiB', '1.25GiB / 4GiB', '800MiB / 4GiB'];
+    $seen = ['12.5%|512.3MiB / 4GiB', '143.2%|1.25GiB / 4GiB', '98%|800MiB / 4GiB'];
 
     Process::fake(function ($process) use (&$seen) {
         $command = (array) $process->command;
@@ -124,7 +124,11 @@ it('keeps the most memory a running container was seen to use', function () {
     $sandbox = app(Sandbox::class);
     $sandbox->run('review-1-41-review', 'true', storage_path('framework/testing/review-work'), [], trusted: false, timeout: 60);
 
-    expect($sandbox->peakMemory)->toBe((int) (1.25 * 1024 ** 3));
+    expect($sandbox->peakMemory)->toBe((int) (1.25 * 1024 ** 3))
+        // And over time: processors busy and megabytes, against what it may use.
+        ->and(array_map(fn (array $sample): array => array_slice($sample, 1), $sandbox->samples))->toBe([[0.13, 512, 0.0], [1.43, 1280, 0.0], [0.98, 800, 0.0]])
+        ->and($sandbox->processors)->toBe((float) config('review.container.cpus'))
+        ->and($sandbox->memoryMb)->toBe(Sandbox::megabytes((string) config('review.container.memory')));
 
     // A step that ended before the first look was never seen.
     Process::fake(fn () => Process::result());

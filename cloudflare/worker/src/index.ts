@@ -40,7 +40,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
  * after one is told apart. tests/Feature/CloudflareWorkerVersionTest.php fails
  * on a change that leaves it as it was.
  */
-const WORKER_VERSION = "2026-11-20.4";
+const WORKER_VERSION = "2026-11-20.5";
 
 interface Env {
   REVIEW_SANDBOX: DurableObjectNamespace<ReviewSandbox>;
@@ -102,6 +102,33 @@ const KEY_HEADERS = ["authorization", "x-api-key", "x-goog-api-key", "api-key"];
 
 /** The query parameter a provider reads its key from, as Gemini's API may. */
 const KEY_PARAMETERS = ["key"];
+
+/** Seconds between two samples. */
+const SAMPLE_SECONDS = 5;
+
+/**
+ * What the sandbox uses, read every few seconds from inside it: a sandbox is a
+ * machine of its own, so /proc/stat and /proc/meminfo are its own. First a line
+ * with its processors and memory, then one per sample: the time, the processors'
+ * busy and stolen time and their total, and the memory in use, in megabytes.
+ */
+const SAMPLER = `
+echo "limits $(nproc) $(awk '/MemTotal/ { print int($2 / 1024) }' /proc/meminfo)"
+while :; do
+  set -- $(head -n 1 /proc/stat)
+  echo "$(date +%s) $(( $2 + $3 + $4 + $7 + $8 )) $9 $(( $2 + $3 + $4 + $5 + $6 + $7 + $8 + $9 )) $(awk '/MemTotal/ { t = $2 } /MemAvailable/ { a = $2 } END { print int((t - a) / 1024) }' /proc/meminfo)"
+  sleep ${SAMPLE_SECONDS}
+done`;
+
+/** Samples handed back at most: an hour of them; a longer run gets every other one, and so on. */
+const MOST_SAMPLES = 720;
+
+/** What the sandbox used: its processors and memory, and per sample the time, processors busy, megabytes in use and the share of time it waited for a processor. */
+interface SandboxMetrics {
+  processors: number | null;
+  memoryMb: number | null;
+  samples: Array<[at: number, busy: number, memoryMb: number, stolen: number]>;
+}
 
 /** Where the runtime puts the certificate its HTTPS interception signs with. */
 const INTERCEPT_CA = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
@@ -275,7 +302,7 @@ export class ReviewSandbox extends DurableObject<Env> {
    *
    *   event: note     data: "a line of this Worker's own"
    *   event: output   data: "a piece of what the script printed"
-   *   event: exit     data: {"exitCode": 0, "seconds": 212, "kept": true}
+   *   event: exit     data: {"exitCode": 0, "seconds": 212, "kept": true, "metrics": {...}}
    *   event: error    data: "why there was no run"
    *
    * A piece of output may end anywhere, so it is appended, not read as a line.
@@ -418,6 +445,7 @@ export class ReviewSandbox extends DurableObject<Env> {
     await this.destroy();
 
     const started = Date.now();
+    await send("note", "##[phase] start");
 
     // The reviewer installs the repository's packages and calls its AI provider,
     // so it has the internet. It gets no credential of the repository's host.
@@ -470,6 +498,11 @@ export class ReviewSandbox extends DurableObject<Env> {
 
     await container.setInactivityTimeout(Math.min(spec.timeout + 900, LONGEST) * 1000);
 
+    // What it uses, for as long as the review runs: never in the way of it.
+    const metrics: SandboxMetrics = { processors: null, memoryMb: null, samples: [] };
+    const sampler = await container.exec(["sh", "-c", SAMPLER], { stdout: "pipe", stderr: "ignore" }).catch(() => null);
+    const sampling = sampler === null ? Promise.resolve() : this.sample(sampler, metrics).catch(() => undefined);
+
     const decoder = new TextDecoder();
 
     /** Runs a command and streams what it prints; resolves with its exit code, or 143 when nobody reads any more. */
@@ -514,6 +547,7 @@ export class ReviewSandbox extends DurableObject<Env> {
       await send("note", `The AI providers' keys stay in the Worker: ${[...new Set(spec.credentials.map((credential) => credential.host))].join(", ")} reached through it.`);
     }
 
+    await send("note", "##[phase] unpack");
     const input = await this.env.BUCKET.get(spec.input);
 
     if (input === null) {
@@ -532,6 +566,7 @@ export class ReviewSandbox extends DurableObject<Env> {
     let restored = false;
 
     if (cache !== null) {
+      await send("note", "##[phase] vendor");
       restored = await this.restoreCache(cache).catch(async (error: unknown) => {
         await send("note", `Could not fetch vendor/ from the bucket, so Composer installs it: ${error instanceof Error ? error.message : String(error)}`);
 
@@ -560,6 +595,7 @@ export class ReviewSandbox extends DurableObject<Env> {
     // What the reviewer left, also when it failed: a session that was resumed and
     // a report that is half there are both the caller's to judge.
     if (wanted()) {
+      await send("note", "##[phase] keep");
       kept = await this.keep(spec).catch(async (error: unknown) => {
         await send("note", `Could not hand back the reviewer's files: ${error instanceof Error ? error.message : String(error)}`);
 
@@ -575,7 +611,55 @@ export class ReviewSandbox extends DurableObject<Env> {
         .catch((error: unknown) => send("note", `Could not keep vendor/ in the bucket: ${error instanceof Error ? error.message : String(error)}`));
     }
 
-    await send("exit", { exitCode, seconds: Math.round((Date.now() - started) / 1000), kept });
+    sampler?.kill();
+    await sampling;
+
+    await send("exit", { exitCode, seconds: Math.round((Date.now() - started) / 1000), kept, metrics: thinned(metrics) });
+  }
+
+  /**
+   * Reads the sampler's lines into the metrics: per sample, the processors kept
+   * busy since the one before, and the share of that time a processor was not
+   * there for it (stolen: a sandbox on a part of a processor waits for the rest).
+   */
+  private async sample(process: ExecProcess, metrics: SandboxMetrics): Promise<void> {
+    const decoder = new TextDecoder();
+    let pending = "";
+    let before: [busy: number, stolen: number, total: number] | null = null;
+
+    for await (const chunk of process.stdout as ReadableStream<Uint8Array>) {
+      pending += decoder.decode(chunk, { stream: true });
+      const lines = pending.split("\n");
+      pending = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+
+        if (parts[0] === "limits") {
+          metrics.processors = Number(parts[1]) || null;
+          metrics.memoryMb = Number(parts[2]) || null;
+          continue;
+        }
+
+        const [at, busy, stolen, total, memory] = parts.map(Number);
+
+        if (parts.length !== 5 || [at, busy, stolen, total, memory].some((value) => !Number.isFinite(value))) {
+          continue;
+        }
+
+        if (before !== null && total > before[2]) {
+          const elapsed = total - before[2];
+          metrics.samples.push([
+            at,
+            Math.round(((busy - before[0]) / elapsed) * (metrics.processors ?? 1) * 100) / 100,
+            memory,
+            Math.round(((stolen - before[1]) / elapsed) * 100) / 100,
+          ]);
+        }
+
+        before = [busy, stolen, total];
+      }
+    }
   }
 
   /**
@@ -820,6 +904,16 @@ async function sameToken(given: string, expected: string): Promise<boolean> {
   }
 
   return different === 0;
+}
+
+/**
+ * The metrics with at most MOST_SAMPLES samples: of a longer run, every other
+ * one, or every third, and so on.
+ */
+function thinned(metrics: SandboxMetrics): SandboxMetrics {
+  const every = Math.ceil(metrics.samples.length / MOST_SAMPLES);
+
+  return every <= 1 ? metrics : { ...metrics, samples: metrics.samples.filter((_, index) => index % every === 0) };
 }
 
 function json(body: unknown, status = 200): Response {

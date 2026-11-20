@@ -9,6 +9,10 @@
 # same repository prepared the same way, and differs only in what run-review.sh
 # starts.
 
+# Each part marks where it starts ("##[phase] <name>"), so how long it took is
+# measured: review-central turns the line into a step of the run.
+echo "##[phase] prepare"
+
 # The config file for the reviewer the precheck chose.
 if [ -z "${REVIEW_AGENT_CONFIG:-}" ] && [ -n "${REVIEW_AGENT:-}" ]; then
   HERE=.review/skill
@@ -416,6 +420,7 @@ export COMPOSER_HOME="$HOME/.composer"
 # vendor/ - but it is a weaker one, so the log says what would fix it. The variable
 # is dropped as soon as Composer is done: the reviewer reads text from the pull
 # request and has no use for it.
+echo "##[phase] composer"
 if [ -f composer.json ]; then
   # Not for a repository that commits anything under vendor/: those files are the
   # pull request's, and kept with the install they would be unpacked into the
@@ -489,6 +494,7 @@ fi
 # pull request brought along is removed first: the reviewer trusts the file as the
 # step's.
 rm -f review-scan.md
+echo "##[phase] scan"
 if [ -n "$DEST_BRANCH" ]; then
   sh .review/skill/scan-change.sh "origin/$DEST_BRANCH" "${BITBUCKET_COMMIT:-HEAD}" review-scan.md
 else
@@ -504,6 +510,7 @@ unset COMPOSER_AUTH
 # release that is, and the cached copy is replaced only when it is not that one -
 # the cache survives every run, so checking only that ocr exists would keep the
 # first copy it ever installed. When npm cannot be asked, the cached copy is used.
+echo "##[phase] tools"
 export PATH="$HOME/.tools/node_modules/.bin:$PATH"
 OCR_SERIES=1.12
 # `ocr --version` prints "open-code-review v1.12.12 (182898c) linux/amd64".

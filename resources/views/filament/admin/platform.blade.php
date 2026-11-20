@@ -97,7 +97,7 @@
             <div class="rc-advice">
                 @foreach ($capacity['advice'] as $advice)
                     <div class="rc-advice-item">
-                        <span class="rc-chip rc-chip-{{ $advice['tone'] }}">{{ $advice['tone'] === 'approved' ? 'No action' : ($advice['tone'] === 'neutral' ? 'Waiting for data' : 'Upgrade') }}</span>
+                        <span class="rc-chip rc-chip-{{ $advice['tone'] }}">{{ $advice['label'] ?? ($advice['tone'] === 'approved' ? 'No action' : ($advice['tone'] === 'neutral' ? 'Waiting for data' : 'Upgrade')) }}</span>
                         <span><strong>{{ $advice['title'] }}</strong><span class="rc-muted">{{ $advice['body'] }}</span></span>
                     </div>
                 @endforeach

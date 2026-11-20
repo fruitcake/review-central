@@ -214,7 +214,9 @@ return [
         // through it and the reviewer's files come back through it.
         'disk' => env('REVIEW_CLOUDFLARE_DISK', 'r2'),
         // lite, basic, standard-1 to standard-4, as Cloudflare names them.
-        'instance' => env('REVIEW_CLOUDFLARE_INSTANCE', 'standard-1'),
+        // Empty here, so the size under Settings can fill it; standard-1 when
+        // neither picks one.
+        'instance' => env('REVIEW_CLOUDFLARE_INSTANCE'),
         // Installs PHP, Composer and the reviewers' CLIs in a fresh sandbox on
         // Cloudflare's own image; the Worker keeps a snapshot of that, which later
         // reviews start from. Off when the Worker was deployed with an image

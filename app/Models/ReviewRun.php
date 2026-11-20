@@ -61,6 +61,7 @@ use Illuminate\Support\Str;
  * @property int|null $queue_seconds
  * @property int|null $peak_memory_mb
  * @property string|null $memory_limit
+ * @property array<string, mixed>|null $metrics What its steps took and what its reviewer used: see App\Services\RunMetrics
  * @property string|null $sandbox
  * @property string|null $sandbox_size
  * @property int|null $sandbox_seconds
@@ -187,6 +188,7 @@ class ReviewRun extends Model
             'sandbox_seconds' => 'integer',
             'cost_estimated' => 'boolean',
             'custom' => 'boolean',
+            'metrics' => 'array',
         ];
     }
 

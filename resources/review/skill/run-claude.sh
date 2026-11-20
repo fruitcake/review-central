@@ -19,6 +19,7 @@
 # review does.
 set -u
 
+echo "##[phase] cli"
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$HERE/reviewer-env.sh"
 CONFIG="${REVIEW_AGENT_CONFIG:-$HERE/claude-config.json}"
@@ -162,6 +163,7 @@ if [ -n "$RESUME_SESSION" ]; then
     | sort -u > "$COUNTED"
 fi
 
+echo "##[phase] reviewer"
 printf '\n-------------------- Reviewing --------------------\n'
 # The review's duration starts here, after the CLI update,
 # and only transcripts written from here on are counted (collect-usage.sh).

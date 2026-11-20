@@ -72,6 +72,7 @@ PROMPT=$(mktemp)
 MAX_BUDGET=${SECURITY_REVIEW_MAX_BUDGET:-20}
 echo "Budget: \$$MAX_BUDGET"
 
+echo "##[phase] reviewer"
 printf '\n-------------------- Reviewing --------------------\n'
 touch "${REVIEW_USAGE_SINCE:-.review-started}"
 reviewer_env_report 'ANTHROPIC_API_KEY|ANTHROPIC_BASE_URL|CLAUDE_CODE_[A-Z0-9_]+|CLAUDE_CONFIG_DIR'

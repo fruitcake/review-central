@@ -25,6 +25,7 @@
 # review, so the step fails.
 set -u
 
+echo "##[phase] cli"
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$HERE/reviewer-env.sh"
 TRANSCRIPT="${REVIEW_TRANSCRIPT_FILE:-pi-review.jsonl}"
@@ -190,6 +191,7 @@ touch "${REVIEW_USAGE_SINCE:-.review-started}"
 # There is no sandbox of Pi's own. The container is the boundary, as for Codex, and
 # the reviewer starts without the step's secrets (reviewer-env.sh) except its own
 # provider's key, which Pi needs in its environment and a shell it starts can read.
+echo "##[phase] reviewer"
 printf '\n-------------------- Reviewing --------------------\n'
 reviewer_env_report "$OWN_KEY|PI_[A-Z0-9_]+"
 {

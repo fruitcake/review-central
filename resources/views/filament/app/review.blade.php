@@ -246,7 +246,26 @@
                         <dt>Effort</dt><dd>{{ $run->effort ?? 'Default' }}</dd>
                         <dt>Instructions</dt><dd class="rc-mono">{{ $run->instructions_version ?? '—' }}</dd>
                         <dt>Commit</dt><dd class="rc-mono">{{ substr($run->commit, 0, 12) }}</dd>
+                        @if (($run->metrics['cpu_average'] ?? null) !== null)
+                            <dt>Processor</dt><dd>{{ $run->metrics['cpu_average'] }} on average, {{ $run->metrics['cpu_peak'] }} at most{{ ($run->metrics['processors'] ?? null) === null ? '' : ', of '.$run->metrics['processors'] }}{{ ($run->metrics['starved_percent'] ?? 0) > 0 ? " · short of it {$run->metrics['starved_percent']}% of the time" : '' }}</dd>
+                        @endif
                     </dl>
+                    @if (! empty($run->metrics['steps']))
+                        <table class="rc-steps">
+                            <caption class="rc-muted">Steps</caption>
+                            <thead><tr><th scope="col">Step</th><th scope="col">Took</th><th scope="col">Memory</th><th scope="col">Processor</th></tr></thead>
+                            <tbody>
+                                @foreach ($run->metrics['steps'] as $step)
+                                    <tr>
+                                        <td>{{ $step['name'] }}</td>
+                                        <td>{{ RunPresenter::duration((int) $step['seconds']) }}</td>
+                                        <td>{{ ($step['peak_memory_mb'] ?? null) === null ? '—' : number_format($step['peak_memory_mb']).' MB' }}</td>
+                                        <td>{{ ($step['cpu_average'] ?? null) === null ? '—' : $step['cpu_average'].' · '.$step['cpu_peak'].' max' }}{{ ($step['starved_percent'] ?? 0) >= 25 ? ' · short' : '' }}</td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    @endif
                 </section>
 
                 <section class="rc-card rc-pad rc-rate" aria-labelledby="rc-rate">

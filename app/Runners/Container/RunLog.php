@@ -34,6 +34,30 @@ class RunLog
     }
 
     /**
+     * When each step of a run started, as its writers noted them: the first time
+     * a step is named, in order.
+     *
+     * @return list<array{at: int, name: string}>
+     */
+    public function phases(int $repositoryId, int $build): array
+    {
+        $file = $this->path($repositoryId, $build).'.phases';
+        $phases = [];
+
+        foreach (is_file($file) ? (array) file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) : [] as $line) {
+            [$at, $name] = array_pad(explode(' ', (string) $line, 2), 2, '');
+
+            if (ctype_digit($at) && $name !== '' && ! in_array($name, array_column($phases, 'name'), true)) {
+                $phases[] = ['at' => (int) $at, 'name' => $name];
+            }
+        }
+
+        usort($phases, fn (array $a, array $b): int => $a['at'] <=> $b['at']);
+
+        return $phases;
+    }
+
+    /**
      * Something to write a step's output to, or null when logs are not kept.
      *
      * @param  array<string, string>  $environment  the step's environment, whose secrets are kept out of the log
