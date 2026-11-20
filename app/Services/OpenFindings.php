@@ -13,6 +13,7 @@ use App\Models\Repository;
 use App\Models\ReviewRun;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * The backlog of findings a pull request was merged with: kept when it is merged,
@@ -23,8 +24,11 @@ class OpenFindings
     /** How often a team may have its open findings checked, by setting, in days. */
     public const INTERVALS = ['weekly' => 7, 'monthly' => 30];
 
-    /** Characters of a file the checking model reads. */
+    /** Characters of a file the checking model reads whole; a longer one is read around the findings' lines. */
     public const FILE_LENGTH = 60000;
+
+    /** Lines either side of a finding's line that a long file's excerpt shows. */
+    public const EXCERPT_LINES = 80;
 
     /**
      * Keeps what the pull request's last review still had open: new or open, and
@@ -47,8 +51,14 @@ class OpenFindings
             return 0;
         }
 
+        // Called no problem or wrong on any review of the pull request: a later
+        // review that carried the finding on keeps its id.
         $dismissed = FindingVerdict::query()
-            ->where('review_run_id', $run->getKey())
+            ->whereIn('review_run_id', ReviewRun::query()
+                ->select('id')
+                ->where('repository_id', $repository->getKey())
+                ->where('pull_request_id', $pullRequestId)
+                ->where('custom', false))
             ->whereIn('verdict', [FindingVerdictKind::NotAProblem, FindingVerdictKind::Wrong])
             ->pluck('finding_id')
             ->all();
@@ -107,6 +117,8 @@ class OpenFindings
         return OpenFinding::query()
             ->where('repository_id', $repository->getKey())
             ->active()
+            // One without a file has nothing to be checked against.
+            ->whereNotNull('path')
             ->where(fn ($query) => $query->whereNull('checked_at')->orWhere('checked_at', '<', now()->subDays($days)))
             ->get();
     }
@@ -132,54 +144,102 @@ class OpenFindings
         $checked = 0;
 
         foreach ($findings->filter(fn (OpenFinding $finding): bool => $finding->path !== null)->groupBy('path') as $path => $group) {
-            $file = $source->getFile((string) $path);
+            // One file that cannot be read or answered for leaves the others to be checked.
+            try {
+                $file = $source->fileOnMainBranch((string) $path);
 
-            if ($file === null) {
+                if ($file === null) {
+                    continue;
+                }
+
+                if ($file === false) {
+                    foreach ($group as $finding) {
+                        $checked += (int) $this->settle($finding, OpenFinding::RESOLVED, 'The file is no longer on the main branch.', null);
+                    }
+
+                    continue;
+                }
+
+                [$text, $excerpt] = self::material((string) $path, $file, $group);
+                $response = $driver->checks($connection, $text);
+                // By the row's own id: two pull requests can each have an F1 in this file.
+                $verdicts = FindingChecker::read($response, $group->map(fn (OpenFinding $finding): string => (string) $finding->getKey())->all());
+
                 foreach ($group as $finding) {
-                    $this->settle($finding, OpenFinding::RESOLVED, 'The file is no longer on the main branch.', null);
+                    $verdict = $verdicts[(string) $finding->getKey()] ?? null;
+
+                    if ($verdict === null) {
+                        continue;
+                    }
+
+                    // Code an excerpt leaves out is not code that is gone.
+                    $status = $verdict['verdict'] === OpenFinding::RESOLVED && $excerpt && $finding->line === null ? OpenFinding::UNCLEAR : $verdict['verdict'];
+                    $checked += (int) $this->settle($finding, $status, $verdict['note'], $response->meta->model);
                 }
-                $checked += $group->count();
-
-                continue;
-            }
-
-            $response = $driver->checks($connection, self::material((string) $path, $file, $group));
-            $verdicts = FindingChecker::read($response, $group->pluck('finding_id')->all());
-
-            foreach ($group as $finding) {
-                $verdict = $verdicts[$finding->finding_id] ?? null;
-
-                if ($verdict !== null) {
-                    $this->settle($finding, $verdict['verdict'], $verdict['note'], $response->meta->model);
-                    $checked++;
-                }
+            } catch (Throwable $exception) {
+                report($exception);
             }
         }
 
         return $checked;
     }
 
-    protected function settle(OpenFinding $finding, string $verdict, string $note, ?string $model): void
+    /**
+     * Applies a verdict, unless someone changed the finding while it was checked,
+     * such as closing it.
+     *
+     * @return bool whether it was applied
+     */
+    protected function settle(OpenFinding $finding, string $verdict, string $note, ?string $model): bool
     {
-        $finding->update([
-            'status' => $verdict,
-            'note' => $note,
-            'checked_at' => now(),
-            'checked_by_model' => $model,
-            'closed_at' => $verdict === OpenFinding::RESOLVED ? now() : null,
-            'closed_by' => $verdict === OpenFinding::RESOLVED ? 'check' : null,
-        ]);
+        return OpenFinding::query()
+            ->whereKey($finding->getKey())
+            ->whereIn('status', OpenFinding::ACTIVE)
+            ->where('updated_at', $finding->updated_at)
+            ->update([
+                'status' => $verdict,
+                'note' => $note,
+                'checked_at' => now(),
+                'checked_by_model' => $model,
+                'closed_at' => $verdict === OpenFinding::RESOLVED ? now() : null,
+                'closed_by' => $verdict === OpenFinding::RESOLVED ? 'check' : null,
+                'updated_at' => now(),
+            ]) === 1;
     }
 
     /**
+     * What the checking model reads: the file with its line numbers, whole, or in
+     * excerpts around each finding's line when it is longer than is read, and the
+     * findings by their row's id.
+     *
      * @param  Collection<int, OpenFinding>  $findings
+     * @return array{0: string, 1: bool} the text, and whether the file is shown in excerpts
      */
-    protected static function material(string $path, string $file, Collection $findings): string
+    protected static function material(string $path, string $file, Collection $findings): array
     {
-        $items = $findings->map(fn (OpenFinding $finding): string => "## {$finding->finding_id} · {$finding->severity} · {$finding->title}\n"
+        $lines = preg_split('/\R/', $file) ?: [];
+        $numbered = fn (int $from, int $to): string => implode("\n", array_map(fn (int $index): string => ($index + 1).': '.$lines[$index], range($from, $to)));
+        $excerpt = strlen($file) > self::FILE_LENGTH;
+
+        if (! $excerpt || $lines === []) {
+            $shown = $lines === [] ? '' : $numbered(0, count($lines) - 1);
+        } else {
+            $shown = $findings->pluck('line')->filter()->unique()->sort()->map(function (int $line) use ($lines, $numbered): string {
+                $from = max(0, $line - 1 - self::EXCERPT_LINES);
+                $to = min(count($lines) - 1, $line - 1 + self::EXCERPT_LINES);
+
+                return $from > $to ? '' : $numbered($from, $to);
+            })->filter()->implode("\n…\n");
+        }
+
+        $items = $findings->map(fn (OpenFinding $finding): string => "## {$finding->getKey()} · {$finding->severity} · {$finding->title}\n"
             .($finding->line === null ? '' : "Raised on line {$finding->line}.\n")
             .Str::limit((string) $finding->details, 2000))->implode("\n\n");
 
-        return "# {$path}, as it is now\n\n".Str::limit($file, self::FILE_LENGTH)."\n\n# The findings\n\n{$items}";
+        $heading = $excerpt
+            ? "# {$path}, as it is now: excerpts around the findings' lines. The rest of the file is not shown, and code not shown is not gone."
+            : "# {$path}, as it is now";
+
+        return ["{$heading}\n\n".Str::limit($shown, self::FILE_LENGTH + 20000)."\n\n# The findings\n\n{$items}", $excerpt];
     }
 }

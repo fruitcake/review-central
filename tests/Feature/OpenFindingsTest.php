@@ -49,7 +49,9 @@ it('keeps what the last review still had open when the pull request is merged', 
         ['id' => 'F3', 'status' => 'open', 'title' => 'Called no problem'],
         ['id' => 'F4', 'status' => 'open', 'title' => 'No rate limit'],
     ], ['started_at' => now()->subHour()]);
-    FindingVerdict::query()->create(['review_run_id' => $run->id, 'user_id' => $this->user->id, 'finding_id' => 'F3', 'verdict' => FindingVerdictKind::NotAProblem]);
+    // Called wrong on an earlier review, which the last one carried on.
+    $earlier = ($this->run)([['id' => 'F3', 'status' => 'new', 'title' => 'Called no problem']], ['started_at' => now()->subDay()]);
+    FindingVerdict::query()->create(['review_run_id' => $earlier->id, 'user_id' => $this->user->id, 'finding_id' => 'F3', 'verdict' => FindingVerdictKind::Wrong]);
     // A trial is no review of the pull request.
     ($this->run)([['id' => 'F9', 'status' => 'new', 'title' => 'From a trial']], ['custom' => true]);
 
@@ -68,28 +70,76 @@ it('checks each file once against the main branch, and resolves what is in a fil
         'api.bitbucket.org/2.0/repositories/acme/shop' => Http::response(['mainbranch' => ['name' => 'main']]),
         'api.bitbucket.org/2.0/repositories/acme/shop/src/main/app/Export.php' => Http::response("<?php\nreturn Invoice::forCompany(\$company)->get();\n"),
         'api.bitbucket.org/2.0/repositories/acme/shop/src/main/app/Old.php' => Http::response('', 404),
+        'api.bitbucket.org/2.0/repositories/acme/shop/src/main/app/Secret.php' => Http::response('', 403),
+        'api.bitbucket.org/2.0/repositories/acme/shop/src/main/app/Broken.php' => Http::response('', 500),
     ]);
     $leak = ($this->finding)('F1');
-    $limit = ($this->finding)('F2', ['line' => 30]);
+    // The same id in the same file, from another pull request.
+    $other = ($this->finding)('F1', ['pull_request_id' => 571, 'line' => 30]);
     $gone = ($this->finding)('F3', ['path' => 'app/Old.php']);
+    $refused = ($this->finding)('F5', ['path' => 'app/Secret.php']);
+    $broken = ($this->finding)('F6', ['path' => 'app/Broken.php']);
     $nowhere = ($this->finding)('F4', ['path' => null]);
 
     FindingChecker::fake([['findings' => [
-        ['id' => 'F1', 'verdict' => 'resolved', 'note' => 'It now scopes to the company.'],
-        ['id' => 'F2', 'verdict' => 'present', 'note' => 'Still no limit.'],
-        ['id' => 'F7', 'verdict' => 'resolved', 'note' => 'Not asked about.'],
+        ['id' => (string) $leak->id, 'verdict' => 'resolved', 'note' => 'It now scopes to the company.'],
+        ['id' => (string) $other->id, 'verdict' => 'present', 'note' => 'Still no limit.'],
+        ['id' => '999999', 'verdict' => 'resolved', 'note' => 'Not asked about.'],
     ]]]);
 
-    expect(app(OpenFindings::class)->check($this->repository, OpenFinding::query()->get()))->toBe(3);
+    // A file that fails to read leaves the others to be checked, in whatever order they come.
+    expect(app(OpenFindings::class)->check($this->repository, OpenFinding::query()->orderByDesc('id')->get()))->toBe(3);
 
     expect($leak->refresh()->only(['status', 'note', 'closed_by']))->toBe(['status' => 'resolved', 'note' => 'It now scopes to the company.', 'closed_by' => 'check'])
-        ->and($limit->refresh()->status)->toBe('present')
+        ->and($other->refresh()->status)->toBe('present')
         ->and($gone->refresh()->only(['status', 'note']))->toBe(['status' => 'resolved', 'note' => 'The file is no longer on the main branch.'])
+        // Refused or failing is not gone.
+        ->and($refused->refresh()->status)->toBe('open')
+        ->and($broken->refresh()->status)->toBe('open')
         ->and($nowhere->refresh()->status)->toBe('open')
         ->and($nowhere->checked_at)->toBeNull();
 
-    FindingChecker::assertPrompted(fn ($prompt): bool => str_contains($prompt->prompt, 'Invoice::forCompany')
-        && str_contains($prompt->prompt, '## F1 · MEDIUM · Finding F1') && str_contains($prompt->prompt, '## F2'));
+    FindingChecker::assertPrompted(fn ($prompt): bool => str_contains($prompt->prompt, '2: return Invoice::forCompany')
+        && str_contains($prompt->prompt, "## {$leak->id} · MEDIUM · Finding F1") && str_contains($prompt->prompt, "## {$other->id} · MEDIUM"));
+});
+
+it('leaves a finding someone closed while it was being checked as they closed it', function () {
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/shop' => Http::response(['mainbranch' => ['name' => 'main']]),
+        'api.bitbucket.org/2.0/repositories/acme/shop/src/main/app/Export.php' => Http::response("<?php\n"),
+    ]);
+    $finding = ($this->finding)('F1', ['updated_at' => now()->subMinute()]);
+    $loaded = OpenFinding::query()->get();
+    $finding->update(['status' => OpenFinding::DISMISSED, 'note' => 'Accepted']);
+    FindingChecker::fake([['findings' => [['id' => (string) $finding->id, 'verdict' => 'present', 'note' => 'Still there.']]]]);
+
+    expect(app(OpenFindings::class)->check($this->repository, $loaded))->toBe(0)
+        ->and($finding->refresh()->only(['status', 'note']))->toBe(['status' => 'dismissed', 'note' => 'Accepted']);
+});
+
+it('reads a long file around the findings\' lines, and resolves nothing it cannot point at', function () {
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    $file = implode("\n", array_map(fn (int $line): string => $line === 2000 ? 'return Invoice::all(); // the leak' : str_repeat('x', 40), range(1, 3000)));
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/shop' => Http::response(['mainbranch' => ['name' => 'main']]),
+        'api.bitbucket.org/2.0/repositories/acme/shop/src/main/app/Export.php' => Http::response($file),
+    ]);
+    $lined = ($this->finding)('F1', ['line' => 2000]);
+    $unlined = ($this->finding)('F2', ['line' => null]);
+    FindingChecker::fake([['findings' => [
+        ['id' => (string) $lined->id, 'verdict' => 'present', 'note' => 'Line 2000 still has it.'],
+        ['id' => (string) $unlined->id, 'verdict' => 'resolved', 'note' => 'Not in what was shown.'],
+    ]]]);
+
+    app(OpenFindings::class)->check($this->repository, OpenFinding::query()->get());
+
+    expect($lined->refresh()->status)->toBe('present')
+        ->and($unlined->refresh()->status)->toBe('unclear');
+
+    FindingChecker::assertPrompted(fn ($prompt): bool => str_contains($prompt->prompt, '2000: return Invoice::all(); // the leak')
+        && str_contains($prompt->prompt, 'code not shown is not gone')
+        && ! str_contains($prompt->prompt, "\n1: xxx"));
 });
 
 it('checks the backlog as often as the team says, and not at all when it says nothing', function () {
@@ -97,6 +147,8 @@ it('checks the backlog as often as the team says, and not at all when it says no
     $fresh = ($this->finding)('F1', ['checked_at' => now()->subDays(2), 'status' => 'present']);
     $stale = ($this->finding)('F2', ['checked_at' => now()->subDays(8), 'status' => 'present']);
     ($this->finding)('F3', ['status' => 'resolved', 'checked_at' => null]);
+    // Nothing to check it against.
+    ($this->finding)('F4', ['path' => null]);
 
     expect(OpenFindings::due($this->repository))->toHaveCount(0);
 

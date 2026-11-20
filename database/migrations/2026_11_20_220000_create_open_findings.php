@@ -21,7 +21,8 @@ return new class extends Migration
             $table->string('finding_id', 16);
             $table->string('severity', 16)->nullable();
             $table->string('title');
-            $table->string('path')->nullable();
+            // A nested path can be longer than a string column takes.
+            $table->text('path')->nullable();
             $table->unsignedInteger('line')->nullable();
             $table->text('details')->nullable();
             $table->string('merge_commit', 40)->nullable();

@@ -440,6 +440,20 @@ class GitHubClient implements FiltersSecrets, SourceControl
         return $repository + ['mainbranch' => ['name' => $repository['default_branch'] ?? null]];
     }
 
+    public function fileOnMainBranch(string $path): string|false|null
+    {
+        $response = $this->request(10)->accept('application/vnd.github.raw')
+            ->get($this->url('contents/'.implode('/', array_map('rawurlencode', explode('/', $path)))));
+
+        // GitHub answers 404 for a repository it hides as well as for a file that is
+        // not there: only one that can be read says the file is gone.
+        return match ($response->status()) {
+            404 => $this->getRepository() === null ? null : false,
+            403 => null,
+            default => $response->throw()->body(),
+        };
+    }
+
     public function getFile(string $path): ?string
     {
         $response = $this->request(10)->accept('application/vnd.github.raw')
