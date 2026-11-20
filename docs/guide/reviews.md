@@ -78,7 +78,7 @@ Approvals and requests for changes reach Review Central through the webhook even
 
 ### Open findings
 
-When a pull request is merged while its last review still had findings open (new or open, and not called *Not a problem* or *Wrong* by anyone in the team), they stay under **Open findings** in the sidebar, per repository. Trials do not count. The list shows each finding with its pull request, file and line, and where it stands:
+When a pull request is merged into the main branch while its last review still had findings open (new or open, and not called *Not a problem* or *Wrong* by anyone in the team), they stay under **Open findings** in the sidebar, per repository. Trials do not count. The list shows each finding with its pull request, file and line, and where it stands:
 
 - **Not checked yet**: kept at the merge.
 - **Still there**, **Resolved** or **Unclear**: what the last check said, with its one-sentence reason.

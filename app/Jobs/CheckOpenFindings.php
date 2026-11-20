@@ -18,7 +18,7 @@ class CheckOpenFindings implements ShouldQueue
 {
     use Queueable;
 
-    public int $timeout = 900;
+    public int $timeout = 600;
 
     public int $tries = 1;
 
@@ -43,6 +43,17 @@ class CheckOpenFindings implements ShouldQueue
         $due = $this->ids === null
             ? OpenFindings::due($repository)
             : OpenFinding::query()->where('repository_id', $repository->getKey())->active()->whereKey($this->ids)->get();
+
+        $files = $due->filter(fn (OpenFinding $finding): bool => $finding->path !== null)->groupBy('path');
+
+        // A job a file, so a repository with many cannot run out of time before the last.
+        if ($files->count() > 1) {
+            foreach ($files as $group) {
+                self::dispatch($repository->getKey(), $group->map(fn (OpenFinding $finding): int => (int) $finding->getKey())->values()->all());
+            }
+
+            return;
+        }
 
         if ($due->isNotEmpty()) {
             $findings->check($repository, $due);

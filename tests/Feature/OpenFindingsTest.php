@@ -232,3 +232,49 @@ it('resolves nothing from excerpts of a long file, since the code may have moved
         && str_contains($prompt->prompt, "\n20: x") && str_contains($prompt->prompt, "\n230: x") && ! str_contains($prompt->prompt, "\n231: x")
         && str_contains($prompt->prompt, 'code not shown is not gone'));
 });
+
+it('keeps the findings once, from before the merge, and only of what reached the main branch', function () {
+    Http::fake(['api.bitbucket.org/2.0/repositories/acme/shop' => Http::response(['mainbranch' => ['name' => 'main']])]);
+    ($this->run)([['id' => 'F1', 'status' => 'new', 'title' => 'Before the merge']], ['started_at' => now()->subHour()]);
+
+    // Into a release branch: not on main yet, so nothing to check it against.
+    expect(app(OpenFindings::class)->record($this->repository, 570, null, 'release/1.2'))->toBe(0)
+        ->and(app(OpenFindings::class)->record($this->repository, 570, null, 'main'))->toBe(1);
+
+    // A review that ran after, and a later delivery of the merge.
+    ($this->run)([['id' => 'F2', 'status' => 'new', 'title' => 'After the merge']]);
+
+    expect(app(OpenFindings::class)->record($this->repository, 570, null, 'main'))->toBe(0)
+        ->and(OpenFinding::query()->pluck('finding_id')->all())->toBe(['F1']);
+});
+
+it('asks about a busy file a few findings at a time, keeps characters whole, and checks each file in a job of its own', function () {
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/shop' => Http::response(['mainbranch' => ['name' => 'main']]),
+        // Å is C3 85 in UTF-8: \R without the u flag would split it.
+        'api.bitbucket.org/2.0/repositories/acme/shop/src/main/app/Export.php' => Http::response("Ångström\nreturn Invoice::all();\n"),
+    ]);
+    foreach (range(1, 12) as $n) {
+        ($this->finding)("F{$n}", ['line' => 2]);
+    }
+    FindingChecker::fake([['findings' => []], ['findings' => []]]);
+
+    app(OpenFindings::class)->check($this->repository, OpenFinding::query()->get());
+
+    FindingChecker::assertPrompted(fn ($prompt): bool => str_contains($prompt->prompt, "1: Ångström\n2: return Invoice::all();"));
+    FindingChecker::assertPromptedTimes(2);
+});
+
+it('queues a job per file when a repository has findings in several', function () {
+    Queue::fake();
+    ReviewSettings::saveDefaults($this->repository->tenant, ['findings_check' => 'weekly']);
+    $one = ($this->finding)('F1');
+    $two = ($this->finding)('F2', ['path' => 'app/Other.php']);
+
+    (new CheckOpenFindings($this->repository->id))->handle(app(OpenFindings::class));
+
+    Queue::assertPushed(CheckOpenFindings::class, 2);
+    Queue::assertPushed(CheckOpenFindings::class, fn (CheckOpenFindings $job): bool => $job->ids === [$one->id]);
+    Queue::assertPushed(CheckOpenFindings::class, fn (CheckOpenFindings $job): bool => $job->ids === [$two->id]);
+});

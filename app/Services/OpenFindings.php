@@ -27,6 +27,9 @@ class OpenFindings
     /** Characters of a file, with its line numbers, the checking model reads whole; a longer one is read around the findings' lines, up to as much. */
     public const FILE_LENGTH = 60000;
 
+    /** Findings asked about in one request. */
+    public const PER_REQUEST = 10;
+
     /** Lines either side of a finding's line that a long file's excerpt shows. */
     public const EXCERPT_LINES = 80;
 
@@ -37,8 +40,22 @@ class OpenFindings
      *
      * @return int how many were kept
      */
-    public function record(Repository $repository, int $pullRequestId, ?string $mergeCommit): int
+    public function record(Repository $repository, int $pullRequestId, ?string $mergeCommit, ?string $destination = null): int
     {
+        // Kept once, at the first word of the merge: a later delivery, after a
+        // review that ran since, adds nothing.
+        if (OpenFinding::query()->where('repository_id', $repository->getKey())->where('pull_request_id', $pullRequestId)->exists()) {
+            return 0;
+        }
+
+        // Only what reached the main branch, which is what they are checked against:
+        // merged into a release branch, the code is not there yet.
+        $main = $destination === null ? null : rescue(fn (): mixed => $repository->sourceControl()->getRepository()['mainbranch']['name'] ?? null, null, false);
+
+        if (is_string($main) && $main !== '' && $main !== $destination) {
+            return 0;
+        }
+
         $run = ReviewRun::query()
             ->where('repository_id', $repository->getKey())
             ->where('pull_request_id', $pullRequestId)
@@ -160,21 +177,24 @@ class OpenFindings
                     continue;
                 }
 
-                [$text, $covered] = self::material((string) $path, $file, $group);
-                $response = $driver->checks($connection, $text);
-                // By the row's own id: two pull requests can each have an F1 in this file.
-                $verdicts = FindingChecker::read($response, $group->map(fn (OpenFinding $finding): string => (string) $finding->getKey())->all());
+                // A few findings a request, so every one gets an answer within the model's room.
+                foreach ($group->chunk(self::PER_REQUEST) as $chunk) {
+                    [$text, $covered] = self::material((string) $path, $file, $chunk);
+                    $response = $driver->checks($connection, $text);
+                    // By the row's own id: two pull requests can each have an F1 in this file.
+                    $verdicts = FindingChecker::read($response, $chunk->map(fn (OpenFinding $finding): string => (string) $finding->getKey())->all());
 
-                foreach ($group as $finding) {
-                    $verdict = $verdicts[(string) $finding->getKey()] ?? null;
+                    foreach ($chunk as $finding) {
+                        $verdict = $verdicts[(string) $finding->getKey()] ?? null;
 
-                    if ($verdict === null) {
-                        continue;
+                        if ($verdict === null) {
+                            continue;
+                        }
+
+                        // Code the model was not shown whole is not code that is gone.
+                        $status = $verdict['verdict'] === OpenFinding::RESOLVED && ! in_array($finding->getKey(), $covered, true) ? OpenFinding::UNCLEAR : $verdict['verdict'];
+                        $checked += (int) $this->settle($finding, $status, $verdict['note'], $response->meta->model);
                     }
-
-                    // Code the model was not shown is not code that is gone.
-                    $status = $verdict['verdict'] === OpenFinding::RESOLVED && ! in_array($finding->getKey(), $covered, true) ? OpenFinding::UNCLEAR : $verdict['verdict'];
-                    $checked += (int) $this->settle($finding, $status, $verdict['note'], $response->meta->model);
                 }
             } catch (Throwable $exception) {
                 report($exception);
@@ -217,7 +237,8 @@ class OpenFindings
      */
     protected static function material(string $path, string $file, Collection $findings): array
     {
-        $lines = preg_split('/\R/', $file) ?: [];
+        // Only real line ends: \R without the u flag also splits on a byte inside a UTF-8 character.
+        $lines = preg_split('/\r\n|\n|\r/', $file) ?: [];
         $count = count($lines);
         $numbered = fn (int $from, int $to): string => implode("\n", array_map(fn (int $index): string => ($index + 1).': '.$lines[$index], range($from, $to)));
         $whole = $count === 0 ? '' : $numbered(0, $count - 1);
