@@ -485,3 +485,16 @@ it('shows no scores before an analysis', function () {
         ->assertSee('A · started from')
         ->assertDontSee('False positives');
 });
+
+it('says a setup could not be started when starting it fails, rather than leave it waiting', function () {
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [],
+    ]);
+    $this->mock(ReviewTrial::class)->shouldReceive('begin')->once()->andThrow(new RuntimeException('The queue is down'));
+
+    app(ReviewComparisons::class)->add($comparison, [['runner' => null, 'provider' => 'claude-code', 'model' => null, 'effort' => null, 'verify' => false]], true);
+
+    expect($comparison->rows[0]['error'])->toBe('It could not be started: The queue is down')
+        ->and($comparison->done())->toBeTrue();
+});

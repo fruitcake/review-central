@@ -90,7 +90,13 @@ class ReviewComparisons
         // Then the trials, once the places are saved: a trial's job is on the queue
         // the moment it starts, and its worker finds its row.
         foreach ($reserved as $index => $row) {
-            $started = $this->trials($run, [$row], $ignoreExisting)[0];
+            // Whatever goes wrong, the place says so rather than wait for ever.
+            try {
+                $started = $this->trials($run, [$row], $ignoreExisting)[0];
+            } catch (Throwable $exception) {
+                report($exception);
+                $started = $row + ['error' => 'It could not be started: '.Str::limit($exception->getMessage(), 300)];
+            }
 
             DB::transaction(function () use ($comparison, $index, $started): void {
                 $locked = ReviewComparison::query()->whereKey($comparison->getKey())->lockForUpdate()->firstOrFail();
