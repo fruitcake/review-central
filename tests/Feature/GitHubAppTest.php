@@ -237,6 +237,8 @@ it('shows the review\'s state as one check run, keeping its report when it ends'
 });
 
 it('shows a running review\'s log in its check, only while the check runs', function () {
+    // The title counts from the start: a second passing mid-test would read 01:06.
+    $this->freezeTime();
     config(['review.container.log.enabled' => true, 'review.container.log.directory' => storage_path('framework/testing/check-logs')]);
     $status = 'in_progress';
     Http::fake(function (Request $request) use (&$status) {
