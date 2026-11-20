@@ -159,6 +159,36 @@ it('answers from the session of the last review, in a copy of it, and replies un
     ])->and((float) $question->cost)->toBe(0.42);
 });
 
+it('answers a question about a trial from the trial\'s own session, with its findings and the branch to diff against', function () {
+    $run = ReviewRun::query()->forceCreate([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'feature/export', 'pull_request_id' => 570, 'commit' => str_repeat('c', 40), 'build_number' => 9, 'custom' => true,
+        'status' => ReviewRun::STATUS_UNPUBLISHED, 'started_at' => now(), 'summary' => 'One problem in the export.',
+        'context' => ['pull_request' => ['destination_branch' => 'main']],
+        'findings' => [['id' => 'F1', 'severity' => 'HIGH', 'status' => 'new', 'title' => 'Customers can load every ride', 'path' => 'app/RideController.php', 'line' => 317, 'details' => 'Any account can call it.']],
+    ]);
+
+    // The trial's own session, apart from the branch's, which has none.
+    $home = app(ReviewSessions::class)->home($this->repository, ReviewSessions::forTrial('feature/export', 9));
+    File::put("{$home}/.review-session", "trial-session\n");
+
+    $question = ReviewQuestion::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $run->id, 'branch' => 'feature/export', 'comment_id' => null, 'question' => 'Did you verify F1?',
+    ]);
+
+    $steps = fakeReviewer(['type' => 'result', 'result' => 'Yes, at `app/RideController.php:317`.', 'total_cost_usd' => 0.1, 'modelUsage' => ['claude-opus-5-5' => []]]);
+
+    app(QuestionAnswer::class)->give($question);
+
+    $asked = collect($steps)->first(fn (array $step): bool => $step['command'][1] === 'run')['environment']['REVIEW_QUESTION'];
+
+    expect($asked)->toContain('git diff origin/main...HEAD', 'was a trial', 'One problem in the export.', 'F1 (high, new) Customers can load every ride — app/RideController.php:317', 'Any account can call it.')
+        ->and($asked)->toEndWith('Did you verify F1?')
+        ->and(collect($steps)->contains(fn (array $step): bool => $step['command'][0] === 'git' && in_array('+refs/heads/main:refs/remotes/origin/main', $step['command'], true)))->toBeTrue()
+        ->and($question->refresh()->resumed)->toBeTrue();
+});
+
 it('says so under the comment when the reviewer gives no answer', function (?array $answer, int $exit) {
     $question = ReviewQuestion::query()->create([
         'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,

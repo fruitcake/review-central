@@ -79,13 +79,13 @@ On **Platform**, the capacity section advises a size from those measurements: on
 
 ## The reviewer's session, and asking it a question
 
-The reviewer's home is kept on the worker per repository and branch (`REVIEW_CONTAINER_SESSION_DIRECTORY`), with the session Claude Code ended its review in. The next review of that branch, from a fresh clone, resumes the session and starts from what the last one read and found. After `REVIEW_CONTAINER_SESSION_RESUMES` (3) reviews in a row a review starts fresh: a session that followed that many commits carries what was true of code that is gone. The home is removed when the pull request is merged or declined, and after `REVIEW_CONTAINER_SESSION_DAYS` (14) without a review. A trial keeps none. The Codex and OpenCodeReview reviewers do not resume a session.
+The reviewer's home is kept on the worker per repository and branch (`REVIEW_CONTAINER_SESSION_DIRECTORY`), with the session Claude Code ended its review in. The next review of that branch, from a fresh clone, resumes the session and starts from what the last one read and found. After `REVIEW_CONTAINER_SESSION_RESUMES` (3) reviews in a row a review starts fresh: a session that followed that many commits carries what was true of code that is gone. The home is removed when the pull request is merged or declined, and after `REVIEW_CONTAINER_SESSION_DAYS` (14) without a review. A trial keeps a session of its own, apart from the branch's, for questions on its page; the pull request's own reviews never resume it. The Codex and OpenCodeReview reviewers do not resume a session.
 
 A comment on a pull request that starts with `@review` is a question for the reviewer:
 
 > @review did you mean the export or the import in F2?
 
-The reviewer answers in a reply under that comment. A job clones the branch and runs Claude Code once in the sandbox a review runs in, in a copy of the branch's session, so it answers from its last review where there is one and from the code otherwise. The answer is no part of the review: it changes no finding, and the copy is thrown away. An answer is capped at 2 dollars, a pull request gets ten an hour, and the review's page lists the questions with what each cost. It needs the container runner and an Anthropic connection; without either the reply says so.
+The reviewer answers in a reply under that comment. A job clones the branch, fetches the branch it merges into, and runs Claude Code once in the sandbox a review runs in, in a copy of the branch's session (a trial's own, for a question on a trial's page). It is also handed the review the question is about, its summary and findings, so it can answer about them also where no session was kept. The answer is no part of the review: it changes no finding, and the copy is thrown away. An answer is capped at 2 dollars, a pull request gets ten an hour, and the review's page lists the questions with what each cost. It needs the container runner and an Anthropic connection; without either the reply says so.
 
 ## Carrying on with a new commit
 

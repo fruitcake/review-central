@@ -40,6 +40,27 @@ class ReviewSessions
     protected const RESUMES = '.review-resumes';
 
     /**
+     * What a trial's session is kept under: its own, apart from the branch's, so a
+     * question on its page goes on from where it ended, and the pull request's own
+     * reviews never resume a session nobody saw. The Composer cache stays shared:
+     * that is per repository and not the reviewer's.
+     */
+    public static function forTrial(string $branch, int $build): string
+    {
+        return "{$branch}#trial-{$build}";
+    }
+
+    /**
+     * What the session of a run is kept under: its branch's, or its own for a trial.
+     */
+    public static function forRun(ReviewRun $run): string
+    {
+        return $run->custom && $run->kind === 'pull-request' && $run->build_number !== null
+            ? self::forTrial($run->branch, $run->build_number)
+            : $run->branch;
+    }
+
+    /**
      * The home for a branch, made when it is not there, or null when none is kept.
      */
     public function home(Repository $repository, string $branch): ?string
@@ -234,13 +255,26 @@ class ReviewSessions
             return;
         }
 
-        $directory = $this->directory($repository, $branch);
+        // The branch's own session, and those of the trials on it: each holds the
+        // reviewer's transcript of the code, which has no use once it is merged.
+        $trials = ReviewRun::query()
+            ->where('repository_id', $repository->getKey())
+            ->where('branch', $branch)
+            ->where('custom', true)
+            ->where('kind', 'pull-request')
+            ->whereNotNull('build_number')
+            ->pluck('build_number')
+            ->map(fn (int $build): string => self::forTrial($branch, $build));
 
-        if ($directory !== null) {
-            File::deleteDirectory($directory);
+        foreach ([$branch, ...$trials] as $session) {
+            $directory = $this->directory($repository, $session);
+
+            if ($directory !== null) {
+                File::deleteDirectory($directory);
+            }
+
+            rescue(fn () => $this->disk()?->delete($this->key($repository, $session)), null, false);
         }
-
-        rescue(fn () => $this->disk()?->delete($this->key($repository, $branch)), null, false);
     }
 
     /**

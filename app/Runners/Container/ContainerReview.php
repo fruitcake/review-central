@@ -73,8 +73,10 @@ class ContainerReview
         $followUps = $trial === null ? max(0, $rounds - 1) : 0;
         // The reviewer's home: the one kept for the branch, so this review resumes
         // the session of the last, or one for this job alone when it may carry on
-        // and nothing is kept. A trial is no part of the pull request's own reviews.
-        $kept = $trial === null ? $this->sessions->home($repository, $branch) : null;
+        // and nothing is kept. A trial is no part of the pull request's own reviews:
+        // it gets a home of its own, kept for questions about it.
+        $session = $trial === null ? $branch : ReviewSessions::forTrial($branch, $build);
+        $kept = $this->sessions->home($repository, $session);
         $home = $kept ?? ($followUps > 0 ? $this->homeDirectory($directory) : null);
         $round = 0;
 
@@ -291,11 +293,9 @@ class ContainerReview
                 $this->sessions->resumed($home);
             }
 
-            // For the next review of the branch, on whichever worker runs it. A
-            // trial keeps no session, and a home of the job's own is not one.
-            if ($trial === null) {
-                $this->sessions->store($repository, $branch);
-            }
+            // For the next review of the branch, or the questions about a trial, on
+            // whichever worker runs them. A home of the job's own is not kept.
+            $this->sessions->store($repository, $trial === null ? $branch : ReviewSessions::forTrial($branch, $build));
 
             // Filed here, by the worker: it reads what the reviewer wrote as data and
             // runs nothing of it, so it needs no container either.

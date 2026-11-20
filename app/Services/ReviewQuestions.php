@@ -243,6 +243,13 @@ class ReviewQuestions
             [
                 'tenant_id' => $repository->tenant_id,
                 'pull_request_id' => (int) $pullRequest['id'],
+                // What the pull request shows as its review: the newest that was posted.
+                'review_run_id' => ReviewRun::query()
+                    ->where('repository_id', $repository->getKey())
+                    ->where('pull_request_id', (int) $pullRequest['id'])
+                    ->where('status', ReviewRun::STATUS_FINISHED)
+                    ->latest('started_at')
+                    ->value('id'),
                 'branch' => $branch,
                 'author' => $event->commentAuthor,
                 'question' => self::question((string) $event->comment, $this->reviewer($repository)),
@@ -285,6 +292,7 @@ class ReviewQuestions
             'tenant_id' => $repository->tenant_id,
             'repository_id' => $repository->getKey(),
             'pull_request_id' => $run->pull_request_id,
+            'review_run_id' => $run->getKey(),
             'branch' => $run->branch,
             'comment_id' => null,
             'author' => $user->name,

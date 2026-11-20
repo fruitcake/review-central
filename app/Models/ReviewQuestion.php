@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $id
  * @property int $tenant_id
  * @property int $repository_id
+ * @property int|null $review_run_id the review it was asked about: on its page, that one; on the pull request, its newest when it was asked
  * @property int $pull_request_id
  * @property string $branch
  * @property int|null $comment_id null for a question asked on the review's page, which is answered there alone
@@ -33,6 +34,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property CarbonInterface $created_at
  * @property-read Repository $repository
  * @property-read ReviewQuestion|null $follows
+ * @property-read ReviewRun|null $run
  */
 class ReviewQuestion extends Model
 {
@@ -69,6 +71,14 @@ class ReviewQuestion extends Model
     public function follows(): BelongsTo
     {
         return $this->belongsTo(self::class, 'follows_id');
+    }
+
+    /**
+     * @return BelongsTo<ReviewRun, $this>
+     */
+    public function run(): BelongsTo
+    {
+        return $this->belongsTo(ReviewRun::class, 'review_run_id');
     }
 
     /**

@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 
@@ -967,21 +968,44 @@ it('resumes the session of the last review of a branch from a fresh clone, a few
         ->and(File::isDirectory($home))->toBeTrue();
 });
 
-it('keeps no session for a trial, and forgets a branch\'s when its pull request is merged', function () {
+it('keeps a trial\'s session apart from the branch\'s, and forgets a branch\'s when its pull request is merged', function () {
     Http::fake(['api.bitbucket.org/*' => Http::response([])]);
 
     $steps = fakeSteps();
     app(ContainerReview::class)->run($this->repository, 'feature/export', null, 41, trial: new Trial(pullRequestId: 570, destination: 'main'));
 
-    expect(implode(' ', stepRunning($steps, 'run-review.sh')['command']))->not->toContain(':/home/reviewer');
+    // A home of its own, kept for questions about the trial: never the branch's.
+    $trialHome = app(ReviewSessions::class)->home($this->repository, ReviewSessions::forTrial('feature/export', 41));
+    $branchHome = app(ReviewSessions::class)->home($this->repository, 'feature/export');
+    $volumes = implode(' ', stepRunning($steps, 'run-review.sh')['command']);
+
+    expect($volumes)->toContain("{$trialHome}:/home/reviewer")
+        ->and($volumes)->not->toContain("{$branchHome}:/home/reviewer");
 
     $home = app(ReviewSessions::class)->home($this->repository, 'feature/export');
     File::put("{$home}/.review-session", "session-one\n");
+    File::put("{$trialHome}/.review-session", "trial-session\n");
+
+    // The trial is on record as a custom run of the branch, with its build.
+    ReviewRun::query()->updateOrCreate(
+        ['repository_id' => $this->repository->id, 'build_number' => 41],
+        ['tenant_id' => $this->repository->tenant_id, 'workspace' => 'acme', 'slug' => $this->repository->slug, 'branch' => 'feature/export',
+            'commit' => str_repeat('a', 40), 'custom' => true, 'kind' => 'pull-request', 'status' => ReviewRun::STATUS_UNPUBLISHED, 'started_at' => now()],
+    );
+
+    // And its archive on the sessions disk, as another worker would have it.
+    config(['review.container.sessions.disk' => 'sessions']);
+    Storage::fake('sessions');
+    $archive = "review/sessions/{$this->repository->id}/".substr(hash('sha256', ReviewSessions::forTrial('feature/export', 41)), 0, 32).'.tar.gz';
+    Storage::disk('sessions')->put($archive, 'archive');
 
     Queue::fake();
     deliver('pullrequest:fulfilled', pullRequestPayload(['state' => 'MERGED']))->assertOk();
 
-    expect(File::isDirectory($home))->toBeFalse();
+    // Merged: the branch's session goes, and so do those of the trials on it.
+    expect(File::isDirectory($home))->toBeFalse()
+        ->and(File::isDirectory($trialHome))->toBeFalse();
+    Storage::disk('sessions')->assertMissing($archive);
 });
 
 it('keeps a branch\'s home while a review of it still runs, when its pull request is merged', function () {
