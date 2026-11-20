@@ -18,7 +18,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
  *
  * @property int $id
  * @property int|null $tenant_id The tenant that added it for itself; null for the platform's
- * @property string $type One of App\Connections\IntegrationApps::TYPES
+ * @property string $type One of App\Connections\Integrations::TYPES
  * @property string $name
  * @property array<string, string> $credentials
  * @property bool $for_all_tenants

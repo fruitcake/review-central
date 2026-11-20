@@ -175,3 +175,32 @@ it('says why a connection cannot sign in, and offers the GitHub App only to the 
 
     expect(app(Drivers::class)->options(ConnectionKind::SourceControl))->toHaveKey('github-app');
 });
+
+it('takes the GitHub App .env sets as the one, and offers no second', function () {
+    config(['services.github_app' => ['id' => '9', 'slug' => 'env-app', 'client_id' => 'Iv1.env', 'client_secret' => 'cs-env', 'private_key' => "-----BEGIN RSA PRIVATE KEY-----\nenv", 'webhook_secret' => 'hook-env']]);
+    $listed = IntegrationApp::query()->create(['type' => 'github_app', 'name' => 'Listed', 'for_all_tenants' => true, 'credentials' => [
+        'app_id' => '2', 'slug' => 'listed', 'client_id' => 'Iv1.listed', 'client_secret' => 'cs2', 'private_key' => "-----BEGIN RSA PRIVATE KEY-----\ndef", 'webhook_secret' => 'hook2',
+    ]]);
+
+    expect(array_keys(Integrations::available('github_app', $this->tenant)))->toBe(['env'])
+        ->and(IntegrationAppResource::types())->not->toHaveKey('github_app');
+
+    // Of a type there can be several of, .env's is one among them.
+    config(['services.asana.client_id' => 'env-app', 'services.asana.client_secret' => 'env-secret']);
+    asanaApp(['for_all_tenants' => true]);
+
+    expect(Integrations::available('asana', $this->tenant))->toHaveCount(2);
+});
+
+it('names the installation\'s apps on a tenant\'s Apps page, .env\'s among them', function () {
+    config(['services.asana.client_id' => 'env-app', 'services.asana.client_secret' => 'env-secret']);
+    asanaApp(['tenant_id' => $this->tenant->id, 'name' => 'Our Asana']);
+    $user = User::factory()->create();
+    $user->tenants()->attach($this->tenant);
+    $this->actingAs($user);
+    Filament::setTenant($this->tenant);
+
+    livewire(ManageOwnApps::class)
+        ->assertSee('From .env (Asana)')
+        ->assertDontSee('Our Asana (Asana)');
+});

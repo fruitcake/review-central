@@ -135,6 +135,12 @@ final class Integrations
 
         if (($env = self::fromEnv($type)) !== null) {
             $apps[$env->key] = $env;
+
+            // Of a single type .env's is the one: the configuration that signing in
+            // with Google and the GitHub App read is its, whatever the list holds.
+            if (self::TYPES[$type]['single']) {
+                return $apps;
+            }
         }
 
         $query = IntegrationApp::query()->where('type', $type)->orderByRaw('tenant_id is not null')->orderBy('name');
