@@ -7,6 +7,7 @@ use App\Services\ReviewFollowUps;
 use App\Services\ReviewPublisher;
 use App\Services\ReviewSettings;
 use App\SourceControl\ReadOnlyClient;
+use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
     $this->repository = Repository::factory()->create(['slug' => 'shop']);
@@ -160,4 +161,18 @@ it('files a follow-up whose finding has an id that is no text', function () {
     $applied = app(ReviewFollowUps::class)->apply(($this->current)(), [['id' => ['F2'], 'status' => 'open', 'severity' => 'HIGH', 'title' => ['odd']]], '1 high.');
 
     expect($applied['findings'])->toHaveCount(1);
+});
+
+it('files and publishes a report whose finding has an id and title that are no text', function () {
+    ($this->rounds)(1);
+    $run = ($this->run)(['status' => ReviewRun::STATUS_RUNNING, 'started_at' => now(), 'build_number' => 97]);
+    Http::fake(['*' => Http::response([])]);
+
+    $filed = app(ReviewFiling::class)->file($this->repository->refresh(), [
+        'branch' => 'feature/export', 'commit' => $run->commit, 'build' => 97, 'pull_request_id' => 7,
+        'result' => 'FAILED', 'summary' => '1 high.', 'findings' => [['id' => ['F1'], 'title' => ['odd'], 'status' => 'new', 'severity' => 'HIGH']],
+    ]);
+
+    expect($run->refresh()->findings[0])->toMatchArray(['id' => null, 'title' => null, 'severity' => 'HIGH'])
+        ->and(ReviewPublisher::failed($filed['publish']))->toBeFalse();
 });
