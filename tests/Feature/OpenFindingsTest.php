@@ -203,28 +203,29 @@ it('sets how often they are checked under Review defaults', function () {
     expect(ReviewSettings::defaults($this->repository->tenant)->findings_check)->toBe('monthly');
 });
 
-it('says nothing is resolved whose code the model was not shown: past the end, or past what fits', function () {
+it('resolves nothing from excerpts of a long file, since the code may have moved out of them', function () {
     Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
-    // Short enough as bytes, too long once every line is numbered.
-    $file = implode("\n", array_fill(0, 30000, 'x'));
+    // Short enough as bytes, too long once every line is numbered. The leak moved
+    // from line 100 to line 900, out of the excerpt around its old line.
+    $file = implode("\n", array_map(fn (int $line): string => $line === 900 ? 'return Invoice::all();' : 'x', range(1, 30000)));
     Http::fake([
         'api.bitbucket.org/2.0/repositories/acme/shop' => Http::response(['mainbranch' => ['name' => 'main']]),
         'api.bitbucket.org/2.0/repositories/acme/shop/src/main/app/Export.php' => Http::response($file),
     ]);
-    $shown = ($this->finding)('F1', ['line' => 100]);
-    $pastEnd = ($this->finding)('F2', ['line' => 40000]);
-    // Two windows close together share one.
+    $moved = ($this->finding)('F1', ['line' => 100]);
+    // Close by: one excerpt for both.
     $near = ($this->finding)('F3', ['line' => 150]);
+    $pastEnd = ($this->finding)('F2', ['line' => 40000]);
     FindingChecker::fake([['findings' => [
-        ['id' => (string) $shown->id, 'verdict' => 'resolved', 'note' => 'Gone.'],
+        ['id' => (string) $moved->id, 'verdict' => 'resolved', 'note' => 'Not around line 100 any more.'],
+        ['id' => (string) $near->id, 'verdict' => 'present', 'note' => 'Still there.'],
         ['id' => (string) $pastEnd->id, 'verdict' => 'resolved', 'note' => 'Not there.'],
-        ['id' => (string) $near->id, 'verdict' => 'resolved', 'note' => 'Gone too.'],
     ]]]);
 
     app(OpenFindings::class)->check($this->repository, OpenFinding::query()->get());
 
-    expect($shown->refresh()->status)->toBe('resolved')
-        ->and($near->refresh()->status)->toBe('resolved')
+    expect($moved->refresh()->status)->toBe('unclear')
+        ->and($near->refresh()->status)->toBe('present')
         ->and($pastEnd->refresh()->status)->toBe('unclear');
 
     FindingChecker::assertPrompted(fn ($prompt): bool => substr_count($prompt->prompt, "\n…\n") === 0

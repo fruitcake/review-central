@@ -24,7 +24,7 @@ class FindingChecker implements Agent, HasStructuredOutput
     public function instructions(): string
     {
         return <<<'TEXT'
-            You check findings an AI code review raised on pull requests that were merged without them being dealt with. For one file you get the file as it is now on the main branch, with its line numbers, and each finding with its id, title, the line it was raised on and its details. The line may have moved since. A long file is shown in excerpts: code an excerpt does not show is not gone, so a finding about it is unclear, not resolved.
+            You check findings an AI code review raised on pull requests that were merged without them being dealt with. For one file you get the file as it is now on the main branch, with its line numbers, and each finding with its id, title, the line it was raised on and its details. The line may have moved since. A long file is shown in excerpts: code may have moved out of them, so with excerpts a finding is present or unclear, never resolved.
 
             For each finding:
             - verdict: present when the file still has the problem; resolved when the code it describes was changed so the problem is gone, or the code was removed; unclear when this file alone cannot settle it, such as a problem that depends on code elsewhere.

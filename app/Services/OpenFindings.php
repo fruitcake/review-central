@@ -213,7 +213,7 @@ class OpenFindings
      * for as many findings as fit. Nothing is cut off unsaid.
      *
      * @param  Collection<int, OpenFinding>  $findings
-     * @return array{0: string, 1: array<int, int>} the text, and the ids of the findings whose code it shows
+     * @return array{0: string, 1: array<int, int>} the text, and the ids of the findings it can call resolved: those of a file shown whole
      */
     protected static function material(string $path, string $file, Collection $findings): array
     {
@@ -233,9 +233,9 @@ class OpenFindings
                 ->all();
         } else {
             // Windows around each finding's line, nearest the top first, merged where
-            // they touch, until the budget is spent.
+            // they touch, until the budget is spent. An excerpt can show a problem is
+            // still there, never that it is gone: the code may have moved out of it.
             $windows = [];
-            $covered = [];
             $length = 0;
 
             foreach ($findings->filter(fn (OpenFinding $finding): bool => $finding->line !== null && $finding->line <= $count)->sortBy('line') as $finding) {
@@ -263,12 +263,12 @@ class OpenFindings
                     $windows[] = [$from, $to];
                     $length += $size;
                 }
-
-                $covered[] = $finding->getKey();
             }
 
+            $covered = [];
+
             $shown = implode("\n…\n", array_map(fn (array $window): string => $numbered($window[0], $window[1]), $windows));
-            $heading = "# {$path}, as it is now: excerpts around the findings' lines. The rest of the file is not shown, and code not shown is not gone.";
+            $heading = "# {$path}, as it is now: excerpts around the findings' lines. The rest of the file is not shown, and code not shown is not gone: say present where an excerpt still has the problem, and unclear otherwise.";
         }
 
         $items = $findings->map(fn (OpenFinding $finding): string => "## {$finding->getKey()} · {$finding->severity} · {$finding->title}\n"
