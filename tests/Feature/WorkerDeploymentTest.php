@@ -189,8 +189,11 @@ it('keeps the settings out of a configuration cache, where a later change would 
 it('tests the Cloudflare setup as it is in use, and says which settings the environment sets instead', function () {
     $this->actingAs(User::factory()->create(['is_admin' => true]));
     Filament::setCurrentPanel(Filament::getPanel('admin'));
-    cloudflareSettings([PlatformSettings::R2_ACCESS_KEY_ID => 'r2-key', PlatformSettings::R2_SECRET_ACCESS_KEY => 'r2-secret']);
+    cloudflareSettings([PlatformSettings::R2_ACCESS_KEY_ID => 'r2-key', PlatformSettings::R2_SECRET_ACCESS_KEY => "  r2-secret\n"]);
     config(['review.cloudflare.url' => 'https://sandbox.example.com', 'review.cloudflare.token' => 'worker-token']);
+
+    // Pasted with a line break, kept without it.
+    expect(app(PlatformSettings::class)->secret(PlatformSettings::R2_SECRET_ACCESS_KEY))->toBe('r2-secret');
     Storage::fake('r2');
     $broken = false;
     Http::fake(function (Request $request) use (&$broken) {
@@ -217,4 +220,10 @@ it('tests the Cloudflare setup as it is in use, and says which settings the envi
     livewire(Settings::class)
         ->callAction(TestAction::make('testCloudflare')->schemaComponent('cloudflare'))
         ->assertNotified('Not everything works');
+
+    // Settings checks what is pasted is shaped as the S3 keys are.
+    livewire(Settings::class)
+        ->fillForm([PlatformSettings::R2_ACCESS_KEY_ID => 'not-a-key', PlatformSettings::R2_SECRET_ACCESS_KEY => 'the-token-value'])
+        ->call('save')
+        ->assertHasFormErrors([PlatformSettings::R2_ACCESS_KEY_ID => 'regex', PlatformSettings::R2_SECRET_ACCESS_KEY => 'regex']);
 });

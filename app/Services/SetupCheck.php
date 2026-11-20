@@ -527,7 +527,13 @@ class SetupCheck
         $title = 'Cloudflare sandboxes: this installation reaches the bucket';
         $key = 'review/setup-check';
         $what = 'write to';
-        $fix = 'Check R2_ENDPOINT (`https://<account id>.r2.cloudflarestorage.com`, without the bucket), R2_BUCKET, and that the bucket\'s keys are of a token with Object Read & Write on this bucket. Keys in .env go before those under Settings.';
+        // Where each part comes from: the settings, or the environment where it sets one.
+        $from = function (string $setting, string $variable): string {
+            return app(PlatformSettings::class)->setByEnvironment($setting) === null ? 'under Settings' : "in {$variable} in .env";
+        };
+        $fix = 'Check the bucket\'s name '.$from(PlatformSettings::CLOUDFLARE_BUCKET, 'R2_BUCKET')
+            .', the account it is in (the address is `https://<account id>.r2.cloudflarestorage.com`, from the account ID under Settings, or R2_ENDPOINT in .env, without the bucket)'
+            .', and that the bucket\'s keys '.$from(PlatformSettings::R2_ACCESS_KEY_ID, 'R2_ACCESS_KEY_ID').' are of a token with Object Read & Write on this bucket.';
 
         // What a review does with it: an object written, read back and removed.
         // Not whether one is there: without the right to list the bucket, R2
@@ -551,9 +557,11 @@ class SetupCheck
                 'state' => self::WRONG, 'title' => $title,
                 // The storage wraps what the bucket said in "Unable to write file".
                 'detail' => "It cannot {$what} {$bucket}: ".mb_substr(($exception->getPrevious() ?? $exception)->getMessage(), 0, 300),
-                'fix' => $what === 'read from'
-                    ? 'The keys may write but not read: give their token Read as well as Edit on this bucket (Object Read & Write), or make one that has both.'
-                    : $fix,
+                'fix' => match (true) {
+                    $what === 'read from' => 'The keys may write but not read: give their token Read as well as Edit on this bucket (Object Read & Write), or make one that has both.',
+                    str_contains($exception->getMessage().($exception->getPrevious()?->getMessage() ?? ''), 'SignatureDoesNotMatch') => 'The secret is not the one of this key ID: take the Secret Access Key (64 characters) that Cloudflare showed with this Access Key ID, not the token value, and both from the same token.',
+                    default => $fix,
+                },
             ];
         }
     }

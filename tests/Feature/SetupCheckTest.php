@@ -192,6 +192,16 @@ it('reaches the bucket as a review does, and says when its keys may write but no
         ->and(($this->find)('reaches the bucket')['fix'])->toContain('Read as well as Edit');
 });
 
+it('says when the bucket\'s secret is not the one of its key ID', function () {
+    config([
+        'filesystems.disks.r2.key' => 'key', 'filesystems.disks.r2.secret' => 'secret', 'filesystems.disks.r2.bucket' => 'review-central', 'filesystems.disks.r2.endpoint' => 'https://account.r2.cloudflarestorage.com',
+    ]);
+    Storage::shouldReceive('disk')->with('r2')->andReturnSelf()->getMock()
+        ->shouldReceive('put')->andThrow(UnableToWriteFile::atLocation('review/setup-check', '', new RuntimeException('AWS HTTP error: SignatureDoesNotMatch (client): The request signature we calculated does not match')));
+
+    expect(($this->find)('reaches the bucket')['fix'])->toContain('Secret Access Key (64 characters)', 'not the token value');
+});
+
 it('shows the checks to an administrator, with a count of what is to fix in the menu', function () {
     $this->actingAs(User::factory()->create(['is_admin' => true]));
     Filament::setCurrentPanel(Filament::getPanel('admin'));
