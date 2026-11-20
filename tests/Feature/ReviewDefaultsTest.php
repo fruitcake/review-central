@@ -3,8 +3,10 @@
 use App\Enums\ReviewCommandAccess;
 use App\Filament\App\Pages\ReviewDefaults;
 use App\Filament\App\Resources\AiProviders\Pages\ManageAiProviders;
+use App\Filament\Components\ReviewSettingsForm;
 use App\Models\Connection;
 use App\Models\ExchangeRate;
+use App\Models\ModelPrice;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Models\Tenant;
@@ -196,4 +198,30 @@ it('sets who may start a review by commenting /review, and asks for the accounts
     livewire(ReviewDefaults::class)->fillForm(['review_command' => 'nobody'])->call('save')->assertHasNoFormErrors();
 
     expect($this->tenant->refresh()->allowsReviewCommandFrom('557058:aaaa-bbbb', 'dana-demo'))->toBeFalse();
+});
+
+it('offers the models it knows to pick from, newest first, and keeps one typed that no list holds', function () {
+    foreach (['claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5-5-20261001', 'gpt-6.1-sol', 'anthropic/claude-opus-5-5'] as $model) {
+        ModelPrice::query()->create(['model' => $model, 'input' => '0.000005', 'output' => '0.000025', 'source' => 'litellm', 'fetched_at' => now()]);
+    }
+
+    $claude = ReviewSettingsForm::claudeModels();
+
+    // The aliases first, then the SDK's smartest, default and cheapest, then the
+    // other IDs; no dated snapshot, no provider's prefix, no other provider's.
+    expect(array_keys($claude))->toBe(['opus', 'sonnet', 'haiku', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-opus-5'])
+        ->and($claude['claude-opus-5-5'])->toBe('claude-opus-5-5 (smartest)')
+        ->and(array_keys(ReviewSettingsForm::openAiModels()))->toBe(['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna']);
+
+    livewire(ReviewDefaults::class)
+        ->fillForm(['ocr_model' => 'my-gateway/claude-x'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect(ReviewSettings::defaults($this->tenant)->ocr_model)->toBe('my-gateway/claude-x');
+
+    livewire(ReviewDefaults::class)
+        ->fillForm(['ocr_model' => 'not a model; rm -rf'])
+        ->call('save')
+        ->assertHasFormErrors(['ocr_model']);
 });
