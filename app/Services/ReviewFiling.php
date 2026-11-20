@@ -76,9 +76,14 @@ class ReviewFiling
         $publishes = (bool) ($validated['publish'] ?? true);
         $status = $validated['status'] ?? ReviewRun::STATUS_FINISHED;
 
+        // The pull request's own review where its connection keeps reviews here: it
+        // is the answer for its commit, only not posted. A later delivery for the same
+        // commit finds it reviewed, as it would one that was posted.
+        $keptHere = ! $publishes && ! $run->custom && ! rescue(fn (): bool => $repository->sourceControl()->publishes(), true, false);
+
         // Only a finished run is recorded as unpublished: a failed or timed-out one
         // published nothing either way, and its status says more.
-        if (! $publishes && $status === ReviewRun::STATUS_FINISHED) {
+        if (! $publishes && ! $keptHere && $status === ReviewRun::STATUS_FINISHED) {
             $status = ReviewRun::STATUS_UNPUBLISHED;
         }
 
@@ -131,7 +136,7 @@ class ReviewFiling
             }
 
         } else {
-            $publish = ['published' => false, 'reason' => 'publishing was turned off'];
+            $publish = ['published' => false, 'reason' => $keptHere ? 'the connection keeps its reviews here' : 'publishing was turned off'];
         }
 
         // The review is on the pull request by now, so the lock has done its job and

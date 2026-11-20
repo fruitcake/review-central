@@ -7,6 +7,7 @@ namespace App\Console\Commands;
 use App\Models\OpenPullRequest;
 use App\Services\ReviewRequest;
 use App\SourceControl\GitHubClient;
+use App\SourceControl\ReadOnlyClient;
 use Illuminate\Console\Command;
 use Throwable;
 
@@ -36,8 +37,11 @@ class SyncPullRequests extends Command
                 $sourceControl = $record->repository->sourceControl();
                 $data = $sourceControl->getPullRequest((string) $record->pull_request_id);
 
-                if ($data !== null && $sourceControl instanceof GitHubClient) {
-                    $data = GitHubClient::withReviews($data, $sourceControl->getPullRequestReviews((string) $record->pull_request_id));
+                // Reading the reviews is reading, also for a connection that posts nothing.
+                $reads = $sourceControl instanceof ReadOnlyClient ? $sourceControl->inner() : $sourceControl;
+
+                if ($data !== null && $reads instanceof GitHubClient) {
+                    $data = GitHubClient::withReviews($data, $reads->getPullRequestReviews((string) $record->pull_request_id));
                 }
 
                 $reviews->sync($record->repository, $record->pull_request_id, $data);

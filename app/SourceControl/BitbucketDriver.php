@@ -60,6 +60,7 @@ class BitbucketDriver implements ExplainsSetup, SourceControlDriver
                 ->helperText('The workspace ID from the URL: bitbucket.org/<workspace>.'),
             TextInput::make('username')->label('Account email')->email()
                 ->helperText('Only with an API token of a user account, which is sent with this address. Leave empty for a workspace access token.'),
+            ReadOnlyClient::field(),
         ];
     }
 

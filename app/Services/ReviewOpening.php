@@ -419,6 +419,13 @@ class ReviewOpening
      */
     protected function handover(Repository $repository, string $commit): ?array
     {
+        // A connection that posts nothing left no findings on the pull request to
+        // carry forward: the next review reviews the whole change, not the new
+        // commits alone, or it could approve what an earlier run held.
+        if (! rescue(fn (): bool => $repository->sourceControl()->publishes(), true, false)) {
+            return null;
+        }
+
         $previous = ReviewRun::query()
             ->where('repository_id', $repository->getKey())
             ->where('status', ReviewRun::STATUS_FINISHED)

@@ -52,6 +52,7 @@ class GitHubDriver implements ExplainsSetup, SourceControlDriver
         return [
             TextInput::make('workspace')->label('Owner')->rule('regex:/^[\w.-]+$/')
                 ->helperText('The user or organisation from the address: github.com/<owner>. Leave it empty, with no token, for any public repository.'),
+            ReadOnlyClient::field(),
         ];
     }
 

@@ -373,6 +373,13 @@ class ReviewQuestions
     public function reply(Repository $repository, int $pullRequestId, int $commentId, string $text): ?int
     {
         try {
+            // A connection that posts nothing: the answer is on the review's page
+            // alone. Inside the try: building the client can fail as well, and
+            // the answer is kept on the page either way.
+            if (! $repository->sourceControl()->publishes()) {
+                return null;
+            }
+
             $posted = $repository->sourceControl()->addPullRequestComment((string) $pullRequestId, $text."\n\n".ReviewPublisher::REPLY_MARKER, parentId: $commentId);
 
             return is_numeric($posted['id'] ?? null) ? (int) $posted['id'] : null;
