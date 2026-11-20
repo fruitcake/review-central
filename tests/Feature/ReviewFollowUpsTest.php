@@ -7,6 +7,7 @@ use App\Services\ReviewFollowUps;
 use App\Services\ReviewPublisher;
 use App\Services\ReviewSettings;
 use App\SourceControl\ReadOnlyClient;
+use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
     $this->repository = Repository::factory()->create(['slug' => 'shop']);
@@ -152,4 +153,45 @@ it('does not count runs that published nothing as rounds', function () {
     }
 
     expect(app(ReviewFollowUps::class)->apply(($this->current)(), [$this->high], '1 high.')['findings'])->toBe([$this->high]);
+});
+
+it('files a follow-up whose finding has an id that is no text', function () {
+    ($this->rounds)(1, [['id' => ['F1'], 'status' => 'new', 'severity' => 'LOW']]);
+
+    $applied = app(ReviewFollowUps::class)->apply(($this->current)(), [['id' => ['F2'], 'status' => 'open', 'severity' => 'HIGH', 'title' => ['odd']]], '1 high.');
+
+    expect($applied['findings'])->toHaveCount(1);
+});
+
+it('files and publishes a report whose finding has an id and title that are no text', function () {
+    ($this->rounds)(1);
+    $run = ($this->run)(['status' => ReviewRun::STATUS_RUNNING, 'started_at' => now(), 'build_number' => 97]);
+    Http::fake(['*' => Http::response([])]);
+
+    $filed = app(ReviewFiling::class)->file($this->repository->refresh(), [
+        'branch' => 'feature/export', 'commit' => $run->commit, 'build' => 97, 'pull_request_id' => 7,
+        'result' => 'FAILED', 'summary' => '1 high.', 'findings' => [['id' => ['F1', 'F2'], 'title' => ['odd'], 'status' => 'new', 'severity' => 'HIGH']],
+    ]);
+
+    expect($run->refresh()->findings[0])->toMatchArray(['id' => null, 'title' => null, 'severity' => 'HIGH'])
+        ->and(ReviewPublisher::failed($filed['publish']))->toBeFalse();
+});
+
+it('keeps an open HIGH after the round limit when its id comes as a list, and holds the merge on it', function () {
+    ReviewSettings::saveDefaults($this->repository->tenant, ['max_rounds' => 1]);
+    ($this->rounds)(2, [['id' => 'F1', 'status' => 'new', 'severity' => 'HIGH', 'title' => 'Leaks invoices']]);
+    $run = ($this->run)(['status' => ReviewRun::STATUS_RUNNING, 'started_at' => now(), 'build_number' => 96]);
+
+    app(ReviewFiling::class)->file($this->repository->refresh(), [
+        'branch' => 'feature/export', 'commit' => $run->commit, 'build' => 96, 'pull_request_id' => 7,
+        'result' => 'PASSED', 'summary' => '1 high.', 'publish' => false,
+        'findings' => [
+            ['id' => ['F1'], 'status' => 'open', 'severity' => 'HIGH', 'title' => 'Leaks invoices'],
+            // Unreadable, and called open: left standing rather than set aside.
+            ['id' => ['F1', 'F2'], 'status' => 'open', 'severity' => 'HIGH', 'title' => 'Two ids'],
+        ],
+    ]);
+
+    expect($run->refresh()->result)->toBe('FAILED')
+        ->and(array_column($run->findings, 'id'))->toBe(['F1', null]);
 });

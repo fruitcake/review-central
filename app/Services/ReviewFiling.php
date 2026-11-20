@@ -209,6 +209,21 @@ class ReviewFiling
             // The server's to set, by the rules for follow-up rounds: never the reviewer's.
             unset($finding['advisory']);
 
+            // An id is text and a title is text: anything else a reviewer writes there
+            // would break whatever reads them after, publishing first.
+            // One id in a list, as ["F1"], is that id.
+            if (is_array($finding['id'] ?? null) && count($finding['id']) === 1 && is_scalar(reset($finding['id']))) {
+                $finding['id'] = reset($finding['id']);
+            }
+
+            if (isset($finding['id'])) {
+                $finding['id'] = is_scalar($finding['id']) ? (string) $finding['id'] : null;
+            }
+
+            if (isset($finding['title']) && ! is_string($finding['title'])) {
+                $finding['title'] = is_scalar($finding['title']) ? (string) $finding['title'] : null;
+            }
+
             if (isset($finding['severity'])) {
                 $finding['severity'] = strtoupper((string) $finding['severity']);
             }

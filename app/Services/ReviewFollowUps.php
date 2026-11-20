@@ -69,7 +69,7 @@ class ReviewFollowUps
 
         foreach ($earlier as $previous) {
             foreach (array_filter($previous->findings ?? [], is_array(...)) as $finding) {
-                $id = (string) ($finding['id'] ?? '');
+                $id = is_scalar($finding['id'] ?? null) ? (string) $finding['id'] : '';
 
                 if ($id !== '' && ! array_key_exists($id, $known)) {
                     $known[$id] = ($finding['advisory'] ?? false) === true;
@@ -88,12 +88,13 @@ class ReviewFollowUps
 
         foreach ($findings as $finding) {
             $high = in_array(strtoupper((string) ($finding['severity'] ?? '')), ReviewPublisher::HIGH_SEVERITIES, true);
-            $id = (string) ($finding['id'] ?? '');
+            $id = is_scalar($finding['id'] ?? null) ? (string) $finding['id'] : '';
             // New as the server knows it: called open, but never reported, is new too.
-            $new = ($finding['status'] ?? 'new') === 'new' || ! array_key_exists($id, $known);
+            // One called open without an id cannot be told apart, and is left standing.
+            $new = ($finding['status'] ?? 'new') === 'new' || ($id !== '' && ! array_key_exists($id, $known));
 
             if ($new && ($over || (! $high && $notConverging))) {
-                $set[] = '- '.($finding['title'] ?? ($id ?: 'A finding'))
+                $set[] = '- '.(is_string($finding['title'] ?? null) ? $finding['title'] : ($id ?: 'A finding'))
                     .(filled($finding['path'] ?? null) ? " (`{$finding['path']}".(filled($finding['line'] ?? null) ? ":{$finding['line']}" : '').'`)' : '')
                     .': '.strtolower((string) ($finding['severity'] ?? '')).', set aside because '
                     .($over ? "this pull request has had its {$max} follow-up rounds" : 'the review is not converging').'.';
