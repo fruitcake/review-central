@@ -194,6 +194,7 @@ PROMPT=$(mktemp)
 jq -L "$HERE" 'include "strict-schema"; strict_schema' "$HERE/ai-review.schema.json" > "$STRICT"
 {
   cat "$HERE/codex-prompt.md"
+  reviewer_module_notes
   printf '\n'
   cat "$HERE/structured-output.md"
   printf '\nThe schema is strict: every field is there. Give null for a field this skill says to leave out.\n'

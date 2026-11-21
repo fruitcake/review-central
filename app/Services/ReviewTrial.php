@@ -57,12 +57,17 @@ class ReviewTrial
         $connection = $this->connection($tenant, $link);
         $repository = $this->repository($tenant, $connection, $link);
 
-        // The runner asked for, else the repository's. A reviewer asked for runs on
-        // a runner that has one: the diff has no reviewer to choose.
+        // The runner asked for, else the repository's. A reviewer or parts of the
+        // review asked for run on a runner that has them: the diff has neither.
         $asked = filled($options['runner'] ?? null) ? (string) $options['runner'] : null;
         $own = $repository->runnerName();
-        $runner = $asked ?? (filled($options['provider'] ?? null) && $own === DiffRunner::NAME ? null : $own);
+        $needsReviewer = filled($options['provider'] ?? null) || filled($options['modules'] ?? null);
+        $runner = $asked ?? ($needsReviewer && $own === DiffRunner::NAME ? null : $own);
         $fromDiff = $runner === DiffRunner::NAME;
+
+        if ($fromDiff && filled($options['modules'] ?? null)) {
+            throw new ReviewTrialRefused('The diff alone has no OpenCodeReview, scan, floor guard, extra passes or second check to turn on or off. Run it on Docker or a Cloudflare sandbox instead.');
+        }
         $container = $fromDiff ? null : $this->runners->containerFor($runner);
 
         if ($fromDiff && ! $this->diff->available()) {

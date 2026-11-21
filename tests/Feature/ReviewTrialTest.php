@@ -155,7 +155,7 @@ it('starts a trial from the list of reviews', function () {
         ->assertHasNoFormErrors()
         ->assertNotified('The trial is started');
 
-    Queue::assertPushed(fn (RunContainerReview $job): bool => $job->trial?->model === 'sonnet' && $job->trial->ignoreExisting === false && $job->trial->verify === false && $job->trial->modules === ['floor_guard' => false]);
+    Queue::assertPushed(fn (RunContainerReview $job): bool => $job->trial?->model === 'sonnet' && $job->trial->ignoreExisting === false && $job->trial->verify === null && $job->trial->modules === ['floor_guard' => false]);
 
     livewire(ListReviewRuns::class)
         ->callAction('try', ['url' => 'https://bitbucket.org/elsewhere/shop/pull-requests/12'])
@@ -262,4 +262,16 @@ it('shows how long a run that is still going has taken, counting up', function (
     livewire(ViewReviewRun::class, ['record' => $run->uuid])
         ->assertSeeHtml('x-text="text"')
         ->assertSee('02:05');
+});
+
+it('runs a trial with its own parts of the review on a reviewer\'s runner, and refuses them on the diff alone', function () {
+    Repository::factory()->create(['tenant_id' => $this->tenant->id, 'connection_id' => $this->connection->id, 'slug' => 'shop', 'review_runner' => 'diff']);
+    fakePullRequest();
+
+    app(ReviewTrial::class)->start($this->tenant, 'https://bitbucket.org/acme/shop/pull-requests/12', ['modules' => ['ocr' => false]]);
+
+    Queue::assertPushed(fn (RunContainerReview $job): bool => $job->trial?->sandbox === 'docker' && $job->trial->modules === ['ocr' => false]);
+
+    expect(fn () => app(ReviewTrial::class)->start($this->tenant, 'https://bitbucket.org/acme/shop/pull-requests/12', ['runner' => 'diff', 'modules' => ['ocr' => false]]))
+        ->toThrow(ReviewTrialRefused::class, 'The diff alone has no OpenCodeReview');
 });

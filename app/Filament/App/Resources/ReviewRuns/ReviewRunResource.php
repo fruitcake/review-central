@@ -183,17 +183,13 @@ class ReviewRunResource extends Resource
             Fieldset::make('Parts of the review')
                 ->columns(2)
                 ->visible(fn (Get $get): bool => $get('runner') !== DiffRunner::NAME && ! $get('plain'))
-                ->schema([
-                    ...array_map(
-                        fn (string $field): Select => Select::make("modules.{$field}")
-                            ->label(ucfirst(ReviewSettings::MODULE_LABELS[$field]))
-                            ->options(['true' => 'On', 'false' => 'Off'])
-                            ->placeholder('As the repository has it'),
-                        ['ocr', 'scan', 'floor_guard', 'extra_passes'],
-                    ),
-                    Toggle::make('verify')
-                        ->label('Check each blocking finding a second time'),
-                ]),
+                ->schema(array_map(
+                    fn (string $field): Select => Select::make("modules.{$field}")
+                        ->label(ucfirst(ReviewSettings::MODULE_LABELS[$field]))
+                        ->options(['true' => 'On', 'false' => 'Off'])
+                        ->placeholder('As the repository has it'),
+                    array_keys(ReviewSettings::MODULES),
+                )),
         ];
     }
 
@@ -236,7 +232,7 @@ class ReviewRunResource extends Resource
 
     /**
      * @param  array<string, mixed>  $data  what the trial fields gave
-     * @return array{runner: string|null, provider: string|null, model: string|null, effort: string|null, verify: bool, ignore_existing: bool, modules: array<string, bool>|null}
+     * @return array{runner: string|null, provider: string|null, model: string|null, effort: string|null, verify: bool|null, ignore_existing: bool, modules: array<string, bool>|null}
      */
     public static function trialOptions(array $data): array
     {
@@ -263,7 +259,8 @@ class ReviewRunResource extends Resource
                 default => (string) $data['model'],
             },
             'effort' => filled($data['effort'] ?? null) ? (string) $data['effort'] : null,
-            'verify' => ! $plain && (bool) ($data['verify'] ?? false),
+            // The second check is one of the parts, and kept apart for the run's scripts.
+            'verify' => $modules['verify'] ?? null,
             'ignore_existing' => (bool) ($data['ignore_existing'] ?? true),
             'modules' => $modules === [] ? null : $modules,
         ];

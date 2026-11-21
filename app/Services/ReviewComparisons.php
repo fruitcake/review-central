@@ -32,7 +32,7 @@ class ReviewComparisons
      * A trial for each setup, on the pull request the run reviewed. A setup that
      * cannot be tried keeps why, and the others still start.
      *
-     * @param  array<int, array{runner: string|null, provider: string|null, model: string|null, effort: string|null, verify: bool, ignore_existing?: bool, modules?: array<string, bool>|null}>  $rows
+     * @param  array<int, array{runner: string|null, provider: string|null, model: string|null, effort: string|null, verify: bool|null, ignore_existing?: bool, modules?: array<string, bool>|null}>  $rows
      */
     public function start(ReviewRun $run, array $rows, bool $ignoreExisting, ?User $user): ReviewComparison
     {
@@ -50,7 +50,7 @@ class ReviewComparisons
      * More setups for a comparison, up to its most, each a trial of the pull request
      * as it is now. An analysis made before keeps to the reviews it read.
      *
-     * @param  array<int, array{runner: string|null, provider: string|null, model: string|null, effort: string|null, verify: bool, ignore_existing?: bool, modules?: array<string, bool>|null}>  $rows
+     * @param  array<int, array{runner: string|null, provider: string|null, model: string|null, effort: string|null, verify: bool|null, ignore_existing?: bool, modules?: array<string, bool>|null}>  $rows
      * @return int how many were added
      */
     public function add(ReviewComparison $comparison, array $rows, bool $ignoreExisting): int
@@ -132,7 +132,7 @@ class ReviewComparisons
      * Starts a trial for each setup on the pull request the run reviewed. A setup
      * that cannot be tried keeps why, and the others still start.
      *
-     * @param  array<int, array{runner: string|null, provider: string|null, model: string|null, effort: string|null, verify: bool, ignore_existing?: bool, modules?: array<string, bool>|null}>  $rows
+     * @param  array<int, array{runner: string|null, provider: string|null, model: string|null, effort: string|null, verify: bool|null, ignore_existing?: bool, modules?: array<string, bool>|null}>  $rows
      * @return array<int, array<string, mixed>>
      */
     protected function trials(ReviewRun $run, array $rows, bool $ignoreExisting): array

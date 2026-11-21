@@ -23,7 +23,7 @@ use Illuminate\Support\Facades\DB;
  * @property int $pull_request_id
  * @property int|null $review_run_id
  * @property int|null $user_id
- * @property array<int, array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool, ignore_existing?: bool, modules?: array<string, bool>|null, build?: int|null, repository_id?: int, error?: string|null, reserved_at?: string}> $rows
+ * @property array<int, array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool|null, ignore_existing?: bool, modules?: array<string, bool>|null, build?: int|null, repository_id?: int, error?: string|null, reserved_at?: string}> $rows
  * @property array<int, string>|null $excluded the labels of the columns left out
  * @property string|null $analysis_status running, finished or failed
  * @property string|null $analysis_model
@@ -80,7 +80,7 @@ class ReviewComparison extends Model
      * The columns: the review it was started from, labelled A, then each setup's
      * run as B, C and on, or null for one whose run has not started or could not.
      *
-     * @return Collection<string, array{label: string, run: ReviewRun|null, row: array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool, ignore_existing?: bool, modules?: array<string, bool>|null, build?: int|null, repository_id?: int, error?: string|null, reserved_at?: string}|null}>
+     * @return Collection<string, array{label: string, run: ReviewRun|null, row: array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool|null, ignore_existing?: bool, modules?: array<string, bool>|null, build?: int|null, repository_id?: int, error?: string|null, reserved_at?: string}|null}>
      */
     public function columns(): Collection
     {
@@ -111,7 +111,7 @@ class ReviewComparison extends Model
     /**
      * The columns not left out: what is analysed, scored and waited for.
      *
-     * @return Collection<string, array{label: string, run: ReviewRun|null, row: array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool, ignore_existing?: bool, modules?: array<string, bool>|null, build?: int|null, repository_id?: int, error?: string|null, reserved_at?: string}|null}>
+     * @return Collection<string, array{label: string, run: ReviewRun|null, row: array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool|null, ignore_existing?: bool, modules?: array<string, bool>|null, build?: int|null, repository_id?: int, error?: string|null, reserved_at?: string}|null}>
      */
     public function active(): Collection
     {

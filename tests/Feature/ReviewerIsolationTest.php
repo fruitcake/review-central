@@ -95,3 +95,18 @@ it('shows the rating page through the tenant\'s secret filter', function () {
     // Shown filtered, kept as it was.
     expect($run->refresh()->summary)->toContain('Rt7Yq2WmN4pK8vX1zB3cD5eF9gH0jL6');
 });
+
+it('tells every reviewer which parts the team turned off, over whatever its instructions say, and nothing when all are on', function () {
+    $notes = fn (array $env): string => Process::env($env)->run(['sh', '-c', '. "$0" && reviewer_module_notes', realpath(SKILL.'/reviewer-env.sh')])->throw()->output();
+
+    expect($notes(['REVIEW_OCR' => 'false', 'REVIEW_FLOOR_GUARD' => 'false']))
+        ->toContain('Do not run `ocr` in any form')
+        ->toContain('Do not run floor-guard.sh')
+        ->not->toContain('review-scan.md')
+        ->and($notes([]))->toBe('');
+
+    // A saved copy of the instructions from before the settings never sees them, so each runner adds this to its prompt.
+    foreach (['run-claude.sh', 'run-codex.sh', 'run-pi.sh'] as $script) {
+        expect((string) file_get_contents(SKILL."/{$script}"))->toContain('reviewer_module_notes');
+    }
+});

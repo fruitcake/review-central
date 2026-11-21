@@ -499,6 +499,24 @@ else
   echo "No composer.json; nothing to install."
 fi
 
+# A part of the review the team turned off is not left to the instructions alone:
+# OCR is in the image whatever is set, so Claude is not allowed to run it either.
+if [ "$IS_CLAUDE" = "true" ] && [ -f "${REVIEW_AGENT_CONFIG:-}" ] \
+  && { [ "${REVIEW_OCR:-true}" = "false" ] || [ "${REVIEW_FLOOR_GUARD:-true}" = "false" ]; }; then
+  if jq --argjson ocr "$([ "${REVIEW_OCR:-true}" = "false" ] && echo true || echo false)" \
+       --argjson guard "$([ "${REVIEW_FLOOR_GUARD:-true}" = "false" ] && echo true || echo false)" '
+       .permissions.allow |= map(select(
+         ($ocr and . == "Bash(ocr *)" | not) and ($guard and (startswith("Bash(sh .review/skill/floor-guard.sh") ) | not)
+       ))
+     ' "$REVIEW_AGENT_CONFIG" > "$REVIEW_AGENT_CONFIG.tmp"; then
+    mv "$REVIEW_AGENT_CONFIG.tmp" "$REVIEW_AGENT_CONFIG"
+    echo "Claude may not run what is turned off: OCR=${REVIEW_OCR:-true} floor guard=${REVIEW_FLOOR_GUARD:-true}."
+  else
+    rm -f "$REVIEW_AGENT_CONFIG.tmp"
+    echo "Could not take OCR or the floor guard out of Claude's permissions; the instructions still say not to run them."
+  fi
+fi
+
 # Plain checks over the change, before the reviewer starts: secrets in added lines
 # and composer audit (scan-change.sh). Here, where there is network and before
 # COMPOSER_AUTH goes, so the audit can ask a private repository too. The reviewer
