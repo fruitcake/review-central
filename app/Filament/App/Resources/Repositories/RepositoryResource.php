@@ -7,6 +7,7 @@ use App\Enums\ConnectionKind;
 use App\Enums\ReviewProvider;
 use App\Enums\ReviewsFrom;
 use App\Filament\App\Resources\Repositories\Pages\ManageRepositories;
+use App\Filament\App\Resources\Repositories\Pages\ViewRepository;
 use App\Filament\Components\ReviewSettingsForm;
 use App\Filament\CurrentTenant;
 use App\Filament\TenantRole;
@@ -178,35 +179,12 @@ class RepositoryResource extends Resource
                 TextColumn::make('review_runs_max_started_at')->label('Last review')->since()->placeholder('Never'),
                 TextColumn::make('cost_this_month')->label('Cost this month')->state(fn (Repository $record): string => Currency::show($record->getAttribute('cost_this_month'))),
             ])
+            ->recordUrl(fn (Repository $record): string => self::getUrl('view', ['record' => $record]))
             ->recordActions([
-                Action::make('host')
-                    ->label('Open on its host')
-                    ->tooltip(fn (Repository $record): string => 'Open on '.rescue(fn (): string => $record->integration->driver()->label(), 'its host', false))
-                    ->icon(Heroicon::OutlinedArrowTopRightOnSquare)
-                    ->iconButton()
-                    ->color('gray')
-                    ->url(fn (Repository $record): ?string => rescue(fn (): string => $record->sourceControl()->repositoryUrl(), null, false), shouldOpenInNewTab: true),
-                Action::make('readiness')
-                    ->icon(Heroicon::OutlinedShieldCheck)
-                    ->color('gray')
-                    ->modalHeading(fn (Repository $record): string => "Can {$record->slug} be reviewed?")
-                    ->modalDescription('Checked now, against the host and this installation.')
-                    ->modalContent(fn (Repository $record, RepositoryReadiness $readiness) => view('filament.readiness', ['checks' => $readiness->checks($record)]))
-                    ->modalSubmitAction(false)
-                    ->modalCancelActionLabel('Close'),
+                self::hostAction()->iconButton(),
+                self::readinessAction(),
                 ActionGroup::make([
-                    Action::make('reviewSettings')
-                        ->label('Review settings')
-                        ->visible(fn (): bool => TenantRole::isAdmin())
-                        ->icon(Heroicon::OutlinedAdjustmentsHorizontal)
-                        ->modalDescription('Left empty, a setting follows the defaults.')
-                        ->fillForm(fn (Repository $record): array => ReviewSettingsForm::state($record->reviewSetting))
-                        ->schema(fn (): array => ReviewSettingsForm::fields(ReviewSettings::defaults(CurrentTenant::get())))
-                        ->action(function (Repository $record, array $data): void {
-                            ReviewSettings::saveFor($record, $data);
-
-                            Notification::make()->title('Saved')->success()->send();
-                        }),
+                    self::reviewSettingsAction(),
                     EditAction::make()
                         // Moved where a removed copy of it is, the two change places.
                         ->using(fn (Repository $record, array $data, RepositorySetup $setup): Repository => $setup->update($record, $data)),
@@ -222,6 +200,54 @@ class RepositoryResource extends Resource
     {
         return [
             'index' => ManageRepositories::route('/'),
+            'view' => ViewRepository::route('/{record}'),
         ];
+    }
+
+    /**
+     * The repository on its host, in a new tab.
+     */
+    public static function hostAction(): Action
+    {
+        return Action::make('host')
+            ->label('Open on its host')
+            ->tooltip(fn (Repository $record): string => 'Open on '.rescue(fn (): string => $record->integration->driver()->label(), 'its host', false))
+            ->icon(Heroicon::OutlinedArrowTopRightOnSquare)
+            ->color('gray')
+            ->url(fn (Repository $record): ?string => rescue(fn (): string => $record->sourceControl()->repositoryUrl(), null, false), shouldOpenInNewTab: true);
+    }
+
+    /**
+     * Whether the repository can be reviewed, checked now.
+     */
+    public static function readinessAction(): Action
+    {
+        return Action::make('readiness')
+            ->icon(Heroicon::OutlinedShieldCheck)
+            ->color('gray')
+            ->modalHeading(fn (Repository $record): string => "Can {$record->slug} be reviewed?")
+            ->modalDescription('Checked now, against the host and this installation.')
+            ->modalContent(fn (Repository $record, RepositoryReadiness $readiness) => view('filament.readiness', ['checks' => $readiness->checks($record)]))
+            ->modalSubmitAction(false)
+            ->modalCancelActionLabel('Close');
+    }
+
+    /**
+     * The repository's own review settings, over the team's defaults.
+     */
+    public static function reviewSettingsAction(): Action
+    {
+        return Action::make('reviewSettings')
+            ->label('Review settings')
+            ->visible(fn (): bool => TenantRole::isAdmin())
+            ->icon(Heroicon::OutlinedAdjustmentsHorizontal)
+            ->modalDescription('Left empty, a setting follows the defaults.')
+            ->fillForm(fn (Repository $record): array => ReviewSettingsForm::state($record->reviewSetting))
+            ->schema(fn (): array => ReviewSettingsForm::fields(ReviewSettings::defaults(CurrentTenant::get())))
+            ->action(function (Repository $record, array $data): void {
+                ReviewSettings::saveFor($record, $data);
+
+                Notification::make()->title('Saved')->success()->send();
+            });
     }
 }

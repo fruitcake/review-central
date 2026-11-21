@@ -22,6 +22,17 @@ Claude Code, Codex and Pi follow the same instructions, and a review is built fr
 
 OpenCodeReview as the reviewer, and a review from the diff alone, have none of these. Each run records which parts it ran with, under **Run details** and in a comparison, so two setups can be told apart.
 
+### Rules
+
+**Rules** in the sidebar are the team's own rules for its reviews, in plain language. A rule is for every repository, or for one, and can be limited to paths (`app/Http/**`). It is one of two kinds:
+
+- **Check**: the reviewer reports a change that breaks it, citing the rule (R1, R2 and on), at the severity the rule sets or at its own judgement.
+- **Not a defect here**: a pattern the reviewer does not report, because the team judged it a false positive or it is how the team works.
+
+The reviewer reads them as `review-rules.md`, after the instructions, with the standing of `REVIEW.md`: they cannot lower the evidence a finding needs. A rule is part of the instructions' version, so changing one has the next push reviewed against it. A rule that is off stays on the list and is not read.
+
+On a review, a finding marked *Not a problem* or *Factually wrong* offers **Make it a rule** (for the tenant's admins): a *Not a defect here* rule for that repository and file, to widen before saving. Everyone in the team reads the rules; its admins write them.
+
 ### By pull request
 
 Under **Review defaults → By pull request** a team can have each pull request classified before its review. A small model, with the AI provider that writes the notes on whose turn, reads the title, the description, the changed files with their size and the diff of the migrations, and calls the pull request **simple**, **normal** or **complex**. It also notes the kind of change and whether it touches the database, breaks what others rely on, matters for security, or has a migration that cannot be undone. Each commit is classified once, so every build of it runs the same.
@@ -65,6 +76,10 @@ A team writes down how its code works, and what counts as a defect there, in the
 | `.opencodereview/rule.json` | OpenCodeReview's own rules, read from the destination branch. |
 
 None of them is needed: without them the reviewer goes by the review instructions and the stack guides alone. They can raise what the reviewer reports, never lower what it needs as evidence or change what it may run.
+
+## A repository's page
+
+Clicking a repository, under **Repositories** or on the overview, opens its page: the figures and charts of the overview for that repository alone over 7, 30 or 90 days, with what it cost and how many findings are left open, its open pull requests with how their last review ended, its latest reviews, the open findings of its merged pull requests, the rules its review reads, and each reviewer that ran there with how often the team accepted what it found. An admin adds a rule for it, and changes its review settings, from the page.
 
 ## Pull requests
 

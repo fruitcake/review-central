@@ -144,6 +144,14 @@ class Tenant extends Model
     }
 
     /**
+     * @return HasMany<ReviewRule, $this>
+     */
+    public function reviewRules(): HasMany
+    {
+        return $this->hasMany(ReviewRule::class);
+    }
+
+    /**
      * @return HasMany<ReviewRun, $this>
      */
     public function reviewRuns(): HasMany

@@ -103,6 +103,14 @@ class Repository extends Model
         return $this->hasMany(ReviewRun::class);
     }
 
+    /**
+     * @return HasMany<ReviewRule, $this>
+     */
+    public function reviewRules(): HasMany
+    {
+        return $this->hasMany(ReviewRule::class);
+    }
+
     public function fullName(): string
     {
         return "{$this->workspace}/{$this->slug}";

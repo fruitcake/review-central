@@ -1,4 +1,5 @@
 @php
+    use App\Filament\App\Resources\Repositories\RepositoryResource;
     use App\Filament\App\Resources\ReviewRuns\ReviewRunResource;
     use App\Filament\RunPresenter;
     use App\Services\Currency;
@@ -127,7 +128,7 @@
                                         <div class="rc-repository">
                                             <span class="rc-dot {{ $row['ready'] ? 'rc-fill-primary' : 'rc-fill-danger' }}" title="{{ $row['ready'] ? 'Ready to review' : 'Cannot start reviews yet' }}"></span>
                                             <span>
-                                                <strong>{{ $row['repository']->slug }}</strong>
+                                                <strong><a href="{{ RepositoryResource::getUrl('view', ['record' => $row['repository']]) }}">{{ $row['repository']->slug }}</a></strong>
                                                 <span class="rc-muted">{{ collect($row['repository']->review_stack ?? [])->map(fn (string $stack): string => ucfirst($stack))->implode(' · ') ?: 'No stack' }}</span>
                                             </span>
                                         </div>

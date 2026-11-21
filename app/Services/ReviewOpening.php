@@ -268,6 +268,16 @@ class ReviewOpening
 
         $files = ReviewInstructions::files($repository->tenant, array_values($input['stack'] ?? []));
 
+        // The team's rules come last, and an instruction of their name is never them.
+        if ($files !== null) {
+            $files = array_values(array_filter($files, fn (array $file): bool => $file['key'] !== ReviewRules::KEY));
+            $rules = ReviewRules::file($repository);
+
+            if ($rules !== null) {
+                $files[] = $rules;
+            }
+        }
+
         return $files === null ? null : [
             'version' => ReviewInstructions::version($files),
             'contract' => ReviewInstructions::CONTRACT,
