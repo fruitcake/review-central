@@ -4,14 +4,17 @@ namespace App\Filament\App\Resources\ReviewRuns\Pages;
 
 use App\Enums\FindingVerdictKind;
 use App\Enums\ReviewEffort;
+use App\Enums\ReviewRuleKind;
 use App\Events\ReviewLogGrew;
 use App\Exceptions\ReviewTrialRefused;
 use App\Filament\App\Resources\ReviewComparisons\ReviewComparisonResource;
+use App\Filament\App\Resources\ReviewRules\ReviewRuleResource;
 use App\Filament\App\Resources\ReviewRuns\ReviewRunResource;
 use App\Filament\Concerns\RefreshesOnBroadcast;
 use App\Filament\CurrentTenant;
 use App\Filament\RunPresenter;
 use App\Filament\TenantRole;
+use App\Models\FindingVerdict;
 use App\Models\ReviewClassification;
 use App\Models\ReviewComparison;
 use App\Models\ReviewQuestion;
@@ -192,6 +195,54 @@ class ViewReviewRun extends ViewRecord
         }
     }
 
+    /**
+     * Makes a rule of a finding the team judged not to be one, so the reviewer
+     * stops raising it: "not a defect here", for this repository and the
+     * finding's file, for an admin to widen before saving.
+     */
+    public function makeRuleAction(): Action
+    {
+        return Action::make('makeRule')
+            ->label('Make it a rule')
+            ->link()
+            ->size('sm')
+            ->visible(fn (): bool => TenantRole::isAdmin())
+            ->modalHeading('Make it a rule')
+            ->modalDescription('The reviewer reads the team\'s rules on every review. A rule saved as "Not a defect here" stops it raising this again.')
+            ->fillForm(function (array $arguments): array {
+                $finding = $this->finding((string) ($arguments['finding'] ?? ''));
+
+                return [
+                    'kind' => ReviewRuleKind::Convention->value,
+                    'title' => $finding['title'] ?? '',
+                    'body' => $finding === null ? null : trim('Raised as '.($finding['id'] ?? '?').' in the review of '.RunPresenter::title($this->record).' and judged not to be a defect.'),
+                    'repository_id' => $this->record->repository_id,
+                    'paths' => filled($finding['path'] ?? null) ? [(string) $finding['path']] : [],
+                    'enabled' => true,
+                ];
+            })
+            ->schema(ReviewRuleResource::fields())
+            ->action(function (array $data, array $arguments): void {
+                $finding = $this->finding((string) ($arguments['finding'] ?? ''));
+
+                CurrentTenant::get()->reviewRules()->create($data + [
+                    'source' => $finding === null ? null : "{$this->record->uuid}:{$finding['id']}",
+                ]);
+
+                Notification::make()->title('The rule is saved')->body('The next review reads it.')->success()->send();
+            });
+    }
+
+    /**
+     * One of this run's findings, by its id.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function finding(string $id): ?array
+    {
+        return collect($this->record->findings ?? [])->first(fn (array $finding): bool => $id !== '' && (string) ($finding['id'] ?? '') === $id);
+    }
+
     /** A question for the reviewer, typed on the page. */
     public string $question = '';
 
@@ -267,6 +318,13 @@ class ViewReviewRun extends ViewRecord
                 ->limit(20)
                 ->get(),
             'verdicts' => auth()->user() instanceof User ? app(FindingFeedback::class)->of($run, auth()->user()) : [],
+            // Anyone in the team judging a finding not to be one is enough to make a rule of it.
+            'dismissed' => FindingVerdict::query()
+                ->where('review_run_id', $run->getKey())
+                ->whereIn('verdict', [FindingVerdictKind::NotAProblem, FindingVerdictKind::Wrong])
+                ->distinct()
+                ->pluck('finding_id')
+                ->all(),
             'ownScore' => $run->ratings()->where('user_id', auth()->id())->value('score'),
             // What a container review printed so far; null when there is no log of it.
             'log' => app(RunLog::class)->tail($run),

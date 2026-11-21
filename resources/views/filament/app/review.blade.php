@@ -146,6 +146,9 @@
                                     @php($given = ($verdicts[(string) ($finding['id'] ?? '')] ?? null) === $kind)
                                     <button type="button" wire:click="judge(@js((string) ($finding['id'] ?? '')), '{{ $kind->value }}')" aria-pressed="{{ $given ? 'true' : 'false' }}" @class(['rc-verdict', "rc-verdict-{$kind->value}", 'rc-on' => $given])>{{ $kind->text() }}</button>
                                 @endforeach
+                                @if (in_array((string) ($finding['id'] ?? ''), $dismissed, true) && $this->makeRuleAction->isVisible())
+                                    {{ ($this->makeRuleAction)(['finding' => (string) ($finding['id'] ?? '')]) }}
+                                @endif
                             </div>
                         </article>
                     @empty
