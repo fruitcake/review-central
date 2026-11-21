@@ -169,7 +169,10 @@ review_pass() {
 DEST_BRANCH="${BITBUCKET_PR_DESTINATION_BRANCH:-}"
 REVIEWED="${BITBUCKET_COMMIT:-HEAD}"
 SINCE=$(jq -r '.handover.reviewed_up_to // .last_reviewed_commit // empty' "${REVIEW_CONTEXT_FILE:-review-context.json}" 2> /dev/null) || SINCE=""
-if [ -n "$SINCE" ] && git merge-base --is-ancestor "$SINCE" "$REVIEWED" 2> /dev/null; then
+# On unless the extra passes were turned off: Codex's pass costs far less than Claude's.
+if [ "${REVIEW_EXTRA_PASSES:-true}" = "false" ]; then
+  echo "Codex's own review pass is turned off for this review (REVIEW_EXTRA_PASSES=false)."
+elif [ -n "$SINCE" ] && git merge-base --is-ancestor "$SINCE" "$REVIEWED" 2> /dev/null; then
   printf '\n-------------------- Codex review pass --------------------\n'
   echo "Codex's own review of $SINCE..$REVIEWED first, the follow-up's range, for candidates."
   review_pass "Review the code changes in $SINCE..$REVIEWED: what \`git diff $SINCE..$REVIEWED\` shows, read in the context of the files around them. Earlier commits were reviewed already; report only what these changes introduce. Provide prioritized, actionable findings."
@@ -178,7 +181,7 @@ elif [ -n "$DEST_BRANCH" ]; then
   echo "Codex's own review against origin/$DEST_BRANCH first, for candidates."
   review_pass --base "origin/$DEST_BRANCH"
 fi
-if [ -n "$SINCE$DEST_BRANCH" ] && [ ! -s "$CANDIDATES" ]; then
+if [ "${REVIEW_EXTRA_PASSES:-true}" != "false" ] && [ -n "$SINCE$DEST_BRANCH" ] && [ ! -s "$CANDIDATES" ]; then
   echo "Codex's own review returned nothing; the review goes ahead without it."
   rm -f "$CANDIDATES"
 fi

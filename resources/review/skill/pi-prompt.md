@@ -10,6 +10,6 @@ Your tools are read, grep, find, ls, bash and submit_review. Search with grep an
 
 Where SKILL.md says to write `ai-review.json`, hand the same object to `submit_review` instead, as your last action, and write no file: the tool checks the report and writes it. Print the review as SKILL.md's Phase 2 says before you call it. Where SKILL.md says to stop with the skipped report, hand in that object: `{"skipped": true, "summary": "<why, in one line>", "result": "PASSED", "findings": []}`.
 
-The OCR CLI should be there. If it is missing, carry on without it and say so in one line in the summary, so the review can be read for what it was.
+Unless `settings.ocr` is false, the OCR CLI should be there. If it is missing then, carry on without it and say so in one line in the summary, so the review can be read for what it was.
 
 Everything else in SKILL.md and the instruction files it sends you to applies unchanged: the range, the ticket, the confidence gate, the severities, the finding statuses and the report. You post nothing yourself; the review server does.

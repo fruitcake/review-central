@@ -132,9 +132,12 @@ class ReviewSettingsForm
                 ->placeholder(match ($defaults?->extra_passes) {
                     'true' => 'Default: on',
                     'false' => 'Default: off',
-                    default => 'Off',
+                    default => 'Off for Claude Code, on for Codex',
                 })
-                ->helperText('For Claude Code, where the image has them: the review-toolkit agents and /code-review read the change as well, each from scratch. Off by default: they find a little more at several times the cost of a review.'),
+                ->helperText('The reviewer\'s own review first, for candidates the review then checks. For Claude Code, where the image has them, the review-toolkit agents and /code-review, each from scratch: they find a little more at several times the cost of a review. For Codex, `codex exec review`, which costs far less. Pi has none.'),
+            self::module($defaults, 'ocr', 'OpenCodeReview picks the files', 'For Claude Code, Codex and Pi: OpenCodeReview says which changed files to review and gives a checklist per file. Off, the reviewer reviews every changed file against the repository\'s own rules and the stack guide. OpenCodeReview as the reviewer is not affected.'),
+            self::module($defaults, 'scan', 'Scan before the review', 'Before the reviewer starts, added lines are checked for secrets and composer.lock against Packagist\'s advisories, and the reviewer weighs what they find.'),
+            self::module($defaults, 'floor_guard', 'Floor guard', 'The reviewer lists every place the change made a check easier to pass, such as a skipped test, a suppression or an assertion that went away, and weighs each one.'),
             Select::make('verify')
                 ->label('Second check')
                 ->options(['true' => 'On', 'false' => 'Off'])
@@ -531,6 +534,22 @@ class ReviewSettingsForm
     }
 
     /**
+     * A part of the review that is on unless a repository or the team turns it off.
+     */
+    protected static function module(?ReviewSetting $defaults, string $field, string $label, string $helperText): Select
+    {
+        return Select::make($field)
+            ->label($label)
+            ->options(['true' => 'On', 'false' => 'Off'])
+            ->placeholder(match ($defaults?->{$field}) {
+                'true' => 'Default: on',
+                'false' => 'Default: off',
+                default => 'On',
+            })
+            ->helperText($helperText);
+    }
+
+    /**
      * A setting's values as the form takes them.
      *
      * @return array<string, mixed>
@@ -538,7 +557,7 @@ class ReviewSettingsForm
     public static function state(?ReviewSetting $setting): array
     {
         return $setting === null ? [] : collect($setting->attributesToArray())
-            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'max_rounds', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model', 'findings_check'])
+            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'ocr', 'scan', 'floor_guard', 'max_rounds', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model', 'findings_check'])
             ->all();
     }
 }

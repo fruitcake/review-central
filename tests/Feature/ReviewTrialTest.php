@@ -151,11 +151,11 @@ it('starts a trial from the list of reviews', function () {
     fakePullRequest();
 
     livewire(ListReviewRuns::class)
-        ->callAction('try', ['url' => 'https://bitbucket.org/acme/shop/pull-requests/12', 'model' => 'sonnet', 'ignore_existing' => false])
+        ->callAction('try', ['url' => 'https://bitbucket.org/acme/shop/pull-requests/12', 'model' => 'sonnet', 'ignore_existing' => false, 'modules' => ['floor_guard' => 'false']])
         ->assertHasNoFormErrors()
         ->assertNotified('The trial is started');
 
-    Queue::assertPushed(fn (RunContainerReview $job): bool => $job->trial?->model === 'sonnet' && $job->trial->ignoreExisting === false && $job->trial->verify === false);
+    Queue::assertPushed(fn (RunContainerReview $job): bool => $job->trial?->model === 'sonnet' && $job->trial->ignoreExisting === false && $job->trial->verify === false && $job->trial->modules === ['floor_guard' => false]);
 
     livewire(ListReviewRuns::class)
         ->callAction('try', ['url' => 'https://bitbucket.org/elsewhere/shop/pull-requests/12'])

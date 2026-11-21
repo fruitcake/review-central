@@ -168,7 +168,9 @@ class ViewReviewRun extends ViewRecord
             'provider' => $reviewer,
             'model' => $run->model,
             'effort' => in_array($run->effort, array_column(ReviewEffort::cases(), 'value'), true) ? $run->effort : null,
-            'verify' => false,
+            // The parts it ran with, so a re-run is the same review again.
+            'verify' => (bool) ($run->modules['verify'] ?? false),
+            'modules' => array_map(fn (bool $on): string => $on ? 'true' : 'false', array_diff_key($run->modules ?? [], ['verify' => true])),
         ];
     }
 

@@ -8,6 +8,20 @@
 - **Pull requests from forks**, on the same page, are not reviewed by themselves unless that is turned on: a fork's code is anyone's, and a review runs it in the sandbox with the tenant's AI key and on its budget. Turned on, a pull request from a fork on GitHub is reviewed on every push and on a comment, as any other; off, it waits under **Pull requests**, and a `/review` comment or a question on one gets a reply saying so. On Bitbucket, which keeps no copy of a fork's branch in the repository, a pull request from a fork is never reviewed by itself; it can be [tried](#trying-a-pull-request) from the diff alone.
 - **Instructions** are what the review is told to look for: a method, the defect lenses and a guide per stack. The administrator keeps the defaults; a tenant can copy one and change it for its own repositories. What is saved is what the next review reads.
 
+### Parts of the review
+
+Claude Code, Codex and Pi follow the same instructions, and a review is built from parts besides the reviewer itself. Each is a setting under **Review defaults**, and a repository can set its own under **Review settings**:
+
+| Setting | What it does | When nothing sets it |
+|---|---|---|
+| OpenCodeReview picks the files | `ocr delegate` says which changed files to review and gives a checklist per file. Off, the reviewer reviews every changed file against the repository's own rules and the stack guide. | On |
+| Scan before the review | Added lines are checked for secrets and `composer.lock` against Packagist's advisories, before the reviewer starts. | On |
+| Floor guard | Lists every place the change made a check easier to pass, for the reviewer to weigh. | On |
+| Extra passes | The reviewer's own review first, for candidates: the review-toolkit agents and `/code-review` for Claude Code, `codex exec review` for Codex. Pi has none. | Off for Claude Code, on for Codex |
+| Second check | Each new finding that would block is checked once more in a fresh session. Not for Pi. | Off |
+
+OpenCodeReview as the reviewer, and a review from the diff alone, have none of these. Each run records which parts it ran with, under **Run details** and in a comparison, so two setups can be told apart.
+
 ### By pull request
 
 Under **Review defaults → By pull request** a team can have each pull request classified before its review. A small model, with the AI provider that writes the notes on whose turn, reads the title, the description, the changed files with their size and the diff of the migrations, and calls the pull request **simple**, **normal** or **complex**. It also notes the kind of change and whether it touches the database, breaks what others rely on, matters for security, or has a migration that cannot be undone. Each commit is classified once, so every build of it runs the same.
@@ -125,7 +139,7 @@ The admin panel opens on **Platform**: every tenant with its connections, reposi
 
 ### Comparing setups
 
-On a review of a pull request, **Compare with** (for the tenant's admins) adds a row for each setup to try: runner, reviewer, model (picked from the same list as under Review defaults, or typed), effort and the second check, up to ten. Each row starts a trial of the pull request as it is now, and **Comparisons** in the sidebar shows them side by side with the review it started from, labelled A, B, C and on: each one's outcome, cost, time and findings. A setup that cannot be tried says why, and the others still run. **Add setups** on the comparison adds more later; an analysis made before keeps to the reviews it read until it is run again. **Leave out** on a column moves it to the end, faded: it is not waited for, analysed or scored until **Bring back**.
+On a review of a pull request, **Compare with** (for the tenant's admins) adds a row for each setup to try: runner, reviewer, model (picked from the same list as under Review defaults, or typed), effort and the [parts of the review](#parts-of-the-review), each on, off or as the repository has it, up to ten. *Plain review* turns every part off: the reviewer with the review's instructions and nothing else, to see what the parts add. Each row starts a trial of the pull request as it is now, and **Comparisons** in the sidebar shows them side by side with the review it started from, labelled A, B, C and on: each one's outcome, cost, time and findings. A setup that cannot be tried says why, and the others still run. **Add setups** on the comparison adds more later; an analysis made before keeps to the reviews it read until it is run again. **Leave out** on a column moves it to the end, faded: it is not waited for, analysed or scored until **Bring back**.
 
 Once every review has ended, **Analyse** has one model, picked with its AI provider (a Laravel AI tier or a model by name; the provider's smartest when none), read the pull request's diff and every review's findings. It groups the findings that are about the same issue, says of each whether it holds, is a false positive or cannot be settled from the diff, and which reviews raised it. Each column then shows how many of its findings hold, how many are false positives or unclear, and how many issues that hold it missed. The analysis is one request with the whole diff, and its cost shows with it.
 

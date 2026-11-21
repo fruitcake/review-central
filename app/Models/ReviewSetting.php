@@ -29,7 +29,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $verify "true" or "false": whether a second check runs on each finding that would block.
  * @property string|null $language the code of the language the review writes for people in; English when none
  * @property string|null $ticket_grading "true" or "false": whether the summary grades the change against the ticket's acceptance criteria
- * @property string|null $extra_passes "true" or "false": whether Claude Code runs the review-toolkit agents and /code-review as well
+ * @property string|null $extra_passes "true" or "false": whether the reviewer runs its CLI's own review pass for candidates: the review-toolkit agents and /code-review for Claude Code, `codex exec review` for Codex. Null leaves it to the reviewer: off for Claude Code, on for Codex
+ * @property string|null $ocr "true" or "false": whether OpenCodeReview picks the files and a checklist per file for Claude Code, Codex and Pi; on when null
+ * @property string|null $scan "true" or "false": whether secrets and composer audit are checked before the reviewer starts; on when null
+ * @property string|null $floor_guard "true" or "false": whether the reviewer runs the floor guard on loosened checks; on when null
  * @property string|null $turn_notes "true" or "false": whether a small model writes what the one at turn has to do; the team's alone
  * @property string|null $turn_model The model it writes with: a tier or a name; the provider's cheapest when none
  * @property string|null $strategy off, record or apply: whether pull requests are classified, and whether that decides their effort and model

@@ -82,6 +82,18 @@ class Precheck
         }
         [$model, $effort, $advisor] = $this->setup($reviewer, $settings, $trial);
 
+        // A trial's parts of the review over the repository's, its second check
+        // among them, so what is recorded is what ran.
+        $settings = ReviewSettings::withModules($settings, $trial === null ? null : array_filter(
+            ($trial->modules ?? []) + ['verify' => $trial->verify],
+            fn (?bool $on): bool => $on !== null,
+        ));
+        $modules = ReviewSettings::modules($reviewer, $settings);
+
+        if ($modules !== null) {
+            $say('Parts of the review: '.ReviewSettings::describeModules($modules).'.');
+        }
+
         $say("Reviewer {$reviewer->value}".($model === null ? '' : ", model {$model}").($effort === null ? '' : ", effort {$effort}"));
 
         if ($trial !== null) {
@@ -107,6 +119,7 @@ class Precheck
             },
             'effort' => $effort,
             'advisor' => $advisor,
+            'modules' => $modules,
             'custom' => $trial !== null,
             // A trial reviews a commit that was reviewed, and a draft; it never
             // overrides a superseded commit.

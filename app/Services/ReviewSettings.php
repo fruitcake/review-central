@@ -80,7 +80,112 @@ class ReviewSettings
         'language' => 'REVIEW_LANGUAGE',
         'ticket_grading' => 'REVIEW_TICKET_GRADING',
         'extra_passes' => 'REVIEW_EXTRA_PASSES',
+        'ocr' => 'REVIEW_OCR',
+        'scan' => 'REVIEW_SCAN',
+        'floor_guard' => 'REVIEW_FLOOR_GUARD',
     ];
+
+    /**
+     * The parts of a review that can each be turned off, by setting, with what each
+     * is when nothing sets it. Null leaves it to the reviewer: see modules().
+     *
+     * Claude Code, Codex and Pi follow SKILL.md, and these are what it is built from
+     * besides the reviewer itself. All of them off is the reviewer asked for a review
+     * and nothing else. OpenCodeReview's own review has none of them.
+     *
+     * @var array<string, bool|null>
+     */
+    public const MODULES = [
+        'ocr' => true,
+        'scan' => true,
+        'floor_guard' => true,
+        'extra_passes' => null,
+        'verify' => false,
+    ];
+
+    /** What each module is called where a person reads it. */
+    public const MODULE_LABELS = [
+        'ocr' => 'OCR',
+        'scan' => 'scan',
+        'floor_guard' => 'floor guard',
+        'extra_passes' => 'extra passes',
+        'verify' => 'second check',
+    ];
+
+    /**
+     * Which modules a review with these variables runs, for the reviewer it runs
+     * with. A module the reviewer has not got is off; null for a reviewer that
+     * follows no SKILL.md.
+     *
+     * @param  array<string, string>  $variables  as variables() gives them
+     * @return array<string, bool>|null
+     */
+    public static function modules(ReviewProvider $reviewer, array $variables): ?array
+    {
+        if (! in_array($reviewer, [ReviewProvider::ClaudeCode, ReviewProvider::CodexCli, ReviewProvider::Pi], true)) {
+            return null;
+        }
+
+        $modules = [];
+
+        foreach (self::MODULES as $field => $default) {
+            $modules[$field] = match ($variables[self::VARIABLES[$field]] ?? null) {
+                'true' => true,
+                'false' => false,
+                // Claude Code's own passes cost several times a review; Codex's one is cheap.
+                default => $default ?? $reviewer === ReviewProvider::CodexCli,
+            };
+        }
+
+        // Pi has no review pass of its own and no second check.
+        if ($reviewer === ReviewProvider::Pi) {
+            $modules['extra_passes'] = false;
+            $modules['verify'] = false;
+        }
+
+        return $modules;
+    }
+
+    /**
+     * The modules a run had, as a person reads them: those on, then those off. A
+     * trial's own may name only some of them.
+     *
+     * @param  array<string, bool>  $modules
+     */
+    public static function describeModules(array $modules): string
+    {
+        $on = array_keys(array_filter($modules));
+        $off = array_keys(array_filter($modules, fn (bool $value): bool => ! $value));
+        $label = fn (array $fields): string => implode(', ', array_map(fn (string $field): string => self::MODULE_LABELS[$field] ?? $field, $fields));
+
+        if ($on === [] && array_diff_key(self::MODULES, $modules) === []) {
+            return 'plain: the reviewer alone';
+        }
+
+        return implode('; ', array_filter([
+            $on === [] ? null : $label($on),
+            $off === [] ? null : 'without '.$label($off),
+        ]));
+    }
+
+    /**
+     * Sets every module a trial names in the variables, over what the repository
+     * would run.
+     *
+     * @param  array<string, string>  $variables
+     * @param  array<string, bool>|null  $modules
+     * @return array<string, string>
+     */
+    public static function withModules(array $variables, ?array $modules): array
+    {
+        foreach ($modules ?? [] as $field => $on) {
+            if (array_key_exists($field, self::MODULES)) {
+                $variables[self::VARIABLES[$field]] = $on ? 'true' : 'false';
+            }
+        }
+
+        return $variables;
+    }
 
     /** The settings of classifying pull requests, which the server applies and no script reads. */
     public const STRATEGY_FIELDS = ['strategy' => true, 'strategy_effort' => true, 'strategy_model' => true];
@@ -94,10 +199,11 @@ class ReviewSettings
     /**
      * What the review's own text leaves to the team, as the reviewer reads it: the
      * language of what it writes for people, whether it grades the change against
-     * the ticket, and whether it runs the extra passes that cost more.
+     * the ticket, whether it runs the extra passes that cost more, and whether it
+     * runs OCR and the floor guard and reads the scan.
      *
      * @param  array<string, string>  $variables  as variables() gives them
-     * @return array{language: string, grade_ticket: bool, extra_passes: bool}
+     * @return array{language: string, grade_ticket: bool, extra_passes: bool, ocr: bool, scan: bool, floor_guard: bool}
      */
     public static function options(array $variables): array
     {
@@ -106,6 +212,9 @@ class ReviewSettings
             'grade_ticket' => ($variables['REVIEW_TICKET_GRADING'] ?? 'true') !== 'false',
             // Off unless asked: they read the change again from scratch, at several times the cost.
             'extra_passes' => ($variables['REVIEW_EXTRA_PASSES'] ?? 'false') === 'true',
+            'ocr' => ($variables['REVIEW_OCR'] ?? 'true') !== 'false',
+            'scan' => ($variables['REVIEW_SCAN'] ?? 'true') !== 'false',
+            'floor_guard' => ($variables['REVIEW_FLOOR_GUARD'] ?? 'true') !== 'false',
         ];
     }
 

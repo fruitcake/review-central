@@ -3,6 +3,7 @@
     use App\Filament\RunPresenter;
     use App\Runners\Runners;
     use App\Services\Currency;
+    use App\Services\ReviewSettings;
     use Illuminate\Support\Str;
 
     $outcome = RunPresenter::outcome($run);
@@ -244,6 +245,9 @@
                         <dt>Reviewer</dt><dd>{{ RunPresenter::reviewer($run) ?? '—' }}</dd>
                         <dt>Model</dt><dd>{{ $run->model ?? '—' }}</dd>
                         <dt>Effort</dt><dd>{{ $run->effort ?? 'Default' }}</dd>
+                        @if ($run->modules !== null)
+                            <dt>Parts</dt><dd>{{ ucfirst(ReviewSettings::describeModules($run->modules)) }}</dd>
+                        @endif
                         @if ($classification !== null)
                             <dt>Classified</dt><dd>{{ $classification->text() }}<span class="rc-muted">{{ $classification->reason === null ? '' : ": {$classification->reason}" }} · {{ $classification->files_count }} files, +{{ $classification->lines_added }} −{{ $classification->lines_removed }}{{ $classification->cost === null ? '' : ' · about '.Currency::show($classification->cost, null, 4) }}</span></dd>
                         @endif

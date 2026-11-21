@@ -29,7 +29,7 @@ class ReviewTrial
     ) {}
 
     /**
-     * @param  array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool|null, ignore_existing?: bool}  $options
+     * @param  array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool|null, ignore_existing?: bool, modules?: array<string, bool>|null}  $options
      *
      * @throws ReviewTrialRefused
      */
@@ -41,7 +41,7 @@ class ReviewTrial
     /**
      * The same as start(), and the build the trial runs as, to find its run by.
      *
-     * @param  array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool|null, ignore_existing?: bool}  $options
+     * @param  array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool|null, ignore_existing?: bool, modules?: array<string, bool>|null}  $options
      * @return array{repository: Repository, build: int}
      *
      * @throws ReviewTrialRefused
@@ -109,6 +109,7 @@ class ReviewTrial
             ignoreExisting: $options['ignore_existing'] ?? true,
             sandbox: $container?->name(),
             pullRef: $fork ? "pull/{$link->id}/head" : null,
+            modules: $fromDiff ? null : ($options['modules'] ?? null),
         );
 
         // Only now: a pull request that cannot be tried leaves no repository behind.
