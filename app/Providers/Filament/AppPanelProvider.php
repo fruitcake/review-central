@@ -33,6 +33,9 @@ class AppPanelProvider extends PanelProvider
             ->login()
             ->passwordReset()
             ->profile(EditProfile::class, isSimple: false)
+            // Google sign-in and an invitation trust the address on an account, so a
+            // new one counts only once its owner has opened the link mailed to it.
+            ->emailChangeVerification()
             ->tenant(Tenant::class, slugAttribute: 'slug')
             ->discoverResources(in: app_path('Filament/App/Resources'), for: 'App\Filament\App\Resources')
             ->discoverPages(in: app_path('Filament/App/Pages'), for: 'App\Filament\App\Pages')
