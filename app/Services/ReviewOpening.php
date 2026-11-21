@@ -279,7 +279,7 @@ class ReviewOpening
      * Opens the record for this run, or reuses the one a retried step already made.
      *
      * @param  array<string, mixed>  $context
-     * @param  array{agent?: string|null, provider?: string|null, effort?: string|null, advisor?: string|null, custom?: bool|null}  $reviewer
+     * @param  array{agent?: string|null, provider?: string|null, effort?: string|null, advisor?: string|null, modules?: array<string, bool>|null, custom?: bool|null}  $reviewer
      */
     protected function openRun(Repository $repository, array $context, string $branch, string $commit, string $build, string $inputHash, array $reviewer, ?string $instructionsVersion): void
     {
@@ -305,6 +305,7 @@ class ReviewOpening
                 'provider' => $reviewer['provider'] ?? null,
                 'effort' => $reviewer['effort'] ?? null,
                 'advisor' => $reviewer['advisor'] ?? null,
+                'modules' => $reviewer['modules'] ?? null,
                 'custom' => (bool) ($reviewer['custom'] ?? false),
                 'instructions_version' => $instructionsVersion,
                 'started_at' => now(),

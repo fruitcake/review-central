@@ -6,6 +6,6 @@ Two exceptions, both forced by this runtime rather than chosen:
 
 2. SKILL.md names Claude Code tools this runtime never has - the Skill and Task tools, the pr-review-toolkit plugin, the code-review skill and the advisor tool. Load a skill it names by reading its SKILL.md under .claude/skills/, and do what a subagent would have done yourself, as in 1. Do not list these as unavailable: their absence is expected and says nothing about this run.
 
-The OCR CLI should be there. If it is missing, carry on without it and say so in one line in the summary, so the review can be read for what it was.
+Unless `settings.ocr` is false, the OCR CLI should be there. If it is missing then, carry on without it and say so in one line in the summary, so the review can be read for what it was.
 
 Everything else in SKILL.md and the instruction files it sends you to applies unchanged: the range, the ticket, the confidence gate, the severities, the finding statuses and the report. You post nothing yourself; the review server does.

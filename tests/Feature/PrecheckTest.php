@@ -234,3 +234,54 @@ it('tells the reviewer what the team chose: the language, the ticket grading and
         // And the step is told to keep them, where it would take them away.
         ->and(File::json("{$this->work}/review-context.json")['settings']['server_variables'])->toMatchArray(['REVIEW_EXTRA_PASSES' => 'true']);
 });
+
+it('runs the parts of the review the team turned on, tells the reviewer and the step, and records what ran', function () {
+    ($this->pullRequest)();
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+
+    ($this->precheck)();
+
+    // Nothing set: OCR, the scan and the floor guard; Claude Code's costly passes and the second check off.
+    expect(File::json("{$this->work}/review-context.json")['settings'])->toMatchArray(['ocr' => true, 'scan' => true, 'floor_guard' => true])
+        ->and(ReviewRun::query()->sole()->modules)->toBe(['ocr' => true, 'scan' => true, 'floor_guard' => true, 'extra_passes' => false, 'verify' => false]);
+
+    ReviewSettings::saveDefaults($this->repository->tenant, ['ocr' => 'false', 'scan' => 'false', 'floor_guard' => 'false']);
+    ReviewRun::query()->delete();
+    ReviewLock::release($this->repository, 'feature/export', '41');
+
+    ($this->precheck)();
+    $settings = File::json("{$this->work}/review-context.json")['settings'];
+
+    expect($settings)->toMatchArray(['ocr' => false, 'scan' => false, 'floor_guard' => false])
+        ->and($settings['server_variables'])->toMatchArray(['REVIEW_OCR' => 'false', 'REVIEW_SCAN' => 'false', 'REVIEW_FLOOR_GUARD' => 'false'])
+        ->and(ReviewRun::query()->sole()->modules)->toBe(['ocr' => false, 'scan' => false, 'floor_guard' => false, 'extra_passes' => false, 'verify' => false])
+        ->and(($this->log)())->toContain('Parts of the review: plain: the reviewer alone.');
+});
+
+it('runs Codex\'s own pass unless it is turned off, and gives Pi no pass or second check', function () {
+    ($this->pullRequest)();
+    Connection::factory()->openai()->create(['tenant_id' => $this->repository->tenant_id]);
+
+    ($this->precheck)(new Trial(pullRequestId: 570, destination: 'main', provider: 'codex-cli'));
+    ($this->precheck)(new Trial(pullRequestId: 570, destination: 'main', provider: 'codex-cli', modules: ['extra_passes' => false]), 42);
+    ($this->precheck)(new Trial(pullRequestId: 570, destination: 'main', provider: 'pi', verify: true, modules: ['extra_passes' => true]), 43);
+
+    $modules = fn (int $build): array => ReviewRun::query()->where('build_number', $build)->sole()->modules;
+
+    expect($modules(41)['extra_passes'])->toBeTrue()
+        ->and($modules(42)['extra_passes'])->toBeFalse()
+        ->and($modules(43))->toMatchArray(['extra_passes' => false, 'verify' => false]);
+});
+
+it('runs a trial with the parts it asks for over the repository\'s, its second check among them', function () {
+    ($this->pullRequest)();
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    ReviewSettings::saveDefaults($this->repository->tenant, ['scan' => 'false']);
+
+    ($this->precheck)(new Trial(pullRequestId: 570, destination: 'main', verify: true, modules: ['ocr' => false]));
+    $settings = File::json("{$this->work}/review-context.json")['settings'];
+
+    expect($settings)->toMatchArray(['ocr' => false, 'scan' => false, 'floor_guard' => true])
+        ->and($settings['server_variables'])->toMatchArray(['REVIEW_OCR' => 'false', 'REVIEW_VERIFY' => 'true'])
+        ->and(ReviewRun::query()->sole()->modules)->toBe(['ocr' => false, 'scan' => false, 'floor_guard' => true, 'extra_passes' => false, 'verify' => true]);
+});

@@ -46,6 +46,7 @@ use Illuminate\Support\Str;
  * @property string|null $provider
  * @property string|null $effort
  * @property string|null $advisor
+ * @property array<string, bool>|null $modules Which parts of the review were on, by name: see ReviewSettings::MODULES; null for a run from before, or a reviewer they do not apply to
  * @property string|null $instructions_version
  * @property bool $custom
  * @property string $kind What was reviewed: a pull request, or a branch for its security
@@ -202,6 +203,7 @@ class ReviewRun extends Model
             'cost_estimated' => 'boolean',
             'custom' => 'boolean',
             'metrics' => 'array',
+            'modules' => 'array',
         ];
     }
 

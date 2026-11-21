@@ -4,6 +4,7 @@
     use App\Models\ReviewComparison;
     use App\Services\Currency;
     use App\Services\ReviewComparisons;
+    use App\Services\ReviewSettings;
 
     $verdicts = ['valid' => 'Holds', 'false_positive' => 'False positive', 'unclear' => 'Unclear'];
     $commits = $columns->map(fn ($column) => $column['run']?->commit)->filter()->unique();
@@ -29,7 +30,7 @@
                                 @if ($run !== null)
                                     {{ ReviewComparisons::setup($run) }}
                                 @else
-                                    {{ implode(' · ', array_filter([$column['row']['provider'] ?? null, $column['row']['model'] ?? null, isset($column['row']['effort']) ? 'effort '.$column['row']['effort'] : null])) ?: 'the repository\'s setup' }}
+                                    {{ implode(' · ', array_filter([$column['row']['provider'] ?? null, $column['row']['model'] ?? null, isset($column['row']['effort']) ? 'effort '.$column['row']['effort'] : null, empty($column['row']['modules']) ? null : ReviewSettings::describeModules($column['row']['modules'])])) ?: 'the repository\'s setup' }}
                                 @endif
                             </span>
                         </div>

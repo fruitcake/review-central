@@ -55,6 +55,8 @@ echo "  CLAUDE_REVIEW_MODEL=${CLAUDE_REVIEW_MODEL:-the runtime default} CLAUDE_R
 echo "  OCR_REVIEW_MODEL=${OCR_REVIEW_MODEL:-by provider} OCR_REVIEW_EFFORT=${OCR_REVIEW_EFFORT:-medium} OCR_REVIEW_PROVIDER=${OCR_REVIEW_PROVIDER:-from the model or the keys}"
 echo "  REVIEW_STACK=${REVIEW_STACK:-auto} (auto | none | laravel, magento, hyva, drupal - which stack guides the review reads)"
 echo "  REVIEW_VERIFY=${REVIEW_VERIFY:-false} REVIEW_VERIFY_MODEL=${REVIEW_VERIFY_MODEL:-sonnet for Claude, the review model for Codex} (a second check on each finding that would block)"
+echo "  REVIEW_EXTRA_PASSES=${REVIEW_EXTRA_PASSES:-off for Claude, on for Codex} (the reviewer's own review first, for candidates)"
+echo "  REVIEW_OCR=${REVIEW_OCR:-true} REVIEW_SCAN=${REVIEW_SCAN:-true} REVIEW_FLOOR_GUARD=${REVIEW_FLOOR_GUARD:-true} (OpenCodeReview picks the files, the scan before the review, the floor guard)"
 
 # A trigger into a custom pipeline sets no PR variables; the precheck resolved them
 # and passed them on, so fill them in here for anything that reads the usual names.
@@ -497,6 +499,24 @@ else
   echo "No composer.json; nothing to install."
 fi
 
+# A part of the review the team turned off is not left to the instructions alone:
+# OCR is in the image whatever is set, so Claude is not allowed to run it either.
+if [ "$IS_CLAUDE" = "true" ] && [ -f "${REVIEW_AGENT_CONFIG:-}" ] \
+  && { [ "${REVIEW_OCR:-true}" = "false" ] || [ "${REVIEW_FLOOR_GUARD:-true}" = "false" ]; }; then
+  if jq --argjson ocr "$([ "${REVIEW_OCR:-true}" = "false" ] && echo true || echo false)" \
+       --argjson guard "$([ "${REVIEW_FLOOR_GUARD:-true}" = "false" ] && echo true || echo false)" '
+       .permissions.allow |= map(select(
+         ($ocr and . == "Bash(ocr *)" | not) and ($guard and (startswith("Bash(sh .review/skill/floor-guard.sh") ) | not)
+       ))
+     ' "$REVIEW_AGENT_CONFIG" > "$REVIEW_AGENT_CONFIG.tmp"; then
+    mv "$REVIEW_AGENT_CONFIG.tmp" "$REVIEW_AGENT_CONFIG"
+    echo "Claude may not run what is turned off: OCR=${REVIEW_OCR:-true} floor guard=${REVIEW_FLOOR_GUARD:-true}."
+  else
+    rm -f "$REVIEW_AGENT_CONFIG.tmp"
+    echo "Could not take OCR or the floor guard out of Claude's permissions; the instructions still say not to run them."
+  fi
+fi
+
 # Plain checks over the change, before the reviewer starts: secrets in added lines
 # and composer audit (scan-change.sh). Here, where there is network and before
 # COMPOSER_AUTH goes, so the audit can ask a private repository too. The reviewer
@@ -506,7 +526,9 @@ fi
 # step's.
 rm -f review-scan.md
 echo "##[phase] scan"
-if [ -n "$DEST_BRANCH" ]; then
+if [ "${REVIEW_SCAN:-true}" = "false" ]; then
+  echo "Scan: turned off for this review (REVIEW_SCAN=false)."
+elif [ -n "$DEST_BRANCH" ]; then
   sh .review/skill/scan-change.sh "origin/$DEST_BRANCH" "${BITBUCKET_COMMIT:-HEAD}" review-scan.md
 else
   echo "Scan: no destination branch known; skipped."
@@ -514,7 +536,8 @@ fi
 unset COMPOSER_AUTH
 
 # OCR runs in delegation mode: it selects files and resolves review rules, the agent
-# does the review. No OCR LLM config is needed.
+# does the review. No OCR LLM config is needed. With REVIEW_OCR=false the agent
+# reviews without it, and it is not installed, unless OCR is the reviewer itself.
 #
 # Pinned to a release series, not a release: the newest 1.12.x, so fixes arrive
 # without an edit here and a 1.13 waits until someone has tried it. npm says which
@@ -524,18 +547,22 @@ unset COMPOSER_AUTH
 echo "##[phase] tools"
 export PATH="$HOME/.tools/node_modules/.bin:$PATH"
 OCR_SERIES=1.12
-# `ocr --version` prints "open-code-review v1.12.12 (182898c) linux/amd64".
-OCR_INSTALLED=$(ocr --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-OCR_LATEST=$(npm view "@alibaba-group/open-code-review@~${OCR_SERIES}" version --json 2>/dev/null \
-  | jq -r 'if type == "array" then .[-1] else . end' 2>/dev/null) || OCR_LATEST=""
-case "$OCR_LATEST" in "$OCR_SERIES".*) ;; *) OCR_LATEST="" ;; esac
+if [ "${REVIEW_OCR:-true}" = "false" ] && [ "${REVIEW_AGENT:-claude-code}" != "ocr" ]; then
+  echo "  OpenCodeReview: turned off for this review (REVIEW_OCR=false)."
+else
+  # `ocr --version` prints "open-code-review v1.12.12 (182898c) linux/amd64".
+  OCR_INSTALLED=$(ocr --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  OCR_LATEST=$(npm view "@alibaba-group/open-code-review@~${OCR_SERIES}" version --json 2>/dev/null \
+    | jq -r 'if type == "array" then .[-1] else . end' 2>/dev/null) || OCR_LATEST=""
+  case "$OCR_LATEST" in "$OCR_SERIES".*) ;; *) OCR_LATEST="" ;; esac
 
-if [ -n "$OCR_LATEST" ] && [ "$OCR_INSTALLED" != "$OCR_LATEST" ]; then
-  npm install --prefix "$HOME/.tools" "@alibaba-group/open-code-review@${OCR_LATEST}"
-elif [ -z "$OCR_INSTALLED" ]; then
-  npm install --prefix "$HOME/.tools" "@alibaba-group/open-code-review@~${OCR_SERIES}"
+  if [ -n "$OCR_LATEST" ] && [ "$OCR_INSTALLED" != "$OCR_LATEST" ]; then
+    npm install --prefix "$HOME/.tools" "@alibaba-group/open-code-review@${OCR_LATEST}"
+  elif [ -z "$OCR_INSTALLED" ]; then
+    npm install --prefix "$HOME/.tools" "@alibaba-group/open-code-review@~${OCR_SERIES}"
+  fi
+  echo "  OpenCodeReview: $(ocr --version 2>/dev/null | head -1 || echo "not installed")"
 fi
-echo "  OpenCodeReview: $(ocr --version 2>/dev/null | head -1 || echo "not installed")"
 
 # ripgrep, which the agents reach for first: Codex searches with rg, and without it
 # every search starts with "rg: command not found". Never fatal - the agents fall

@@ -24,6 +24,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Component;
+use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Support\Icons\Heroicon;
@@ -174,8 +175,21 @@ class ReviewRunResource extends Resource
             Select::make('effort')
                 ->options(collect(ReviewEffort::cases())->mapWithKeys(fn (ReviewEffort $effort): array => [$effort->value => $effort->text()]))
                 ->placeholder('The reviewer\'s own'),
-            Toggle::make('verify')
-                ->label('Check each blocking finding a second time'),
+            Toggle::make('plain')
+                ->label('Plain review: the reviewer alone')
+                ->live()
+                ->visible(fn (Get $get): bool => $get('runner') !== DiffRunner::NAME)
+                ->helperText('Claude Code or Codex asked for a review with the review\'s own instructions, and nothing else: no OpenCodeReview, no scan, no floor guard, no extra passes and no second check. To see what those add.'),
+            Fieldset::make('Parts of the review')
+                ->columns(2)
+                ->visible(fn (Get $get): bool => $get('runner') !== DiffRunner::NAME && ! $get('plain'))
+                ->schema(array_map(
+                    fn (string $field): Select => Select::make("modules.{$field}")
+                        ->label(ucfirst(ReviewSettings::MODULE_LABELS[$field]))
+                        ->options(['true' => 'On', 'false' => 'Off'])
+                        ->placeholder('As the repository has it'),
+                    array_keys(ReviewSettings::MODULES),
+                )),
         ];
     }
 
@@ -218,10 +232,23 @@ class ReviewRunResource extends Resource
 
     /**
      * @param  array<string, mixed>  $data  what the trial fields gave
-     * @return array{runner: string|null, provider: string|null, model: string|null, effort: string|null, verify: bool, ignore_existing: bool}
+     * @return array{runner: string|null, provider: string|null, model: string|null, effort: string|null, verify: bool|null, ignore_existing: bool, modules: array<string, bool>|null}
      */
     public static function trialOptions(array $data): array
     {
+        $plain = (bool) ($data['plain'] ?? false);
+
+        // Only what was set: a part left alone runs as the repository has it.
+        $modules = $plain
+            ? array_fill_keys(array_keys(ReviewSettings::MODULES), false)
+            : array_map(
+                fn (mixed $value): bool => $value === 'true',
+                array_filter(
+                    array_intersect_key((array) ($data['modules'] ?? []), ReviewSettings::MODULES),
+                    fn (mixed $value): bool => in_array($value, ['true', 'false'], true),
+                ),
+            );
+
         return [
             'runner' => filled($data['runner'] ?? null) ? (string) $data['runner'] : null,
             'provider' => filled($data['provider'] ?? null) ? (string) $data['provider'] : null,
@@ -232,8 +259,10 @@ class ReviewRunResource extends Resource
                 default => (string) $data['model'],
             },
             'effort' => filled($data['effort'] ?? null) ? (string) $data['effort'] : null,
-            'verify' => (bool) ($data['verify'] ?? false),
+            // The second check is one of the parts, and kept apart for the run's scripts.
+            'verify' => $modules['verify'] ?? null,
             'ignore_existing' => (bool) ($data['ignore_existing'] ?? true),
+            'modules' => $modules === [] ? null : $modules,
         ];
     }
 

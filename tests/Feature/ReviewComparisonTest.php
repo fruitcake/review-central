@@ -515,3 +515,33 @@ it('lets go of a place whose trial never started, and reads a job queued before 
     $old = (new ReflectionClass(AnalyzeReviewComparison::class))->newInstanceWithoutConstructor();
     expect($old->labels)->toBeNull();
 });
+
+it('tries a plain review with every part off, a setup with only the parts it names and the rest as the repository has them, and shows what each ran with', function () {
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    $this->mock(ReviewTrial::class)->shouldReceive('begin')
+        ->twice()
+        ->andReturn(['repository' => $this->repository, 'build' => 51], ['repository' => $this->repository, 'build' => 52]);
+
+    livewire(ViewReviewRun::class, ['record' => $this->base->uuid])
+        ->callAction('compare', [
+            'ignore_existing' => true,
+            'rows' => [
+                ['provider' => 'claude-code', 'plain' => true, 'modules' => ['ocr' => 'true', 'verify' => 'true']],
+                ['provider' => 'claude-code', 'modules' => ['ocr' => 'false', 'scan' => null]],
+            ],
+        ])
+        ->assertHasNoActionErrors();
+
+    $comparison = ReviewComparison::query()->sole();
+
+    expect($comparison->rows[0])->toMatchArray(['verify' => false, 'modules' => ['ocr' => false, 'scan' => false, 'floor_guard' => false, 'extra_passes' => false, 'verify' => false]])
+        // Left alone, a part runs as the repository has it, the second check too.
+        ->and($comparison->rows[1]['modules'])->toBe(['ocr' => false])
+        ->and($comparison->rows[1]['verify'])->toBeNull();
+
+    ($this->run)(51, [], attributes: ['modules' => ['ocr' => false, 'scan' => false, 'floor_guard' => false, 'extra_passes' => false, 'verify' => false]]);
+
+    livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])
+        ->assertSee('plain: the reviewer alone')
+        ->assertSee('claude-code · without OCR');
+});

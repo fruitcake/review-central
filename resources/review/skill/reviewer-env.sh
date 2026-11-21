@@ -71,3 +71,20 @@ reviewer_drop_project_settings() {
     fi
   done
 }
+
+# The parts of the review the team turned off (REVIEW_OCR, REVIEW_FLOOR_GUARD,
+# REVIEW_SCAN), said to the reviewer after the instructions. The instructions say it
+# too, through settings in review-context.json, but a platform's saved copy of them
+# may be from before those settings, and OCR is in the image whatever is set. A
+# runner appends what this prints to its prompt; nothing is printed when all are on.
+reviewer_module_notes() {
+  _off=""
+  [ "${REVIEW_OCR:-true}" = "false" ] && _off="$_off
+- OpenCodeReview is not part of this review. Do not run \`ocr\` in any form. Review every file the range changed, against the repository's rules and the stack guides, with each file's diff from \`git diff\`."
+  [ "${REVIEW_FLOOR_GUARD:-true}" = "false" ] && _off="$_off
+- The floor guard is not part of this review. Do not run floor-guard.sh; look for loosened checks in the diff as you read it."
+  [ "${REVIEW_SCAN:-true}" = "false" ] && _off="$_off
+- The scan did not run, by the team's choice: there is no review-scan.md to read."
+  [ -n "$_off" ] || return 0
+  printf '\nTHIS RUN:\n\nThe team turned these parts of the review off. This holds over anything the instructions above say about them, and their absence is not mentioned in the summary.%s\n' "$_off"
+}

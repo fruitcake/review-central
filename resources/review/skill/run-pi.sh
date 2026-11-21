@@ -209,7 +209,7 @@ reviewer_env_report "$OWN_KEY|PI_[A-Z0-9_]+"
       --no-prompt-templates \
       --no-themes \
       --tools read,grep,find,ls,bash,submit_review \
-      -- "$(cat "$HERE/pi-prompt.md")" \
+      -- "$(cat "$HERE/pi-prompt.md"; reviewer_module_notes)" \
       < /dev/null
   echo $? > .pi-exit
 } | show

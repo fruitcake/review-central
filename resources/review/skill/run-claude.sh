@@ -99,6 +99,7 @@ PROMPT=$(mktemp)
   else
     cat "$HERE/SKILL.md"
   fi
+  reviewer_module_notes
   printf '\n'
   cat "$HERE/structured-output.md"
   # The pipeline config refuses subagents (prepare-review.sh). Said up front, so the
