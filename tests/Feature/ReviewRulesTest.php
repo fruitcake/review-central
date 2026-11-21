@@ -95,17 +95,22 @@ it('lets an admin make a rule of a finding anyone in the team judged not to be o
         ->toBe(['kind' => ReviewRuleKind::Convention, 'repository_id' => $this->repository->id, 'source' => "{$run->uuid}:F1"]);
 });
 
-it('names each repository so that two of the same name cannot be mixed up, and keeps a removed one\'s rules its own', function () {
+it('names each repository so that two of the same name cannot be mixed up, in the form and the list, and keeps a removed one\'s rules its own', function () {
     $partner = Repository::factory()->create(['tenant_id' => $this->tenant->id, 'workspace' => 'partner', 'slug' => 'shop']);
     $twin = Repository::factory()->create(['connection_id' => Connection::factory()->create(['tenant_id' => $this->tenant->id, 'name' => 'Partner GitHub'])->id, 'workspace' => 'partner', 'slug' => 'shop']);
-    Repository::factory()->create(['connection_id' => $this->repository->connection_id, 'workspace' => 'partner', 'slug' => 'shop']);
+    $sameName = Repository::factory()->create(['connection_id' => $this->repository->connection_id, 'workspace' => 'partner', 'slug' => 'shop']);
+    // Two connections named alike: then only the connection's number tells them apart.
+    $alike = Repository::factory()->create(['connection_id' => Connection::factory()->create(['tenant_id' => $this->tenant->id, 'name' => 'GitHub'])->id, 'workspace' => 'acme', 'slug' => 'shop']);
+    $this->repository->integration->update(['name' => 'GitHub']);
     $rule = ReviewRule::factory()->create(['tenant_id' => $this->tenant->id, 'repository_id' => $partner->id, 'title' => 'Partner rule']);
     $partner->delete();
     ($this->as)($this->admin);
 
     $options = ReviewRuleResource::repositoryOptions();
 
-    expect($options[$this->repository->id])->toBe('acme/shop')
+    expect($options[$this->repository->id])->toBe("acme/shop (GitHub #{$this->repository->connection_id})")
+        ->and($options[$alike->id])->toBe("acme/shop (GitHub #{$alike->connection_id})")
+        ->and($options[$sameName->id])->toBe('partner/shop (GitHub)')
         // The same workspace and name on another connection says which.
         ->and($options[$twin->id])->toBe('partner/shop (Partner GitHub)')
         ->and($options)->not->toHaveKey($partner->id);
@@ -113,4 +118,9 @@ it('names each repository so that two of the same name cannot be mixed up, and k
     livewire(ManageReviewRules::class)
         ->assertCanSeeTableRecords([$rule])
         ->assertSee('partner/shop (removed)');
+
+    ReviewRule::factory()->create(['tenant_id' => $this->tenant->id, 'repository_id' => $alike->id, 'title' => 'On the second GitHub']);
+
+    // The list names the repository as the form does.
+    livewire(ManageReviewRules::class)->assertSee("acme/shop (GitHub #{$alike->connection_id})");
 });

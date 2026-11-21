@@ -30,6 +30,7 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -139,7 +140,7 @@ class ReviewRuleResource extends Resource
                     ->color(fn (ReviewRuleKind $state): string => $state === ReviewRuleKind::Check ? 'primary' : 'gray'),
                 TextColumn::make('repository_id')
                     ->label('For')
-                    ->formatStateUsing(fn (ReviewRule $record): string => $record->repository === null ? 'Every repository' : $record->repository->fullName().($record->repository->trashed() ? ' (removed)' : ''))
+                    ->formatStateUsing(fn (ReviewRule $record): string => self::repositoryLabel($record))
                     ->placeholder('Every repository'),
                 TextColumn::make('paths')
                     ->label('Only in')
@@ -175,19 +176,50 @@ class ReviewRuleResource extends Resource
 
     /**
      * The team's repositories by id, each named so that two cannot be mistaken for
-     * one another: by workspace and name, and by connection as well where two
-     * connections have one of the same name.
+     * one another: by workspace and name; where two connections have one of the
+     * same name, by connection as well; and where those connections are named alike
+     * too, by the connection's number. Removed ones are left out.
      *
      * @return array<int, string>
      */
     public static function repositoryOptions(): array
     {
-        $repositories = CurrentTenant::get()->repositories()->with('integration')->orderBy('workspace')->orderBy('slug')->get();
-        $names = $repositories->countBy(fn (Repository $repository): string => $repository->fullName());
+        return self::labels(CurrentTenant::get()->repositories()->with('integration')->orderBy('workspace')->orderBy('slug')->get());
+    }
 
-        return $repositories->mapWithKeys(fn (Repository $repository): array => [
-            $repository->getKey() => $repository->fullName().($names[$repository->fullName()] > 1 ? ' ('.($repository->integration->name ?? 'connection '.$repository->connection_id).')' : ''),
-        ])->all();
+    /**
+     * The label of a rule's repository in the list: as the options name it, or by
+     * its full name and "removed" once it was removed.
+     */
+    public static function repositoryLabel(ReviewRule $rule): string
+    {
+        if ($rule->repository === null) {
+            return 'Every repository';
+        }
+
+        return self::repositoryOptions()[$rule->repository_id] ?? $rule->repository->fullName().' (removed)';
+    }
+
+    /**
+     * @param  Collection<int, Repository>  $repositories
+     * @return array<int, string>
+     */
+    protected static function labels(Collection $repositories): array
+    {
+        $byName = $repositories->groupBy(fn (Repository $repository): string => $repository->fullName());
+
+        return $repositories->mapWithKeys(function (Repository $repository) use ($byName): array {
+            $same = $byName[$repository->fullName()];
+
+            if ($same->count() === 1) {
+                return [$repository->getKey() => $repository->fullName()];
+            }
+
+            $connection = $repository->integration->name ?? 'a connection';
+            $alike = $same->filter(fn (Repository $other): bool => ($other->integration->name ?? 'a connection') === $connection)->count() > 1;
+
+            return [$repository->getKey() => $repository->fullName().' ('.$connection.($alike ? " #{$repository->connection_id}" : '').')'];
+        })->all();
     }
 
     public static function getPages(): array
