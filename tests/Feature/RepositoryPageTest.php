@@ -1,12 +1,14 @@
 <?php
 
 use App\Filament\App\Resources\Repositories\Pages\ViewRepository;
+use App\Filament\RunPresenter;
 use App\Models\OpenFinding;
 use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\ReviewRule;
 use App\Models\ReviewRun;
 use App\Models\User;
+use App\Services\RepositoryOverview;
 use Filament\Facades\Filament;
 
 use function Pest\Livewire\livewire;
@@ -61,4 +63,20 @@ it('opens from the list of repositories, and not for another team\'s', function 
 
     $this->get("/app/{$tenant}/repositories/{$this->repository->id}")->assertOk()->assertSee('shop');
     $this->get("/app/{$tenant}/repositories/{$elsewhere->id}")->assertNotFound();
+});
+
+it('gives the median duration of an even number of reviews as the middle of the two, a review of no time included', function () {
+    ($this->run)($this->repository, 12, 'One', ['duration_seconds' => 60]);
+    ($this->run)($this->repository, 13, 'Two', ['duration_seconds' => 540]);
+
+    $figures = collect(app(RepositoryOverview::class)->forRepository($this->repository, 30)['figures'])->keyBy('label');
+
+    expect($figures['Median duration']['value'])->toBe(RunPresenter::duration(300));
+
+    ($this->run)($this->repository, 14, 'Three', ['duration_seconds' => 0]);
+    ($this->run)($this->repository, 15, 'Four', ['duration_seconds' => 0]);
+
+    $reviewers = app(RepositoryOverview::class)->forRepository($this->repository, 30)['reviewers'];
+
+    expect($reviewers[0]['median'])->toBe(RunPresenter::duration(30));
 });

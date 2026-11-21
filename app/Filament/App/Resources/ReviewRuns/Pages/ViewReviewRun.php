@@ -14,6 +14,7 @@ use App\Filament\Concerns\RefreshesOnBroadcast;
 use App\Filament\CurrentTenant;
 use App\Filament\RunPresenter;
 use App\Filament\TenantRole;
+use App\Models\FindingVerdict;
 use App\Models\ReviewClassification;
 use App\Models\ReviewComparison;
 use App\Models\ReviewQuestion;
@@ -317,6 +318,13 @@ class ViewReviewRun extends ViewRecord
                 ->limit(20)
                 ->get(),
             'verdicts' => auth()->user() instanceof User ? app(FindingFeedback::class)->of($run, auth()->user()) : [],
+            // Anyone in the team judging a finding not to be one is enough to make a rule of it.
+            'dismissed' => FindingVerdict::query()
+                ->where('review_run_id', $run->getKey())
+                ->whereIn('verdict', [FindingVerdictKind::NotAProblem, FindingVerdictKind::Wrong])
+                ->distinct()
+                ->pluck('finding_id')
+                ->all(),
             'ownScore' => $run->ratings()->where('user_id', auth()->id())->value('score'),
             // What a container review printed so far; null when there is no log of it.
             'log' => app(RunLog::class)->tail($run),

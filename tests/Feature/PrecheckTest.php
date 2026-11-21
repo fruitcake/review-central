@@ -311,3 +311,28 @@ it('gives the reviewer the team\'s rules for this repository, its own and those 
         ->not->toContain('Turned off')
         ->not->toContain('Another team');
 });
+
+it('keeps a team\'s own instruction called review-rules next to the rules, and sends the rules with the shipped instructions when none are kept', function () {
+    ($this->pullRequest)();
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    ReviewRule::factory()->create(['tenant_id' => $this->repository->tenant_id, 'title' => 'Every controller action checks the policy']);
+    ReviewInstruction::query()->create(['tenant_id' => $this->repository->tenant_id, 'key' => 'review-rules', 'title' => 'Our own', 'position' => 50, 'body' => 'Our own file.']);
+
+    ($this->precheck)();
+
+    expect(array_column(File::json("{$this->work}/review-context.json")['instructions']['files'], 'file'))->toBe(['method.md', 'stack-laravel.md', 'review-rules.md', 'review-rules-2.md'])
+        ->and(File::get("{$this->work}/.review-instructions/review-rules.md"))->toBe('Our own file.')
+        ->and(File::get("{$this->work}/.review-instructions/review-rules-2.md"))->toContain('Every controller action checks the policy');
+
+    // Nothing kept here: the shipped method and stack guide, with the rules after them.
+    ReviewInstruction::query()->delete();
+    ReviewRun::query()->delete();
+    ReviewLock::release($this->repository, 'feature/export', '41');
+
+    ($this->precheck)();
+    $context = File::json("{$this->work}/review-context.json");
+
+    expect($context['instructions']['source'])->toBe('server')
+        ->and(array_column($context['instructions']['files'], 'file'))->toBe(['method.md', 'stack-laravel.md', 'review-rules.md'])
+        ->and(File::get("{$this->work}/.review-instructions/method.md"))->toBe(File::get(resource_path('review/skill/references/method.md')));
+});

@@ -266,14 +266,17 @@ class ReviewOpening
             return null;
         }
 
-        $files = ReviewInstructions::files($repository->tenant, array_values($input['stack'] ?? []));
+        $stacks = array_values($input['stack'] ?? []);
+        $files = ReviewInstructions::files($repository->tenant, $stacks);
+        $rules = ReviewRules::file($repository, $files === null ? [] : array_column($files, 'key'));
 
-        // The team's rules come last, and an instruction of their name is never them.
-        if ($files !== null) {
-            $files = array_values(array_filter($files, fn (array $file): bool => $file['key'] !== ReviewRules::KEY));
-            $rules = ReviewRules::file($repository);
+        // The team's rules come last. Without instructions kept here the review would
+        // read the copy the skill ships, which cannot carry them, so they go with that
+        // copy from here.
+        if ($rules !== null) {
+            $files = $files ?? ReviewInstructions::bundled($stacks);
 
-            if ($rules !== null) {
+            if ($files !== null) {
                 $files[] = $rules;
             }
         }

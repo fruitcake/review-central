@@ -74,7 +74,7 @@ class RepositoryOverview extends TenantOverview
     {
         $finished = $runs->where('status', ReviewRun::STATUS_FINISHED);
         $blocked = $finished->filter(fn (ReviewRun $run): bool => strtoupper((string) $run->result) === 'FAILED')->count();
-        $durations = $finished->pluck('duration_seconds')->filter()->sort()->values();
+        $durations = $finished->pluck('duration_seconds')->reject(fn (?int $seconds): bool => $seconds === null)->sort()->values();
         $acceptance = $this->acceptance($verdicts);
         $cost = $this->currency->convert((float) $runs->sum(fn (ReviewRun $run): float => (float) $run->cost), $repository->tenant);
 
@@ -97,7 +97,7 @@ class RepositoryOverview extends TenantOverview
             ],
             [
                 'label' => 'Median duration', 'tone' => 'neutral', 'bar' => null,
-                'value' => $durations->isEmpty() ? '—' : (string) RunPresenter::duration((int) $durations[intdiv($durations->count(), 2)]),
+                'value' => $durations->isEmpty() ? '—' : (string) RunPresenter::duration((int) round((float) $durations->median())),
                 'note' => $durations->isEmpty() ? 'No finished reviews yet' : 'p90 '.RunPresenter::duration((int) $durations[(int) ceil($durations->count() * 0.9) - 1]),
             ],
             [
@@ -123,14 +123,14 @@ class RepositoryOverview extends TenantOverview
     {
         return $runs->whereNotNull('agent')->groupBy('agent')->map(function (Collection $own, string $agent) use ($verdicts): array {
             $acceptance = $this->acceptance(array_intersect_key($verdicts, $own->keyBy('id')->all()));
-            $durations = $own->where('status', ReviewRun::STATUS_FINISHED)->pluck('duration_seconds')->filter()->sort()->values();
+            $durations = $own->where('status', ReviewRun::STATUS_FINISHED)->pluck('duration_seconds')->reject(fn (?int $seconds): bool => $seconds === null);
 
             return [
                 'name' => ReviewProvider::tryFrom($agent)?->text() ?? ($agent === DiffReview::AGENT ? 'The diff alone' : $agent),
                 'reviews' => $own->count(),
                 'accepted' => $acceptance['percent'] === null ? '—' : "{$acceptance['percent']}%",
                 'cost' => (float) $own->sum(fn (ReviewRun $run): float => (float) $run->cost),
-                'median' => $durations->isEmpty() ? null : RunPresenter::duration((int) $durations[intdiv($durations->count(), 2)]),
+                'median' => $durations->isEmpty() ? null : RunPresenter::duration((int) round((float) $durations->median())),
             ];
         })->sortByDesc('reviews')->values()->all();
     }

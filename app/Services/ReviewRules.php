@@ -36,11 +36,14 @@ class ReviewRules
     }
 
     /**
-     * The rules as an instruction file, or null when the repository has none.
+     * The rules as an instruction file, or null when the repository has none. Under
+     * a key none of the other instructions has: a team may have a file of its own
+     * called review-rules, and that one stays.
      *
+     * @param  array<int, string>  $taken  the keys of the instructions it goes with
      * @return array{key: string, title: string, stack: null, file: string, body: string}|null
      */
-    public static function file(Repository $repository): ?array
+    public static function file(Repository $repository, array $taken = []): ?array
     {
         $rules = self::for($repository);
 
@@ -48,11 +51,17 @@ class ReviewRules
             return null;
         }
 
+        $key = self::KEY;
+
+        for ($number = 2; in_array($key, $taken, true); $number++) {
+            $key = self::KEY."-{$number}";
+        }
+
         return [
-            'key' => self::KEY,
+            'key' => $key,
             'title' => 'The team\'s rules',
             'stack' => null,
-            'file' => self::KEY.'.md',
+            'file' => "{$key}.md",
             'body' => self::markdown($rules),
         ];
     }

@@ -133,6 +133,29 @@ class ReviewInstructions
     }
 
     /**
+     * The files that ship with the skill for these stacks, as the skill's own
+     * instructions.sh picks them when the server sends none: the method, then a
+     * guide for each stack there is one for. Null when the method does not ship.
+     *
+     * @param  array<int, string>  $stacks
+     * @return array<int, array{key: string, title: string, stack: string|null, file: string, body: string}>|null
+     */
+    public static function bundled(array $stacks): ?array
+    {
+        $files = [];
+
+        foreach ([self::METHOD => null, ...array_combine(array_map(fn (string $stack): string => "stack-{$stack}", $stacks), $stacks)] as $key => $stack) {
+            $body = self::shipped((string) $key);
+
+            if ($body !== null) {
+                $files[] = ['key' => (string) $key, 'title' => self::title($body) ?? Str::headline((string) $key), 'stack' => $stack, 'file' => "{$key}.md", 'body' => $body];
+            }
+        }
+
+        return in_array(self::METHOD, array_column($files, 'key'), true) ? $files : null;
+    }
+
+    /**
      * Starts the platform's own copy of a file of the structure from the one
      * that ships, for an administrator to edit.
      */

@@ -8,6 +8,7 @@ use App\Enums\ReviewRuleKind;
 use App\Filament\App\Resources\ReviewRules\Pages\ManageReviewRules;
 use App\Filament\CurrentTenant;
 use App\Filament\TenantRole;
+use App\Models\Repository;
 use App\Models\ReviewRule;
 use BackedEnum;
 use Filament\Actions\DeleteAction;
@@ -104,7 +105,7 @@ class ReviewRuleResource extends Resource
                 ->helperText('Optional. What the rule protects, and the cases it does and does not cover.'),
             Select::make('repository_id')
                 ->label('For')
-                ->options(fn (): array => CurrentTenant::get()->repositories()->orderBy('slug')->pluck('slug', 'id')->all())
+                ->options(fn (): array => self::repositoryOptions())
                 ->placeholder('Every repository'),
             TagsInput::make('paths')
                 ->label('Only in')
@@ -136,8 +137,9 @@ class ReviewRuleResource extends Resource
                     ->badge()
                     ->formatStateUsing(fn (ReviewRuleKind $state): string => $state->text())
                     ->color(fn (ReviewRuleKind $state): string => $state === ReviewRuleKind::Check ? 'primary' : 'gray'),
-                TextColumn::make('repository.slug')
+                TextColumn::make('repository_id')
                     ->label('For')
+                    ->formatStateUsing(fn (ReviewRule $record): string => $record->repository === null ? 'Every repository' : $record->repository->fullName().($record->repository->trashed() ? ' (removed)' : ''))
                     ->placeholder('Every repository'),
                 TextColumn::make('paths')
                     ->label('Only in')
@@ -154,7 +156,7 @@ class ReviewRuleResource extends Resource
             ->filters([
                 SelectFilter::make('repository_id')
                     ->label('For')
-                    ->options(fn (): array => ['all' => 'Every repository'] + CurrentTenant::get()->repositories()->orderBy('slug')->pluck('slug', 'id')->all())
+                    ->options(fn (): array => ['all' => 'Every repository'] + self::repositoryOptions())
                     // A repository's rules are its own and those for every repository: what its review reads.
                     ->query(fn (Builder $query, array $data): Builder => match ($data['value'] ?? null) {
                         null, '' => $query,
@@ -169,6 +171,23 @@ class ReviewRuleResource extends Resource
             ])
             ->emptyStateHeading('No rules yet')
             ->emptyStateDescription('A rule says what the reviewer checks in your code, or what is not a defect here. Mark a finding "Not a problem" to make one from it.');
+    }
+
+    /**
+     * The team's repositories by id, each named so that two cannot be mistaken for
+     * one another: by workspace and name, and by connection as well where two
+     * connections have one of the same name.
+     *
+     * @return array<int, string>
+     */
+    public static function repositoryOptions(): array
+    {
+        $repositories = CurrentTenant::get()->repositories()->with('integration')->orderBy('workspace')->orderBy('slug')->get();
+        $names = $repositories->countBy(fn (Repository $repository): string => $repository->fullName());
+
+        return $repositories->mapWithKeys(fn (Repository $repository): array => [
+            $repository->getKey() => $repository->fullName().($names[$repository->fullName()] > 1 ? ' ('.($repository->integration->name ?? 'connection '.$repository->connection_id).')' : ''),
+        ])->all();
     }
 
     public static function getPages(): array

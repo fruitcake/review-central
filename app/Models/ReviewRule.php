@@ -66,7 +66,8 @@ class ReviewRule extends Model
      */
     public function repository(): BelongsTo
     {
-        return $this->belongsTo(Repository::class);
+        // Also a removed one: its rules stay its own, and come back with it.
+        return $this->belongsTo(Repository::class)->withTrashed();
     }
 
     /**
