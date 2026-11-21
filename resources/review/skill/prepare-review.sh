@@ -500,7 +500,9 @@ else
 fi
 
 # A part of the review the team turned off is not left to the instructions alone:
-# OCR is in the image whatever is set, so Claude is not allowed to run it either.
+# OCR is in the image whatever is set, so Claude is refused it. On the deny list,
+# not only off the allow list: in auto mode a call no rule covers goes to the
+# classifier, which could still let it through.
 if [ "$IS_CLAUDE" = "true" ] && [ -f "${REVIEW_AGENT_CONFIG:-}" ] \
   && { [ "${REVIEW_OCR:-true}" = "false" ] || [ "${REVIEW_FLOOR_GUARD:-true}" = "false" ]; }; then
   if jq --argjson ocr "$([ "${REVIEW_OCR:-true}" = "false" ] && echo true || echo false)" \
@@ -508,6 +510,10 @@ if [ "$IS_CLAUDE" = "true" ] && [ -f "${REVIEW_AGENT_CONFIG:-}" ] \
        .permissions.allow |= map(select(
          ($ocr and . == "Bash(ocr *)" | not) and ($guard and (startswith("Bash(sh .review/skill/floor-guard.sh") ) | not)
        ))
+       | .permissions.deny = ((.permissions.deny // [])
+           + (if $ocr then ["Bash(ocr)", "Bash(ocr *)"] else [] end)
+           + (if $guard then ["Bash(sh .review/skill/floor-guard.sh)", "Bash(sh .review/skill/floor-guard.sh *)"] else [] end)
+           | unique)
      ' "$REVIEW_AGENT_CONFIG" > "$REVIEW_AGENT_CONFIG.tmp"; then
     mv "$REVIEW_AGENT_CONFIG.tmp" "$REVIEW_AGENT_CONFIG"
     echo "Claude may not run what is turned off: OCR=${REVIEW_OCR:-true} floor guard=${REVIEW_FLOOR_GUARD:-true}."
