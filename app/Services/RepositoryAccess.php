@@ -43,11 +43,12 @@ class RepositoryAccess
     /**
      * The repository a name points at: workspace/slug, a git remote, or the address
      * of the repository or of one of its pull requests on the host. A name two of
-     * the user's tenants both have needs the tenant, by its slug.
+     * the user's tenants both have needs the tenant, by its slug; one that two
+     * connections on the same host both have needs the connection, by its number.
      *
      * @throws RepositoryNotFound
      */
-    public function find(User $user, string $name, ?string $tenant = null): Repository
+    public function find(User $user, string $name, ?string $tenant = null, ?int $connection = null): Repository
     {
         $fullName = self::fullName($name);
 
@@ -66,6 +67,7 @@ class RepositoryAccess
             // A remote or an address names its host, which tells a GitHub repository
             // from a Bitbucket one of the same name.
             ->when($drivers !== null, fn (Builder $query) => $query->whereHas('integration', fn (Builder $scope) => $scope->whereIn('driver', $drivers)))
+            ->when($connection !== null, fn (Builder $query) => $query->where('connection_id', $connection))
             ->get();
 
         if ($found->isEmpty()) {
@@ -75,7 +77,7 @@ class RepositoryAccess
         if ($found->count() > 1) {
             throw new RepositoryNotFound($found->pluck('tenant_id')->unique()->count() > 1
                 ? "{$workspace}/{$slug} is in more than one of your tenants (".$found->map(fn (Repository $repository): string => $repository->tenant->slug)->unique()->implode(', ').'): name the tenant too.'
-                : "{$workspace}/{$slug} is on more than one host (".$found->map(fn (Repository $repository): string => $repository->integration->name)->implode(', ').'): give its git remote or its address, which names the host.');
+                : "{$workspace}/{$slug} is in more than one connection (".$found->map(fn (Repository $repository): string => "#{$repository->connection_id} {$repository->integration->name}")->implode(', ').'): give its git remote, which names the host, or the connection by its number.');
         }
 
         return $found->first();
@@ -89,10 +91,10 @@ class RepositoryAccess
      *
      * @throws RepositoryNotFound
      */
-    public function scoped(User $user, ?string $repository = null, ?string $tenant = null): Builder
+    public function scoped(User $user, ?string $repository = null, ?string $tenant = null, ?int $connection = null): Builder
     {
         return filled($repository)
-            ? $this->repositories($user)->whereKey($this->find($user, (string) $repository, $tenant)->getKey())
+            ? $this->repositories($user)->whereKey($this->find($user, (string) $repository, $tenant, $connection)->getKey())
             : $this->repositories($user)->when(filled($tenant), fn (Builder $query) => $query->whereHas('tenant', fn (Builder $scope) => $scope->where('slug', $tenant)));
     }
 

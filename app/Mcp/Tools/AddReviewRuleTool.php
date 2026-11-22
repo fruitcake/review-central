@@ -32,6 +32,7 @@ class AddReviewRuleTool extends ReviewTool
         $validated = $request->validate([
             'repository' => ['required', 'string', 'max:500'],
             'tenant' => ['nullable', 'string', 'max:255'],
+            'connection' => ['nullable', 'integer', 'min:1'],
             'all_repositories' => ['nullable', 'boolean'],
             'kind' => ['required', Rule::enum(ReviewRuleKind::class)],
             'title' => ['required', 'string', 'max:255'],

@@ -18,6 +18,9 @@ use Illuminate\Support\Collection as SupportCollection;
  */
 class PullRequestOverview
 {
+    /** Open pull requests read at a time while a list is filled. */
+    public const CHUNK = 100;
+
     /** Who a list can be narrowed to. */
     public const MINE = 'mine';
 
@@ -30,35 +33,40 @@ class PullRequestOverview
      */
     public function list(User $user, Builder $repositories, ?string $only = null, int $limit = 50): array
     {
-        // Narrowed to the user, the list is read whole and filtered here: who someone
-        // is on a host is matched in PHP. Otherwise the database takes the limit.
-        $records = OpenPullRequest::query()
+        $rows = collect();
+
+        // Newest first, a chunk at a time, until the limit is reached: who someone is
+        // on a host is matched here, not in the database.
+        OpenPullRequest::query()
             ->with('repository.tenant')
             ->whereIn('repository_id', $repositories->select('id'))
             ->latest('updated_at')
-            ->when($only === null, fn (Builder $query) => $query->limit($limit))
-            ->get();
-        $attempts = $this->latestAttempts($records);
+            ->latest('id')
+            ->chunk(min(max($limit, 20), self::CHUNK), function (Collection $records) use ($user, $only, $limit, $rows): bool {
+                $attempts = $this->latestAttempts($records);
 
-        return $records
-            ->map(function (OpenPullRequest $record) use ($user, $attempts): array {
-                $run = $attempts->get("{$record->repository_id}:{$record->pull_request_id}");
-                $turn = PullRequestTurn::of($record, $run);
+                foreach ($records as $record) {
+                    $run = $attempts->get("{$record->repository_id}:{$record->pull_request_id}");
+                    $turn = PullRequestTurn::of($record, $run, lookUp: false);
+                    $row = ['record' => $record, 'turn' => $turn, 'mine' => $user->isOnHost($record->authorPerson()), 'my_turn' => $turn->isFor($user), 'run' => $run];
 
-                return [
-                    'record' => $record,
-                    'turn' => $turn,
-                    'mine' => $user->isOnHost($record->authorPerson()),
-                    'my_turn' => collect($turn->people)->contains(fn (array $person): bool => $user->isOnHost($person)),
-                    'run' => $run,
-                ];
-            })
-            ->filter(fn (array $row): bool => match ($only) {
-                self::MINE => $row['mine'],
-                self::MY_TURN => $row['my_turn'],
-                default => true,
-            })
-            ->take($limit)
+                    if (match ($only) {
+                        self::MINE => $row['mine'],
+                        self::MY_TURN => $row['my_turn'],
+                        default => true,
+                    }) {
+                        $rows->push($row);
+                    }
+
+                    if ($rows->count() >= $limit) {
+                        return false;
+                    }
+                }
+
+                return true;
+            });
+
+        return $rows
             ->map(fn (array $row): array => array_filter([
                 'repository' => $row['record']->repository->fullName(),
                 'tenant' => $row['record']->repository->tenant->slug,
@@ -102,8 +110,12 @@ class PullRequestOverview
 
         $runs = ReviewRun::query()
             ->select(['id', 'uuid', 'repository_id', 'pull_request_id', 'status', 'result', 'commit', 'findings', 'manual_review', 'custom', 'started_at'])
-            ->whereIn('repository_id', $records->pluck('repository_id')->unique())
-            ->whereIn('pull_request_id', $records->pluck('pull_request_id')->unique())
+            // These pull requests exactly, not every pairing of their repositories and numbers.
+            ->where(function (Builder $query) use ($records): void {
+                foreach ($records as $record) {
+                    $query->orWhere(fn (Builder $pair) => $pair->where('repository_id', $record->repository_id)->where('pull_request_id', $record->pull_request_id));
+                }
+            })
             ->whereNotIn('status', PullRequestFeedback::NO_ATTEMPT)
             ->where('custom', false)
             ->latest('started_at')
@@ -127,7 +139,7 @@ class PullRequestOverview
     public function repositories(Builder $repositories): array
     {
         return $repositories
-            ->with(['tenant', 'integration', 'latestReviewRun' => fn ($query) => $query->select(['review_runs.id', 'uuid', 'repository_id', 'pull_request_id', 'status', 'result', 'started_at'])])
+            ->with(['tenant', 'integration', 'latestReviewRun' => fn ($query) => $query->select(['review_runs.id', 'review_runs.uuid', 'review_runs.repository_id', 'review_runs.pull_request_id', 'review_runs.status', 'review_runs.result', 'review_runs.started_at'])])
             ->withCount('openPullRequests')
             ->orderBy('workspace')
             ->orderBy('slug')
@@ -139,6 +151,7 @@ class PullRequestOverview
                     'repository' => $repository->fullName(),
                     'tenant' => $repository->tenant->slug,
                     'host' => $repository->integration->name,
+                    'connection' => $repository->connection_id,
                     'reviews_enabled' => $repository->reviews_enabled,
                     'open_pull_requests' => $repository->open_pull_requests_count,
                     'last_review' => $last === null ? null : array_filter([

@@ -13,6 +13,7 @@ use App\Mcp\Tools\JudgeFindingTool;
 use App\Mcp\Tools\OpenFindingsTool;
 use App\Mcp\Tools\PullRequestFeedbackTool;
 use App\Mcp\Tools\PullRequestsTool;
+use App\Mcp\Tools\RepositoriesTool;
 use App\Mcp\Tools\RequestReviewTool;
 use App\Mcp\Tools\ReviewerAnswerTool;
 use App\Mcp\Tools\ReviewInstructionsTool;
@@ -219,7 +220,7 @@ it('tells a GitHub repository from a Bitbucket one of the same name by the remot
 
     AgentServer::actingAs($this->member)
         ->tool(ReviewRulesTool::class, ['repository' => 'acme/shop'])
-        ->assertHasErrors(['acme/shop is on more than one host (Bitbucket, GitHub)']);
+        ->assertHasErrors(["acme/shop is in more than one connection (#{$this->repository->connection_id} Bitbucket, #{$github->connection_id} GitHub)"]);
 
     ReviewRule::factory()->create(['tenant_id' => $this->tenant->id, 'repository_id' => $github->id, 'title' => 'Only on GitHub']);
 
@@ -229,6 +230,17 @@ it('tells a GitHub repository from a Bitbucket one of the same name by the remot
 
     AgentServer::actingAs($this->member)
         ->tool(ReviewRulesTool::class, ['repository' => 'https://bitbucket.org/acme/shop'])
+        ->assertStructuredContentCount(0, 'rules');
+
+    // Two connections on one host, such as a token and the GitHub App: the number tells them apart.
+    $app = Repository::factory()->for(Connection::factory()->state(['tenant_id' => $this->tenant->id, 'driver' => 'github-app', 'name' => 'GitHub App']), 'integration')->create(['tenant_id' => $this->tenant->id, 'slug' => 'shop']);
+
+    AgentServer::actingAs($this->member)
+        ->tool(ReviewRulesTool::class, ['repository' => 'git@github.com:acme/shop.git'])
+        ->assertHasErrors(['acme/shop is in more than one connection']);
+
+    AgentServer::actingAs($this->member)
+        ->tool(ReviewRulesTool::class, ['repository' => 'git@github.com:acme/shop.git', 'connection' => $app->connection_id])
         ->assertStructuredContentCount(0, 'rules');
 });
 
@@ -375,4 +387,21 @@ it('lists the pull requests waiting for the user', function () {
 
     UserServer::actingAs($this->member)->tool(PullRequestsTool::class)
         ->assertStructuredContentCount(2, 'pull_requests');
+
+    UserServer::actingAs($this->member)->tool(PullRequestsTool::class, ['limit' => 1])
+        ->assertStructuredContentCount(1, 'pull_requests');
+});
+
+it('lists the user\'s tenants and repositories, each with its open pull requests and last review', function () {
+    UserServer::actingAs($this->member)->tool(RepositoriesTool::class)
+        ->assertOk()
+        ->assertStructuredContentCount(1, 'tenants')
+        ->assertStructuredContentCount(1, 'repositories')
+        ->assertStructuredContentPaths([
+            'tenants.0.you_are_admin' => false,
+            'repositories.0.repository' => 'acme/shop',
+            'repositories.0.connection' => $this->repository->connection_id,
+            'repositories.0.open_pull_requests' => 1,
+            'repositories.0.last_review.id' => $this->run->uuid,
+        ]);
 });

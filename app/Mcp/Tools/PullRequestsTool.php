@@ -30,13 +30,14 @@ class PullRequestsTool extends ReviewTool
         $validated = $request->validate([
             'repository' => ['nullable', 'string', 'max:500'],
             'tenant' => ['nullable', 'string', 'max:255'],
+            'connection' => ['nullable', 'integer', 'min:1'],
             'only' => ['nullable', Rule::in([PullRequestOverview::MINE, PullRequestOverview::MY_TURN])],
             'limit' => ['nullable', 'integer', 'min:1', 'max:200'],
         ]);
 
         return $this->answer(function () use ($request, $validated, $access, $overview): array {
             $user = $this->user($request);
-            $repositories = $access->scoped($user, $validated['repository'] ?? null, $validated['tenant'] ?? null);
+            $repositories = $access->scoped($user, $validated['repository'] ?? null, $validated['tenant'] ?? null, $this->connection($request));
 
             return ['pull_requests' => $overview->list($user, $repositories, $validated['only'] ?? null, (int) ($validated['limit'] ?? 50))];
         });

@@ -480,7 +480,7 @@ class ReviewRequest
         $siblings = OpenPullRequest::query()->where('repository_id', $repository->getKey())->where('branch', $record->branch)->whereKeyNot($record->getKey())->pluck('pull_request_id');
 
         if ($siblings->isNotEmpty()) {
-            throw new ActionRefused("{$record->branch} has more than one open pull request (#{$record->pull_request_id} and #{$siblings->implode(', #')}), and a review started here could land on another than #{$record->pull_request_id}. Push, or comment /review on the pull request itself.");
+            throw new ActionRefused("{$record->branch} has more than one open pull request (#{$record->pull_request_id} and #{$siblings->implode(', #')}), and a review started here could land on another than #{$record->pull_request_id}. Push to start the review instead.");
         }
 
         if ($feedback->hasNothingNew($repository, $record)) {

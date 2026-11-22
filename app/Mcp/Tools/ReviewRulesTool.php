@@ -26,7 +26,7 @@ class ReviewRulesTool extends ReviewTool
 
     public function handle(Request $request, RepositoryAccess $access): Response|ResponseFactory
     {
-        $request->validate(['repository' => ['required', 'string', 'max:500'], 'tenant' => ['nullable', 'string', 'max:255']]);
+        $request->validate(['repository' => ['required', 'string', 'max:500'], 'tenant' => ['nullable', 'string', 'max:255'], 'connection' => ['nullable', 'integer', 'min:1']]);
 
         return $this->answer(function () use ($request, $access): array {
             $repository = $this->repository($request);

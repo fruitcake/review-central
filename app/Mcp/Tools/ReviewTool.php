@@ -37,7 +37,18 @@ abstract class ReviewTool extends Tool
      */
     protected function repository(Request $request): Repository
     {
-        return app(RepositoryAccess::class)->find($this->user($request), (string) $request->get('repository'), $request->get('tenant'));
+        return app(RepositoryAccess::class)->find($this->user($request), (string) $request->get('repository'), $request->get('tenant'), $this->connection($request));
+    }
+
+    /**
+     * The connection the request names, by its number, for a repository two
+     * connections on one host both have.
+     */
+    protected function connection(Request $request): ?int
+    {
+        $connection = $request->get('connection');
+
+        return is_numeric($connection) ? (int) $connection : null;
     }
 
     /**
@@ -69,6 +80,7 @@ abstract class ReviewTool extends Tool
         return [
             'repository' => $required ? $repository->required() : $repository,
             'tenant' => $schema->string()->description('A tenant\'s slug: narrows a list to that tenant, and is needed when a repository is in more than one of your tenants.'),
+            'connection' => $schema->integer()->description('The connection\'s number, only needed when two connections on the same host have the repository; `repositories` lists it.'),
         ];
     }
 
@@ -94,6 +106,7 @@ abstract class ReviewTool extends Tool
         return [
             'repository' => ['required', 'string', 'max:500'],
             'tenant' => ['nullable', 'string', 'max:255'],
+            'connection' => ['nullable', 'integer', 'min:1'],
             'pull_request_id' => ['nullable', 'integer', 'min:1', 'required_without:branch'],
             'branch' => ['nullable', 'string', 'max:255', 'required_without:pull_request_id'],
         ];

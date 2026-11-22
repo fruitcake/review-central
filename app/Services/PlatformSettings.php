@@ -9,6 +9,7 @@ use App\Filament\Themes;
 use App\Models\PlatformSetting;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\DB;
 use Laravel\Passport\Passport;
 use phpseclib4\Crypt\RSA;
 use RuntimeException;
@@ -293,11 +294,17 @@ class PlatformSettings
         $value = json_encode(Crypt::encryptString((string) json_encode(['private' => (string) $private, 'public' => (string) $private->getPublicKey()])));
 
         // Two servers making one at once keep the first that was saved. An unreadable
-        // pair is replaced only as it was read: once another server has replaced it,
-        // tokens may already be signed with that one.
+        // pair is replaced under a lock, and only while it still cannot be read: once
+        // another server has replaced it, tokens may already be signed with that one.
         $row === null
             ? PlatformSetting::query()->insertOrIgnore(['key' => self::OAUTH_KEYS, 'value' => $value, 'created_at' => now(), 'updated_at' => now()])
-            : PlatformSetting::query()->whereKey(self::OAUTH_KEYS)->where('updated_at', $row->getRawOriginal('updated_at'))->update(['value' => $value, 'updated_at' => now()]);
+            : DB::transaction(function () use ($value): void {
+                $locked = PlatformSetting::query()->lockForUpdate()->find(self::OAUTH_KEYS);
+
+                if ($locked !== null && self::decodeOAuthKeys($locked->value) === null) {
+                    PlatformSetting::query()->whereKey(self::OAUTH_KEYS)->update(['value' => $value, 'updated_at' => now()]);
+                }
+            });
 
         Cache::forget(self::CACHE);
         $this->values = null;
