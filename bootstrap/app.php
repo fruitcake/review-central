@@ -14,7 +14,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // A guest on a page outside the panels, such as the consent screen of an MCP
+        // client, signs in at the panel's own page and comes back.
+        $middleware->redirectGuestsTo(fn (): string => route('filament.app.auth.login'));
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

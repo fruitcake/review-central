@@ -77,6 +77,25 @@ class ReviewStack
     }
 
     /**
+     * The stacks a repository is set to, or else those its last review found by
+     * itself: what to read the guides for outside a review.
+     *
+     * @return list<string>
+     */
+    public static function forRepository(Repository $repository): array
+    {
+        $stacks = self::resolve($repository);
+
+        if ($stacks !== []) {
+            return $stacks;
+        }
+
+        $last = $repository->reviewRuns()->whereNotNull('context')->latest('started_at')->first(['context']);
+
+        return array_values(array_filter((array) ($last?->context['stack'] ?? []), is_string(...)));
+    }
+
+    /**
      * The stacks a repository's composer.json names, by the rules of the skill's
      * detect-stack.sh: a package anywhere in the file, or the type of the package
      * itself. What only the tree would show, such as a theme's parent, is left to

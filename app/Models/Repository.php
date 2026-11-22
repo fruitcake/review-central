@@ -111,6 +111,24 @@ class Repository extends Model
         return $this->hasMany(ReviewRule::class);
     }
 
+    /**
+     * @return HasMany<OpenPullRequest, $this>
+     */
+    public function openPullRequests(): HasMany
+    {
+        return $this->hasMany(OpenPullRequest::class);
+    }
+
+    /**
+     * Its newest review, whatever came of it.
+     *
+     * @return HasOne<ReviewRun, $this>
+     */
+    public function latestReviewRun(): HasOne
+    {
+        return $this->hasOne(ReviewRun::class)->latestOfMany('started_at');
+    }
+
     public function fullName(): string
     {
         return "{$this->workspace}/{$this->slug}";

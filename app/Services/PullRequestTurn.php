@@ -46,9 +46,12 @@ final readonly class PullRequestTurn
         public string $key,
     ) {}
 
-    public static function of(OpenPullRequest $record, ?ReviewRun $run = null): self
+    /**
+     * @param  bool  $lookUp  read its newest review when none is given; false when the caller already knows it has none
+     */
+    public static function of(OpenPullRequest $record, ?ReviewRun $run = null, bool $lookUp = true): self
     {
-        $run ??= $record->latestRun();
+        $run ??= $lookUp ? $record->latestRun() : null;
         $author = $record->authorPerson();
         $authorName = $record->author ?? 'The author';
         $reviewers = collect($record->reviewers ?? []);

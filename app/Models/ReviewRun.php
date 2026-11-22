@@ -478,6 +478,14 @@ class ReviewRun extends Model
     }
 
     /**
+     * Whether the run reported a finding by this id.
+     */
+    public function hasFinding(string $id): bool
+    {
+        return in_array($id, array_map(strval(...), array_column($this->findings ?? [], 'id')), true);
+    }
+
+    /**
      * The findings that matter for a graph: how many were open at the end.
      */
     public function openFindings(): int

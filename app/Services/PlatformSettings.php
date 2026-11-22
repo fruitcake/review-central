@@ -9,6 +9,10 @@ use App\Filament\Themes;
 use App\Models\PlatformSetting;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\DB;
+use Laravel\Passport\Passport;
+use phpseclib4\Crypt\RSA;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -73,6 +77,14 @@ class PlatformSettings
      */
     public const CLOUDFLARE_CLIS = 'cloudflare_clis';
 
+    /**
+     * The key pair the OAuth server signs its tokens with, as encrypted JSON: made
+     * the first time a token is issued or read, so every server of the
+     * installation signs with the same one. PASSPORT_PRIVATE_KEY and
+     * PASSPORT_PUBLIC_KEY, or the key files Passport makes, go first.
+     */
+    public const OAUTH_KEYS = 'oauth_keys';
+
     /** Kept encrypted, and never shown again. */
     public const SECRETS = [self::CLOUDFLARE_API_TOKEN, self::R2_SECRET_ACCESS_KEY, self::CLOUDFLARE_TOKEN];
 
@@ -105,6 +117,7 @@ class PlatformSettings
         self::CLOUDFLARE_URL => null,
         self::CLOUDFLARE_TOKEN => null,
         self::CLOUDFLARE_CLIS => null,
+        self::OAUTH_KEYS => null,
     ];
 
     protected const CACHE = 'platform-settings';
@@ -244,6 +257,76 @@ class PlatformSettings
         }
 
         return array_key_exists($key, self::$applied) && self::$applied[$key] === $value ? null : $variable;
+    }
+
+    /**
+     * Puts the OAuth server's key pair in the configuration, made and kept here
+     * the first time, unless the environment or Passport's key files give one.
+     */
+    public function applyOAuthKeys(): void
+    {
+        if (filled(config('passport.private_key')) || is_file(Passport::keyPath('oauth-private.key'))) {
+            return;
+        }
+
+        $keys = $this->oauthKeys();
+
+        config(['passport.private_key' => $keys['private'], 'passport.public_key' => $keys['public']]);
+    }
+
+    /**
+     * The key pair as it is kept, made when there is none, or when the one kept
+     * was encrypted with another APP_KEY and so cannot be read. Read from the
+     * table rather than the cache, which another server may have made before the
+     * pair was kept.
+     *
+     * @return array{private: string, public: string}
+     */
+    protected function oauthKeys(): array
+    {
+        $row = PlatformSetting::query()->find(self::OAUTH_KEYS);
+
+        if (($keys = self::decodeOAuthKeys($row?->value)) !== null) {
+            return $keys;
+        }
+
+        $private = RSA::createKey(2048);
+        $value = json_encode(Crypt::encryptString((string) json_encode(['private' => (string) $private, 'public' => (string) $private->getPublicKey()])));
+
+        // Two servers making one at once keep the first that was saved. An unreadable
+        // pair is replaced under a lock, and only while it still cannot be read: once
+        // another server has replaced it, tokens may already be signed with that one.
+        $row === null
+            ? PlatformSetting::query()->insertOrIgnore(['key' => self::OAUTH_KEYS, 'value' => $value, 'created_at' => now(), 'updated_at' => now()])
+            : DB::transaction(function () use ($value): void {
+                $locked = PlatformSetting::query()->lockForUpdate()->find(self::OAUTH_KEYS);
+
+                if ($locked !== null && self::decodeOAuthKeys($locked->value) === null) {
+                    PlatformSetting::query()->whereKey(self::OAUTH_KEYS)->update(['value' => $value, 'updated_at' => now()]);
+                }
+            });
+
+        Cache::forget(self::CACHE);
+        $this->values = null;
+
+        return self::decodeOAuthKeys(PlatformSetting::query()->find(self::OAUTH_KEYS)?->value)
+            ?? throw new RuntimeException('The OAuth keys could not be kept.');
+    }
+
+    /**
+     * The key pair from its kept value, or null when it cannot be read.
+     *
+     * @return array{private: string, public: string}|null
+     */
+    protected static function decodeOAuthKeys(mixed $value): ?array
+    {
+        try {
+            $keys = is_string($value) && $value !== '' ? json_decode(Crypt::decryptString($value), true) : null;
+        } catch (Throwable) {
+            return null;
+        }
+
+        return is_array($keys) && is_string($keys['private'] ?? null) && is_string($keys['public'] ?? null) ? ['private' => $keys['private'], 'public' => $keys['public']] : null;
     }
 
     /**

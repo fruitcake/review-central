@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Models\Repository;
 use App\Models\ReviewInstruction;
 use App\Models\ReviewInstructionVersion;
 use App\Models\Tenant;
@@ -107,6 +108,37 @@ class ReviewInstructions
             ->all();
 
         return in_array(self::METHOD, array_column($files, 'key'), true) ? $files : null;
+    }
+
+    /**
+     * What a review of this repository on these stacks reads: the instructions
+     * kept here, with the team's rules last. Null leaves the review to the copy
+     * the skill ships with.
+     *
+     * @param  array<int, string>  $stacks
+     * @return array{version: string, contract: string, files: array<int, array{key: string, title: string, stack: string|null, file: string, body: string}>}|null
+     */
+    public static function forRepository(Repository $repository, array $stacks): ?array
+    {
+        $files = self::files($repository->tenant, $stacks);
+        $rules = ReviewRules::file($repository, $files === null ? [] : array_column($files, 'key'));
+
+        // The team's rules come last. Without instructions kept here the review would
+        // read the copy the skill ships, which cannot carry them, so they go with that
+        // copy from here.
+        if ($rules !== null) {
+            $files = $files ?? self::bundled($stacks);
+
+            if ($files !== null) {
+                $files[] = $rules;
+            }
+        }
+
+        return $files === null ? null : [
+            'version' => self::version($files),
+            'contract' => self::CONTRACT,
+            'files' => $files,
+        ];
     }
 
     /**

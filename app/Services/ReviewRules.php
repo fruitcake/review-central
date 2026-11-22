@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\ReviewRuleKind;
+use App\Exceptions\ActionRefused;
 use App\Models\Repository;
 use App\Models\ReviewRule;
+use App\Models\ReviewRun;
+use App\Models\Tenant;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Collection;
 
 /**
@@ -33,6 +37,88 @@ class ReviewRules
             ->orderByRaw('repository_id is not null')
             ->orderBy('id')
             ->get();
+    }
+
+    /**
+     * The rules a review of this repository reads, as data, each under the label
+     * the reviewer cites it by (R1 for a check, C1 for a convention).
+     *
+     * @return array<int, array{label: string, id: int, kind: string, title: string, body: string|null, paths: array<int, string>|null, severity: string|null, scope: string}>
+     */
+    public static function described(Repository $repository): array
+    {
+        $numbers = [];
+
+        return self::for($repository)->map(function (ReviewRule $rule) use (&$numbers): array {
+            $numbers[$rule->kind->value] = ($numbers[$rule->kind->value] ?? 0) + 1;
+
+            return [
+                'label' => ($rule->kind === ReviewRuleKind::Check ? 'R' : 'C').$numbers[$rule->kind->value],
+                'id' => $rule->getKey(),
+                'kind' => $rule->kind->value,
+                'title' => self::line($rule->title),
+                'body' => $rule->body,
+                'paths' => $rule->paths ?: null,
+                'severity' => $rule->kind === ReviewRuleKind::Check ? $rule->severity : null,
+                'scope' => $rule->repository_id === null ? 'every repository of the tenant' : 'this repository',
+            ];
+        })->all();
+    }
+
+    /**
+     * Adds a rule, for one repository or for all of the tenant's, as an admin of
+     * the tenant may. The next review reads it.
+     *
+     * @param  array<int, string>|null  $paths
+     * @param  ReviewRun|null  $from  the review whose finding the rule is made from, with $findingId
+     *
+     * @throws ActionRefused when the user may not, or the rule says nothing
+     */
+    public function add(
+        User $user,
+        Tenant $tenant,
+        ?Repository $repository,
+        ReviewRuleKind $kind,
+        string $title,
+        ?string $body = null,
+        ?array $paths = null,
+        ?string $severity = null,
+        ?ReviewRun $from = null,
+        ?string $findingId = null,
+    ): ReviewRule {
+        app(RepositoryAccess::class)->mustManage($user, $tenant);
+
+        // Made from a finding: one of that review's, of a repository of the tenant.
+        if ($from !== null && ($from->tenant_id !== $tenant->getKey() || $findingId === null || ! $from->hasFinding($findingId))) {
+            throw new ActionRefused("The review {$from->uuid} has no finding ".($findingId ?? '(none named)').' in this tenant.');
+        }
+
+        if ($repository !== null && $repository->tenant_id !== $tenant->getKey()) {
+            throw new ActionRefused("{$repository->fullName()} is not a repository of {$tenant->name}.");
+        }
+
+        if (trim($title) === '') {
+            throw new ActionRefused('A rule needs a title: the rule in one line.');
+        }
+
+        $severity = $severity === null ? null : strtoupper(trim($severity));
+
+        if ($severity !== null && ! array_key_exists($severity, ReviewRule::SEVERITIES)) {
+            throw new ActionRefused('A severity is HIGH, MEDIUM or LOW, or left out for the reviewer to judge.');
+        }
+
+        $paths = array_values(array_filter(array_map(fn (mixed $path): string => trim((string) $path), $paths ?? []), fn (string $path): bool => $path !== ''));
+
+        return $tenant->reviewRules()->create([
+            'repository_id' => $repository?->getKey(),
+            'kind' => $kind,
+            'title' => self::line($title),
+            'body' => filled($body) ? trim((string) $body) : null,
+            'paths' => $paths === [] ? null : $paths,
+            'severity' => $kind === ReviewRuleKind::Check ? $severity : null,
+            'enabled' => true,
+            'source' => $from === null ? null : "{$from->uuid}:{$findingId}",
+        ]);
     }
 
     /**

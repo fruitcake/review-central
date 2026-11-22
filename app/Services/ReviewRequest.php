@@ -7,6 +7,8 @@ namespace App\Services;
 use App\Enums\BuildState;
 use App\Enums\ReviewCommandAccess;
 use App\Enums\ReviewsFrom;
+use App\Exceptions\ActionRefused;
+use App\Exceptions\RepositoryNotFound;
 use App\Filament\App\Resources\PullRequests\PullRequestResource;
 use App\Models\OpenPullRequest;
 use App\Models\Repository;
@@ -452,6 +454,50 @@ class ReviewRequest
     protected static function text(mixed $value): ?string
     {
         return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    /**
+     * Starts the review of an open pull request for someone who asked by name,
+     * outside the panel, as a push would: refused when it would review another
+     * pull request, or find nothing to do.
+     *
+     * @return array{id: int, branch: string}
+     *
+     * @throws RepositoryNotFound when the pull request is unknown
+     * @throws ActionRefused when it cannot be reviewed now
+     */
+    public function request(Repository $repository, ?int $pullRequestId, ?string $branch = null): array
+    {
+        $feedback = app(PullRequestFeedback::class);
+        $pullRequest = $feedback->resolve($repository, $pullRequestId, $branch);
+        $record = $pullRequest['record'];
+
+        if ($record === null || blank($record->branch)) {
+            throw new ActionRefused("Pull request #{$pullRequest['id']} is not open, as far as Review Central knows: only an open pull request is reviewed.");
+        }
+
+        // A run is started for a branch, and finds its pull request by it.
+        $siblings = OpenPullRequest::query()->where('repository_id', $repository->getKey())->where('branch', $record->branch)->whereKeyNot($record->getKey())->pluck('pull_request_id');
+
+        if ($siblings->isNotEmpty()) {
+            throw new ActionRefused("{$record->branch} has more than one open pull request (#{$record->pull_request_id} and #{$siblings->implode(', #')}), and a review started here could land on another than #{$record->pull_request_id}. Push to start the review instead.");
+        }
+
+        if ($feedback->hasNothingNew($repository, $record)) {
+            throw new ActionRefused("The newest review already covers the head of #{$record->pull_request_id}, and nobody commented since, so a review now would be skipped. Reply under the findings first (a resolved thread alone is read at the next push), or push.");
+        }
+
+        try {
+            $this->start($repository, $record->branch, strict: true);
+        } catch (RuntimeException $exception) {
+            throw new ActionRefused($exception->getMessage());
+        } catch (Throwable $exception) {
+            report($exception);
+
+            throw new ActionRefused('The review could not be started: '.$exception->getMessage());
+        }
+
+        return ['id' => $record->pull_request_id, 'branch' => $record->branch];
     }
 
     /**
