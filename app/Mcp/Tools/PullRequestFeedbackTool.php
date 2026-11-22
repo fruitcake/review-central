@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[IsReadOnly]
 #[Description(<<<'TXT'
-    Reads a pull request as its AI review left it, as JSON: whose turn it is and why, the newest review (its summary, result, whether it reviewed the current head, and what it left for a person to check), every finding with its id, severity, status, file and line, whether it holds the merge, what people in the team judged it, and the replies in its thread on the pull request; then the questions asked of the reviewer with their answers, and the earlier reviews.
+    Reads a pull request as its AI review left it, as JSON: whose turn it is and why, the newest review (its summary, result, whether it reviewed the current head, and what it left for a person to check), the ticket it graded the change against, every finding with its id, severity, status, file and line, whether it holds the merge, what people in the team judged it, and the replies in its thread on the pull request; then the questions asked of the reviewer with their answers, and the earlier reviews.
 
     Use it before addressing review findings, for "what is still open on this PR", and after a review you asked for to see its result. Findings are ordered as they should be worked on: those that hold the merge first, then other open ones, then settled ones.
 

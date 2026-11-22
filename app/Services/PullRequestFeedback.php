@@ -169,6 +169,8 @@ class PullRequestFeedback
             'tenant' => $repository->tenant->slug,
             'pull_request' => $this->pullRequest($repository, $id, $pullRequest['branch'], $record, $attempt ?? $run),
             'review' => $run === null ? null : $this->review($run, $record),
+            // What the review graded the change against.
+            'ticket' => $run === null ? null : $this->ticket($run),
             // A newer attempt that has not reported: running, or failed.
             'latest_attempt' => $attempt === null || $attempt->is($run) || $run?->started_at->gt($attempt->started_at) ? null : array_filter([
                 'id' => $attempt->uuid,
@@ -240,6 +242,25 @@ class PullRequestFeedback
             'manual_review' => $run->manual_review ?: null,
             'open_findings' => $run->openFindings(),
         ], fn (mixed $value): bool => $value !== null && $value !== '');
+    }
+
+    /**
+     * The ticket as the review read it, or null when its pull request's title named none.
+     *
+     * @return array<string, string>|null
+     */
+    public function ticket(ReviewRun $run): ?array
+    {
+        $ticket = $run->context['ticket'] ?? null;
+
+        if (! is_array($ticket)) {
+            return null;
+        }
+
+        return array_filter(
+            array_intersect_key($ticket, array_flip(['reference', 'source', 'url', 'markdown', 'error'])),
+            fn (mixed $value): bool => is_string($value) && $value !== '',
+        );
     }
 
     /**

@@ -18,6 +18,7 @@ use App\Mcp\Tools\RequestReviewTool;
 use App\Mcp\Tools\ReviewerAnswerTool;
 use App\Mcp\Tools\ReviewInstructionsTool;
 use App\Mcp\Tools\ReviewRulesTool;
+use App\Mcp\Tools\TicketTool;
 use App\Models\Connection;
 use App\Models\FindingVerdict;
 use App\Models\OpenFinding;
@@ -27,6 +28,7 @@ use App\Models\Repository;
 use App\Models\ReviewQuestion;
 use App\Models\ReviewRule;
 use App\Models\ReviewRun;
+use App\Models\TicketSource;
 use App\Models\User;
 use App\Services\PlatformSettings;
 use Illuminate\Support\Facades\Http;
@@ -69,6 +71,9 @@ beforeEach(function () {
             ['id' => 14, 'parent' => ['id' => 12], 'content' => ['raw' => "It is not: cell() only quotes.\n\n[//]: # (ai-review-reply)"], 'user' => ['display_name' => 'Review'], 'created_on' => now()->addMinutes(2)->toIso8601String()],
             ['id' => 13, 'content' => ['raw' => 'Looks good otherwise.'], 'user' => ['display_name' => 'Alex'], 'created_on' => now()->addMinute()->toIso8601String()],
         ]]),
+        'acme.atlassian.net/rest/api/2/issue/PROJ-7/comment*' => Http::response(['comments' => [], 'total' => 0]),
+        'acme.atlassian.net/rest/api/2/issue/PROJ-7*' => Http::response(['key' => 'PROJ-7', 'fields' => ['summary' => 'Export the orders to CSV', 'description' => 'Every order, one row each.']]),
+        'acme.atlassian.net/*' => Http::response([], 404),
         '*' => Http::response([]),
     ]);
 });
@@ -165,6 +170,55 @@ it('reads a pull request by its branch: findings that hold the merge first, with
         // People's comments, replies to findings among them, and none of the review's own.
         ->assertStructuredContentCount(2, 'comments')
         ->assertStructuredContentPath('comments.1.text', 'Looks good otherwise.');
+});
+
+it('reads a ticket from the tenant\'s ticket sources by its reference or by the pull request whose title names it', function () {
+    TicketSource::factory()->create([
+        'connection_id' => Connection::factory()->jira()->create(['tenant_id' => $this->tenant->id]),
+        'prefixes' => ['PROJ'],
+    ]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'reference' => 'proj-7'])
+        ->assertOk()
+        ->assertStructuredContentPaths([
+            'reference' => 'PROJ-7',
+            'source' => 'Jira',
+            'url' => 'https://acme.atlassian.net/browse/PROJ-7',
+        ]);
+
+    // The title names no ticket yet, and then it does.
+    AgentServer::actingAs($this->member)
+        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'branch' => 'feature/export'])
+        ->assertHasErrors(['names no ticket']);
+
+    OpenPullRequest::query()->where('pull_request_id', 570)->update(['title' => 'PROJ-7 Export to CSV']);
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570])
+        ->assertOk()
+        ->assertStructuredContentPaths(['reference' => 'PROJ-7', 'pull_request_id' => 570])
+        ->assertSee('Export the orders to CSV');
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'reference' => 'PROJ-8'])
+        ->assertHasErrors(['PROJ-8: No ticket in Jira matches this reference.']);
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'reference' => 'SHOP-1'])
+        ->assertHasErrors(['No ticket source of acme/shop reads "SHOP-1"']);
+});
+
+it('gives the ticket the review graded the pull request against', function () {
+    $this->run->update(['context' => ['ticket' => ['reference' => 'PROJ-7', 'source' => 'Jira', 'url' => 'https://acme.atlassian.net/browse/PROJ-7', 'markdown' => '# Export the orders', 'error' => null]]]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(PullRequestFeedbackTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570])
+        ->assertStructuredContentPaths([
+            'ticket.reference' => 'PROJ-7',
+            'ticket.markdown' => '# Export the orders',
+        ])
+        ->assertStructuredContentMissingPath('ticket.error');
 });
 
 it('keeps the findings of the last review that reported when a newer attempt failed, and says it did', function () {
