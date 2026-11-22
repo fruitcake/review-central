@@ -96,8 +96,9 @@ class PullRequestOverview
     }
 
     /**
-     * The newest attempt at reviewing each of these pull requests, in one query,
-     * by "repository id:pull request id".
+     * The newest attempt at reviewing each of these pull requests, by "repository
+     * id:pull request id". The history is read without its findings to pick the
+     * newest of each, and only those are read whole.
      *
      * @param  Collection<int, OpenPullRequest>  $records
      * @return SupportCollection<string, ReviewRun>
@@ -108,8 +109,8 @@ class PullRequestOverview
             return collect();
         }
 
-        $runs = ReviewRun::query()
-            ->select(['id', 'uuid', 'repository_id', 'pull_request_id', 'status', 'result', 'commit', 'findings', 'manual_review', 'custom', 'started_at'])
+        $history = ReviewRun::query()
+            ->select(['id', 'repository_id', 'pull_request_id'])
             // These pull requests exactly, not every pairing of their repositories and numbers.
             ->where(function (Builder $query) use ($records): void {
                 foreach ($records as $record) {
@@ -119,15 +120,22 @@ class PullRequestOverview
             ->whereNotIn('status', PullRequestFeedback::NO_ATTEMPT)
             ->where('custom', false)
             ->latest('started_at')
+            ->toBase()
             ->get();
-        $latest = [];
+        $newest = [];
 
         // Newest first, so the first of each pull request is its newest.
-        foreach ($runs as $run) {
-            $latest["{$run->repository_id}:{$run->pull_request_id}"] ??= $run;
+        foreach ($history as $run) {
+            $newest["{$run->repository_id}:{$run->pull_request_id}"] ??= (int) $run->id;
         }
 
-        return collect($latest);
+        $runs = ReviewRun::query()
+            ->select(['id', 'uuid', 'repository_id', 'pull_request_id', 'status', 'result', 'commit', 'findings', 'manual_review', 'custom', 'started_at'])
+            ->whereKey(array_values($newest))
+            ->get()
+            ->keyBy('id');
+
+        return collect($newest)->map(fn (int $id): ?ReviewRun => $runs->get($id))->filter();
     }
 
     /**

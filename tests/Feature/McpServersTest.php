@@ -380,10 +380,16 @@ it('lists the pull requests waiting for the user', function () {
         ->forceFill(['title' => 'Someone else\'s', 'author' => 'Alex', 'author_nickname' => 'alex', 'branch' => 'feature/other'])
         ->save();
 
+    // An older attempt, which the newest review stands before.
+    ReviewRun::query()->create([
+        'tenant_id' => $this->tenant->id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'feature/export', 'commit' => str_repeat('c', 40), 'pull_request_id' => 570, 'status' => ReviewRun::STATUS_FAILED, 'started_at' => now()->subDay(),
+    ]);
+
     UserServer::actingAs($this->member)->tool(PullRequestsTool::class, ['only' => 'my-turn'])
         ->assertOk()
         ->assertStructuredContentCount(1, 'pull_requests')
-        ->assertStructuredContentPaths(['pull_requests.0.id' => 570, 'pull_requests.0.turn.yours' => true]);
+        ->assertStructuredContentPaths(['pull_requests.0.id' => 570, 'pull_requests.0.turn.yours' => true, 'pull_requests.0.review.id' => $this->run->uuid]);
 
     UserServer::actingAs($this->member)->tool(PullRequestsTool::class)
         ->assertStructuredContentCount(2, 'pull_requests');
