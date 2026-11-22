@@ -475,12 +475,12 @@ class ReviewContext
 
     /**
      * The comments, without the API's envelope: who said what, where, and whether
-     * it arrived after the last review.
+     * it arrived after the last review. Also what the MCP servers show of them.
      *
      * @param  array<int, array<string, mixed>>  $comments
      * @return array<int, array<string, mixed>>
      */
-    protected static function compactComments(array $comments, ?Carbon $reviewedAt): array
+    public static function compactComments(array $comments, ?Carbon $reviewedAt): array
     {
         return collect($comments)
             ->reject(fn (array $comment): bool => (bool) ($comment['deleted'] ?? false))

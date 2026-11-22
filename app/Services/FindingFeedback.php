@@ -26,9 +26,7 @@ class FindingFeedback
      */
     public function give(ReviewRun $run, User $user, string $findingId, FindingVerdictKind $verdict): ?FindingVerdictKind
     {
-        if (! in_array($findingId, array_map(strval(...), array_column($run->findings ?? [], 'id')), true)) {
-            throw new InvalidArgumentException("This review has no finding {$findingId}.");
-        }
+        $this->mustHave($run, $findingId);
 
         $key = ['review_run_id' => $run->getKey(), 'user_id' => $user->getKey(), 'finding_id' => $findingId];
         $existing = FindingVerdict::query()->where($key)->first();
@@ -42,6 +40,34 @@ class FindingFeedback
         FindingVerdict::query()->updateOrCreate($key, ['verdict' => $verdict]);
 
         return $verdict;
+    }
+
+    /**
+     * Stores what a user thinks of a finding, replacing what they said before;
+     * null takes it back. Unlike give(), the same verdict twice stays given, for a
+     * caller that says what it should be rather than clicking.
+     *
+     * @throws InvalidArgumentException when the run has no such finding
+     */
+    public function set(ReviewRun $run, User $user, string $findingId, ?FindingVerdictKind $verdict): void
+    {
+        $this->mustHave($run, $findingId);
+
+        $key = ['review_run_id' => $run->getKey(), 'user_id' => $user->getKey(), 'finding_id' => $findingId];
+
+        $verdict === null
+            ? FindingVerdict::query()->where($key)->delete()
+            : FindingVerdict::query()->updateOrCreate($key, ['verdict' => $verdict]);
+    }
+
+    /**
+     * @throws InvalidArgumentException when the run has no such finding
+     */
+    protected function mustHave(ReviewRun $run, string $findingId): void
+    {
+        if (! in_array($findingId, array_map(strval(...), array_column($run->findings ?? [], 'id')), true)) {
+            throw new InvalidArgumentException("This review has no finding {$findingId}.");
+        }
     }
 
     /**

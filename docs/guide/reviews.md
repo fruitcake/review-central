@@ -125,6 +125,21 @@ When a pull request is merged into the main branch while its last review still h
 
 Under **Review defaults → Open findings after a merge** a team can have them checked **weekly** or **monthly** (off by default: kept, not checked). A small model, with the AI provider that writes the notes on whose turn, reads each finding's file as it is on the main branch, one request per file, and says whether the problem is still there. A finding whose file is gone is resolved; one without a file is not checked. An admin can also check findings now, all or a selection, and close or reopen them.
 
+## In Claude and other AI assistants
+
+Review Central is also an MCP server, so an AI assistant can read and act on the reviews as you. It has two addresses:
+
+- **`/mcp/agent`**, for a coding agent in a checkout, such as Claude Code: the review's instructions with the team's rules, to review a change the way the pull request's review will before it is pushed; a pull request's newest review with its findings, the team's verdicts and the replies in each finding's thread; the open findings of the files it touches. It can ask the reviewer about a finding, record your verdict on one, start the review again without a push, and, for an admin, add a rule.
+- **`/mcp/user`**, for a chat, such as Claude: your tenants and repositories, the open pull requests and whose turn each is (or only those waiting for you), and the same reviews, findings and rules.
+
+Add it with its address, and the assistant signs you in on Review Central's own page:
+
+```sh
+claude mcp add --transport http review-central https://review.example.com/mcp/agent
+```
+
+It does no more than your account may: only your tenants' repositories, and rules only where you are an admin. Starting a review costs what a review costs, and the assistant is told to ask you first.
+
 ## A security review of a branch
 
 **Security review**, under Reviews, has the reviewer read a whole branch for security problems as it stands, rather than one pull request's change: pick the repository and the branch, such as the default one. Nothing is posted; the report shows under the *Security* view. It reads far more than a pull request's review, so it takes longer and costs more. It needs a runner that reads the code, a Cloudflare sandbox or Docker, and an Anthropic connection, since Claude Code is its reviewer. Its model and effort are set with `SECURITY_REVIEW_MODEL` and the variables beside it in the [configuration](./configuration).

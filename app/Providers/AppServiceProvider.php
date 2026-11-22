@@ -10,12 +10,16 @@ use Carbon\CarbonImmutable;
 use Filament\Auth\Http\Responses\Contracts\LoginResponse as LoginResponseContract;
 use Filament\Support\Facades\FilamentTimezone;
 use GuzzleHttp\Promise\PromiseInterface;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
+use Laravel\Passport\Passport;
+use League\OAuth2\Server\AuthorizationServer;
+use League\OAuth2\Server\ResourceServer;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 
@@ -79,6 +83,14 @@ class AppServiceProvider extends ServiceProvider
                 ? $answer->then(fn (ResponseInterface $response): ResponseInterface => $response->withoutHeader('Location'))
                 : $answer;
         });
+
+        // The OAuth server's keys, read once it signs or checks a token: kept with the
+        // settings, so no server of the installation needs a key file of its own.
+        $this->app->beforeResolving(AuthorizationServer::class, fn () => app(PlatformSettings::class)->applyOAuthKeys());
+        $this->app->beforeResolving(ResourceServer::class, fn () => app(PlatformSettings::class)->applyOAuthKeys());
+
+        // The consent screen an MCP client sends someone to before it gets a token.
+        Passport::authorizationView(fn (array $parameters): Response => response()->view('mcp.authorize', $parameters));
 
         $this->configureDefaults();
     }

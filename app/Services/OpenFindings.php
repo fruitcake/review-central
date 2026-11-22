@@ -11,6 +11,7 @@ use App\Models\FindingVerdict;
 use App\Models\OpenFinding;
 use App\Models\Repository;
 use App\Models\ReviewRun;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Throwable;
@@ -32,6 +33,42 @@ class OpenFindings
 
     /** Lines either side of a finding's line that a long file's excerpt shows. */
     public const EXCERPT_LINES = 80;
+
+    /**
+     * The backlog as data, newest first: what is still open on the repositories
+     * given, or every finding there whatever its status.
+     *
+     * @param  Builder<Repository>  $repositories
+     * @return array<int, array<string, mixed>>
+     */
+    public function listed(Builder $repositories, bool $closedToo = false, ?string $path = null, int $limit = 50): array
+    {
+        return OpenFinding::query()
+            ->with('repository')
+            ->whereIn('repository_id', $repositories->select('id'))
+            ->when(! $closedToo, fn (Builder $query) => $query->active())
+            ->when(filled($path), fn (Builder $query) => $query->where('path', 'like', $path.'%'))
+            ->latest()
+            ->limit($limit)
+            ->get()
+            ->map(fn (OpenFinding $finding): array => array_filter([
+                'id' => $finding->getKey(),
+                'repository' => $finding->repository->fullName(),
+                'pull_request_id' => $finding->pull_request_id,
+                'finding_id' => $finding->finding_id,
+                'severity' => $finding->severity,
+                'title' => $finding->title,
+                'path' => $finding->path,
+                'line' => $finding->line,
+                'details' => $finding->details,
+                'status' => $finding->status,
+                'status_text' => OpenFinding::LABELS[$finding->status] ?? $finding->status,
+                'note' => $finding->note,
+                'merged_at' => $finding->created_at?->toIso8601String(),
+                'checked_at' => $finding->checked_at?->toIso8601String(),
+            ], fn (mixed $value): bool => $value !== null))
+            ->all();
+    }
 
     /**
      * Keeps what the pull request's last review still had open: new or open, and
