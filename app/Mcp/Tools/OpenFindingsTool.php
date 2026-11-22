@@ -35,9 +35,7 @@ class OpenFindingsTool extends ReviewTool
         ]);
 
         return $this->answer(function () use ($request, $validated, $access, $findings): array {
-            $repositories = filled($validated['repository'] ?? null)
-                ? $access->repositories($this->user($request))->whereKey($this->repository($request)->getKey())
-                : $access->repositories($this->user($request));
+            $repositories = $access->scoped($this->user($request), $validated['repository'] ?? null, $validated['tenant'] ?? null);
 
             return ['findings' => $findings->listed($repositories, (bool) ($validated['closed'] ?? false), $validated['path'] ?? null, (int) ($validated['limit'] ?? 50))];
         });

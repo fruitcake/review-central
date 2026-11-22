@@ -275,45 +275,49 @@ class PlatformSettings
 
     /**
      * The key pair as it is kept, made when there is none, or when the one kept
-     * was encrypted with another APP_KEY and so cannot be read.
+     * was encrypted with another APP_KEY and so cannot be read. Read from the
+     * table rather than the cache, which another server may have made before the
+     * pair was kept.
      *
      * @return array{private: string, public: string}
      */
     protected function oauthKeys(): array
     {
-        if (($keys = $this->keptOAuthKeys()) !== null) {
+        $row = PlatformSetting::query()->find(self::OAUTH_KEYS);
+
+        if (($keys = self::decodeOAuthKeys($row?->value)) !== null) {
             return $keys;
         }
 
         $private = RSA::createKey(2048);
         $value = json_encode(Crypt::encryptString((string) json_encode(['private' => (string) $private, 'public' => (string) $private->getPublicKey()])));
-        $unreadable = PlatformSetting::query()->whereKey(self::OAUTH_KEYS)->exists();
 
-        // Two servers making one at once keep the first that was saved.
-        $unreadable
-            ? PlatformSetting::query()->whereKey(self::OAUTH_KEYS)->update(['value' => $value])
-            : PlatformSetting::query()->insertOrIgnore(['key' => self::OAUTH_KEYS, 'value' => $value, 'created_at' => now(), 'updated_at' => now()]);
+        // Two servers making one at once keep the first that was saved. An unreadable
+        // pair is replaced only as it was read: once another server has replaced it,
+        // tokens may already be signed with that one.
+        $row === null
+            ? PlatformSetting::query()->insertOrIgnore(['key' => self::OAUTH_KEYS, 'value' => $value, 'created_at' => now(), 'updated_at' => now()])
+            : PlatformSetting::query()->whereKey(self::OAUTH_KEYS)->where('updated_at', $row->getRawOriginal('updated_at'))->update(['value' => $value, 'updated_at' => now()]);
 
         Cache::forget(self::CACHE);
         $this->values = null;
 
-        $kept = $this->keptOAuthKeys();
-
-        if ($kept === null) {
-            throw new RuntimeException('The OAuth keys could not be kept.');
-        }
-
-        return $kept;
+        return self::decodeOAuthKeys(PlatformSetting::query()->find(self::OAUTH_KEYS)?->value)
+            ?? throw new RuntimeException('The OAuth keys could not be kept.');
     }
 
     /**
-     * The key pair as it is kept, or null when none is or it cannot be read.
+     * The key pair from its kept value, or null when it cannot be read.
      *
      * @return array{private: string, public: string}|null
      */
-    protected function keptOAuthKeys(): ?array
+    protected static function decodeOAuthKeys(mixed $value): ?array
     {
-        $keys = json_decode((string) $this->secret(self::OAUTH_KEYS), true);
+        try {
+            $keys = is_string($value) && $value !== '' ? json_decode(Crypt::decryptString($value), true) : null;
+        } catch (Throwable) {
+            return null;
+        }
 
         return is_array($keys) && is_string($keys['private'] ?? null) && is_string($keys['public'] ?? null) ? ['private' => $keys['private'], 'public' => $keys['public']] : null;
     }

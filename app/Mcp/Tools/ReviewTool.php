@@ -68,7 +68,7 @@ abstract class ReviewTool extends Tool
 
         return [
             'repository' => $required ? $repository->required() : $repository,
-            'tenant' => $schema->string()->description('The tenant\'s slug, only needed when the repository is in more than one of your tenants.'),
+            'tenant' => $schema->string()->description('A tenant\'s slug: narrows a list to that tenant, and is needed when a repository is in more than one of your tenants.'),
         ];
     }
 

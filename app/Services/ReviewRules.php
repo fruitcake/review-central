@@ -8,6 +8,7 @@ use App\Enums\ReviewRuleKind;
 use App\Exceptions\ActionRefused;
 use App\Models\Repository;
 use App\Models\ReviewRule;
+use App\Models\ReviewRun;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Collection;
@@ -69,6 +70,7 @@ class ReviewRules
      * the tenant may. The next review reads it.
      *
      * @param  array<int, string>|null  $paths
+     * @param  ReviewRun|null  $from  the review whose finding the rule is made from, with $findingId
      *
      * @throws ActionRefused when the user may not, or the rule says nothing
      */
@@ -81,9 +83,15 @@ class ReviewRules
         ?string $body = null,
         ?array $paths = null,
         ?string $severity = null,
-        ?string $source = null,
+        ?ReviewRun $from = null,
+        ?string $findingId = null,
     ): ReviewRule {
         app(RepositoryAccess::class)->mustManage($user, $tenant);
+
+        // Made from a finding: one of that review's, of a repository of the tenant.
+        if ($from !== null && ($from->tenant_id !== $tenant->getKey() || $findingId === null || ! $from->hasFinding($findingId))) {
+            throw new ActionRefused("The review {$from->uuid} has no finding ".($findingId ?? '(none named)').' in this tenant.');
+        }
 
         if ($repository !== null && $repository->tenant_id !== $tenant->getKey()) {
             throw new ActionRefused("{$repository->fullName()} is not a repository of {$tenant->name}.");
@@ -109,7 +117,7 @@ class ReviewRules
             'paths' => $paths === [] ? null : $paths,
             'severity' => $kind === ReviewRuleKind::Check ? $severity : null,
             'enabled' => true,
-            'source' => $source,
+            'source' => $from === null ? null : "{$from->uuid}:{$findingId}",
         ]);
     }
 

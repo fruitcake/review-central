@@ -36,9 +36,7 @@ class PullRequestsTool extends ReviewTool
 
         return $this->answer(function () use ($request, $validated, $access, $overview): array {
             $user = $this->user($request);
-            $repositories = filled($validated['repository'] ?? null)
-                ? $access->repositories($user)->whereKey($this->repository($request)->getKey())
-                : $access->repositories($user)->when(filled($validated['tenant'] ?? null), fn ($query) => $query->whereHas('tenant', fn ($tenant) => $tenant->where('slug', $validated['tenant'])));
+            $repositories = $access->scoped($user, $validated['repository'] ?? null, $validated['tenant'] ?? null);
 
             return ['pull_requests' => $overview->list($user, $repositories, $validated['only'] ?? null, (int) ($validated['limit'] ?? 50))];
         });

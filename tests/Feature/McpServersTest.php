@@ -65,6 +65,7 @@ beforeEach(function () {
         'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570/comments*' => Http::response(['values' => [
             ['id' => 11, 'content' => ['raw' => "**HIGH** Unescaped CSV cell\n\n[//]: # (ai-finding id=F2 status=new severity=HIGH)"], 'user' => ['display_name' => 'Review'], 'created_on' => now()->subHour()->toIso8601String(), 'inline' => ['path' => 'app/Export.php', 'to' => 12]],
             ['id' => 12, 'parent' => ['id' => 11], 'content' => ['raw' => 'The cell is escaped by the writer, see CsvWriter::cell().'], 'user' => ['display_name' => 'Sam Sample'], 'created_on' => now()->addMinute()->toIso8601String()],
+            ['id' => 14, 'parent' => ['id' => 12], 'content' => ['raw' => "It is not: cell() only quotes.\n\n[//]: # (ai-review-reply)"], 'user' => ['display_name' => 'Review'], 'created_on' => now()->addMinutes(2)->toIso8601String()],
             ['id' => 13, 'content' => ['raw' => 'Looks good otherwise.'], 'user' => ['display_name' => 'Alex'], 'created_on' => now()->addMinute()->toIso8601String()],
         ]]),
         '*' => Http::response([]),
@@ -85,10 +86,10 @@ it('lets only a token issued for the MCP servers in', function () {
         ->assertJsonFragment(['name' => 'pull-request-feedback']);
 });
 
-it('sends someone who is not signed in to the sign-in page before the consent screen, and shows it after', function () {
+it('sends someone who is not signed in to the sign-in page before the consent screen, and asks there for the MCP scope a client left out', function () {
     $client = $this->postJson('/oauth/register', ['client_name' => 'Claude Code', 'redirect_uris' => ['http://localhost:4567/callback']])->assertCreated()->json('client_id');
     $query = http_build_query([
-        'client_id' => $client, 'redirect_uri' => 'http://localhost:4567/callback', 'response_type' => 'code', 'scope' => 'mcp:use', 'state' => 'abc',
+        'client_id' => $client, 'redirect_uri' => 'http://localhost:4567/callback', 'response_type' => 'code', 'state' => 'abc',
         'code_challenge' => rtrim(strtr(base64_encode(hash('sha256', str_repeat('v', 64), true)), '+/', '-_'), '='), 'code_challenge_method' => 'S256',
     ]);
 
@@ -97,7 +98,8 @@ it('sends someone who is not signed in to the sign-in page before the consent sc
     $this->actingAs($this->member)->get("/oauth/authorize?{$query}")
         ->assertOk()
         ->assertSee('Connect Claude Code')
-        ->assertSee($this->member->email);
+        ->assertSee($this->member->email)
+        ->assertSee('Use MCP server');
 });
 
 it('keeps one OAuth key pair for the whole installation, unless the environment gives one', function () {
@@ -114,6 +116,13 @@ it('keeps one OAuth key pair for the whole installation, unless the environment 
     expect($private)->toStartWith('-----BEGIN PRIVATE KEY-----')
         ->and(config('passport.private_key'))->toBe($private)
         ->and(PlatformSetting::query()->count())->toBe(1);
+
+    // Kept under another APP_KEY, it cannot be read, and is replaced.
+    PlatformSetting::query()->whereKey(PlatformSettings::OAUTH_KEYS)->update(['value' => json_encode('encrypted-elsewhere')]);
+    config(['passport.private_key' => null]);
+    (new PlatformSettings)->applyOAuthKeys();
+
+    expect(config('passport.private_key'))->toStartWith('-----BEGIN PRIVATE KEY-----')->not->toBe($private);
 
     config(['passport.private_key' => 'from-the-environment']);
     $settings->applyOAuthKeys();
@@ -141,6 +150,8 @@ it('reads a pull request by its branch: findings that hold the merge first, with
             'findings.0.verdicts' => ['wrong' => 1],
             'findings.0.thread.replies.0.text' => 'The cell is escaped by the writer, see CsvWriter::cell().',
             'findings.0.thread.replies.0.after_last_review' => true,
+            // The reviewer's answer to that reply, a reply to the reply.
+            'findings.0.thread.replies.1.by_review' => true,
             'findings.1.id' => 'F1',
             'findings.2.id' => 'F3',
             'findings.2.open' => false,
@@ -153,6 +164,24 @@ it('reads a pull request by its branch: findings that hold the merge first, with
         // People's comments, replies to findings among them, and none of the review's own.
         ->assertStructuredContentCount(2, 'comments')
         ->assertStructuredContentPath('comments.1.text', 'Looks good otherwise.');
+});
+
+it('keeps the findings of the last review that reported when a newer attempt failed, and says it did', function () {
+    $failed = ReviewRun::query()->create([
+        'tenant_id' => $this->tenant->id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'feature/export', 'commit' => str_repeat('a', 40), 'pull_request_id' => 570, 'status' => ReviewRun::STATUS_FAILED, 'started_at' => now()->addMinute(),
+    ]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(PullRequestFeedbackTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570])
+        ->assertStructuredContentPaths([
+            'review.id' => $this->run->uuid,
+            'findings.0.id' => 'F2',
+            'latest_attempt.id' => $failed->uuid,
+            'latest_attempt.status' => ReviewRun::STATUS_FAILED,
+        ])
+        // Neither is listed again as an earlier review.
+        ->assertStructuredContentPath('earlier_reviews', []);
 });
 
 it('finds no repository or review of a team the user is not in', function () {
@@ -185,6 +214,24 @@ it('asks for the tenant when a user reaches two repositories of the same name', 
         ->assertOk();
 });
 
+it('tells a GitHub repository from a Bitbucket one of the same name by the remote it is named by', function () {
+    $github = Repository::factory()->for(Connection::factory()->gitHubSource()->state(['tenant_id' => $this->tenant->id]), 'integration')->create(['tenant_id' => $this->tenant->id, 'slug' => 'shop']);
+
+    AgentServer::actingAs($this->member)
+        ->tool(ReviewRulesTool::class, ['repository' => 'acme/shop'])
+        ->assertHasErrors(['acme/shop is on more than one host (Bitbucket, GitHub)']);
+
+    ReviewRule::factory()->create(['tenant_id' => $this->tenant->id, 'repository_id' => $github->id, 'title' => 'Only on GitHub']);
+
+    AgentServer::actingAs($this->member)
+        ->tool(ReviewRulesTool::class, ['repository' => 'git@github.com:acme/shop.git'])
+        ->assertStructuredContentPath('rules.0.title', 'Only on GitHub');
+
+    AgentServer::actingAs($this->member)
+        ->tool(ReviewRulesTool::class, ['repository' => 'https://bitbucket.org/acme/shop'])
+        ->assertStructuredContentCount(0, 'rules');
+});
+
 it('records the user\'s verdict on a finding, the same again changing nothing, and none taking it back', function () {
     $judge = fn (string $verdict) => AgentServer::actingAs($this->member)
         ->tool(JudgeFindingTool::class, ['review_id' => $this->run->uuid, 'finding_id' => 'F2', 'verdict' => $verdict]);
@@ -212,6 +259,9 @@ it('lets an admin add a rule made from a finding, and refuses a member', functio
 
     expect(ReviewRule::query()->count())->toBe(0);
 
+    AgentServer::actingAs($this->admin)->tool(AddReviewRuleTool::class, ['finding_id' => 'F9'] + $rule)
+        ->assertHasErrors(["The review {$this->run->uuid} has no finding F9 in this tenant."]);
+
     AgentServer::actingAs($this->admin)->tool(AddReviewRuleTool::class, $rule)
         ->assertOk()
         ->assertStructuredContentPath('rule.label', 'C1');
@@ -230,13 +280,27 @@ it('lets an admin add a rule made from a finding, and refuses a member', functio
         ->assertSee(['Stacks: laravel.', '### R1. Every export is queued', '### C1. CSV cells go through CsvWriter::cell()']);
 });
 
-it('starts the review of an open pull request without a push, and not of one that is closed', function () {
+it('starts the review of an open pull request without a push, and not when it would be skipped, land elsewhere or the pull request is closed', function () {
     AgentServer::actingAs($this->member)
         ->tool(RequestReviewTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570])
         ->assertOk()
         ->assertStructuredContentPath('branch', 'feature/export');
 
     Queue::assertPushed(RunContainerReview::class, fn (RunContainerReview $job): bool => $job->branch === 'feature/export');
+
+    // Nothing said since the review of the head: it would be skipped as reviewed.
+    $this->run->update(['finished_at' => now()->addHour()]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(RequestReviewTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570])
+        ->assertHasErrors(['The newest review already covers the head of #570, and nobody commented since']);
+
+    // A run finds its pull request by the branch, which another one shares.
+    OpenPullRequest::query()->create(['repository_id' => $this->repository->id, 'pull_request_id' => 580])->forceFill(['branch' => 'feature/export'])->save();
+
+    AgentServer::actingAs($this->member)
+        ->tool(RequestReviewTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570])
+        ->assertHasErrors(['feature/export has more than one open pull request (#570 and #580)']);
 
     OpenPullRequest::query()->delete();
 
@@ -269,22 +333,34 @@ it('asks the reviewer about a review under the user\'s name, and reads the answe
         ->assertHasErrors(["There is no question {$question->id} among yours."]);
 });
 
-it('lists the open findings backlog of the user\'s repositories, narrowed to a path', function () {
+it('lists the open findings backlog of the user\'s repositories, narrowed to a path or a tenant', function () {
     $finding = fn (Repository $repository, string $path, string $status = OpenFinding::PRESENT) => OpenFinding::query()->create([
         'tenant_id' => $repository->tenant_id, 'repository_id' => $repository->id, 'pull_request_id' => 1, 'finding_id' => $path, 'title' => "In {$path}", 'path' => $path, 'status' => $status,
     ]);
     $finding($this->repository, 'app/Export.php');
     $finding($this->repository, 'app/Import.php', OpenFinding::RESOLVED);
     $finding($this->repository, 'routes/web.php');
+    $finding($this->repository, 'app/my-module/Export.php');
     $finding($this->elsewhere, 'app/Export.php');
 
-    AgentServer::actingAs($this->member)->tool(OpenFindingsTool::class, ['repository' => 'acme/shop', 'path' => 'app/'])
+    AgentServer::actingAs($this->member)->tool(OpenFindingsTool::class, ['repository' => 'acme/shop', 'path' => 'app/E'])
         ->assertOk()
         ->assertStructuredContentCount(1, 'findings')
         ->assertStructuredContentPath('findings.0.title', 'In app/Export.php');
 
+    // An underscore is an underscore, not any character.
+    AgentServer::actingAs($this->member)->tool(OpenFindingsTool::class, ['repository' => 'acme/shop', 'path' => 'app/my_module/'])
+        ->assertStructuredContentCount(0, 'findings');
+
     UserServer::actingAs($this->member)->tool(OpenFindingsTool::class)
-        ->assertStructuredContentCount(2, 'findings');
+        ->assertStructuredContentCount(3, 'findings');
+
+    // In two tenants, a tenant narrows the list to its own.
+    $this->member->tenants()->attach($this->elsewhere->tenant);
+
+    UserServer::actingAs($this->member)->tool(OpenFindingsTool::class, ['tenant' => $this->elsewhere->tenant->slug])
+        ->assertStructuredContentCount(1, 'findings')
+        ->assertStructuredContentPath('findings.0.repository', 'other/shop');
 });
 
 it('lists the pull requests waiting for the user', function () {

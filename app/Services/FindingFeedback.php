@@ -65,7 +65,7 @@ class FindingFeedback
      */
     protected function mustHave(ReviewRun $run, string $findingId): void
     {
-        if (! in_array($findingId, array_map(strval(...), array_column($run->findings ?? [], 'id')), true)) {
+        if (! $run->hasFinding($findingId)) {
             throw new InvalidArgumentException("This review has no finding {$findingId}.");
         }
     }

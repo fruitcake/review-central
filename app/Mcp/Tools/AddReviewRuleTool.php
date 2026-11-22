@@ -46,16 +46,10 @@ class AddReviewRuleTool extends ReviewTool
         return $this->answer(function () use ($request, $validated, $rules, $access): array {
             $user = $this->user($request);
             $repository = $this->repository($request);
-            $source = null;
+            $from = isset($validated['review_id']) ? $access->run($user, $validated['review_id']) : null;
 
-            if (isset($validated['review_id'])) {
-                $run = $access->run($user, $validated['review_id']);
-
-                if ($run->repository_id !== $repository->getKey()) {
-                    throw new ActionRefused('That review is of another repository.');
-                }
-
-                $source = "{$run->uuid}:{$validated['finding_id']}";
+            if ($from !== null && $from->repository_id !== $repository->getKey()) {
+                throw new ActionRefused('That review is of another repository.');
             }
 
             $rule = $rules->add(
@@ -67,7 +61,8 @@ class AddReviewRuleTool extends ReviewTool
                 body: $validated['body'] ?? null,
                 paths: $validated['paths'] ?? null,
                 severity: $validated['severity'] ?? null,
-                source: $source,
+                from: $from,
+                findingId: $validated['finding_id'] ?? null,
             );
 
             return [

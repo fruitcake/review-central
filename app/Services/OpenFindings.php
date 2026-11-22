@@ -47,7 +47,8 @@ class OpenFindings
             ->with('repository')
             ->whereIn('repository_id', $repositories->select('id'))
             ->when(! $closedToo, fn (Builder $query) => $query->active())
-            ->when(filled($path), fn (Builder $query) => $query->where('path', 'like', $path.'%'))
+            // A prefix taken literally: in LIKE an underscore in a path would match any character.
+            ->when(filled($path), fn (Builder $query) => $query->whereRaw('substr(path, 1, ?) = ?', [mb_strlen((string) $path), $path]))
             ->latest()
             ->limit($limit)
             ->get()

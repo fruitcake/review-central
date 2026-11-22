@@ -71,19 +71,70 @@ class PullRequestFeedback
         return ['id' => (int) $id, 'branch' => $branch, 'record' => $record];
     }
 
+    /** The statuses of a run that reported findings. */
+    public const REPORTED = [ReviewRun::STATUS_FINISHED, ReviewRun::STATUS_UNPUBLISHED];
+
+    /** The statuses of a run that never was an attempt at a review. */
+    public const NO_ATTEMPT = [ReviewRun::STATUS_SKIPPED, ReviewRun::STATUS_RESTARTED];
+
     /**
-     * The newest review of a pull request: the newest that was posted on it, or a
-     * trial when there is nothing else.
+     * The newest review of a pull request that reported its findings: the newest
+     * posted on it, or a trial when there is none. A newer attempt that failed or
+     * still runs leaves it standing, as it does on the pull request.
      */
     public function latestRun(Repository $repository, int $pullRequestId): ?ReviewRun
     {
         $runs = ReviewRun::query()
             ->where('repository_id', $repository->getKey())
             ->where('pull_request_id', $pullRequestId)
-            ->whereNotIn('status', [ReviewRun::STATUS_SKIPPED, ReviewRun::STATUS_RESTARTED])
+            ->whereIn('status', self::REPORTED)
             ->latest('started_at');
 
         return (clone $runs)->where('custom', false)->first() ?? $runs->first();
+    }
+
+    /**
+     * The newest attempt at reviewing the pull request, whatever came of it: what
+     * says whether a review is running, or the last one failed.
+     */
+    public function latestAttempt(Repository $repository, int $pullRequestId): ?ReviewRun
+    {
+        return ReviewRun::query()
+            ->where('repository_id', $repository->getKey())
+            ->where('pull_request_id', $pullRequestId)
+            ->whereNotIn('status', self::NO_ATTEMPT)
+            ->where('custom', false)
+            ->latest('started_at')
+            ->first();
+    }
+
+    /**
+     * Whether a review started now would find nothing to do: the newest review
+     * covers the head, and nobody said anything since, which is what a review of
+     * the same commit needs to run again (see ReviewContext's new activity). A
+     * resolved thread alone is no reason: the next push's review reads it.
+     *
+     * @param  array<int, array<string, mixed>>|null  $comments  as compactComments() gives them, read from the host when left out
+     */
+    public function hasNothingNew(Repository $repository, OpenPullRequest $record, ?array $comments = null): bool
+    {
+        $run = $this->latestRun($repository, $record->pull_request_id);
+
+        if ($run === null || $run->custom || $run->status !== ReviewRun::STATUS_FINISHED || $record->commit === null || ! ReviewContext::isSameCommit($run->commit, $record->commit)) {
+            return false;
+        }
+
+        $comments ??= rescue(fn (): array => ReviewContext::compactComments(
+            $repository->sourceControl()->getPullRequestComments((string) $record->pull_request_id),
+            $run->finished_at === null ? null : Carbon::instance($run->finished_at),
+        ), null, false);
+
+        // Not readable: the review itself decides.
+        if ($comments === null) {
+            return false;
+        }
+
+        return ! collect($comments)->contains(fn (array $comment): bool => $comment['after_last_review'] && ! $comment['is_review'] && ! ReviewQuestions::isQuestion((string) $comment['text']));
     }
 
     /**
@@ -100,6 +151,7 @@ class PullRequestFeedback
         $id = $pullRequest['id'];
         $record = $pullRequest['record'];
         $run = $this->latestRun($repository, $id);
+        $attempt = $this->latestAttempt($repository, $id);
 
         // One read of the host serves the threads and the comments; without it the
         // review still reads, only without the replies.
@@ -115,11 +167,19 @@ class PullRequestFeedback
         return array_filter([
             'repository' => $repository->fullName(),
             'tenant' => $repository->tenant->slug,
-            'pull_request' => $this->pullRequest($repository, $id, $pullRequest['branch'], $record, $run),
+            'pull_request' => $this->pullRequest($repository, $id, $pullRequest['branch'], $record, $attempt ?? $run),
             'review' => $run === null ? null : $this->review($run, $record),
+            // A newer attempt that has not reported: running, or failed.
+            'latest_attempt' => $attempt === null || $attempt->is($run) || $run?->started_at->gt($attempt->started_at) ? null : array_filter([
+                'id' => $attempt->uuid,
+                'status' => $attempt->status,
+                'commit' => $attempt->commit,
+                'started_at' => $attempt->started_at->toIso8601String(),
+                'finished_at' => $attempt->finished_at?->toIso8601String(),
+            ], fn (mixed $value): bool => $value !== null),
             'findings' => $run === null ? [] : $this->findings($run, $user, $hostComments ?? []),
             'questions' => $this->questions($repository, $id),
-            'earlier_reviews' => $this->earlierReviews($repository, $id, $run),
+            'earlier_reviews' => $this->earlierReviews($repository, $id, $run, $attempt),
             'comments' => $comments && $hostComments !== null ? array_values(array_filter($hostComments, fn (array $comment): bool => ! $comment['is_review'])) : null,
             'notice' => $hostError,
         ], fn (mixed $value): bool => $value !== null);
@@ -239,18 +299,42 @@ class PullRequestFeedback
 
                 $threads[$id[1]] = [
                     'resolved' => (bool) $comment['resolved'],
-                    'replies' => $byParent->get($comment['id'], collect())->map(fn (array $reply): array => [
-                        'author' => $reply['author'],
-                        'by_review' => $reply['is_review'],
-                        'at' => $reply['created_on'],
-                        'after_last_review' => $reply['after_last_review'],
-                        'text' => $reply['text'],
-                    ])->values()->all(),
+                    'replies' => $this->descendants($byParent, $comment['id'])
+                        ->sortBy('created_on')
+                        ->map(fn (array $reply): array => [
+                            'author' => $reply['author'],
+                            'by_review' => $reply['is_review'],
+                            'at' => $reply['created_on'],
+                            'after_last_review' => $reply['after_last_review'],
+                            'text' => $reply['text'],
+                        ])->values()->all(),
                 ];
             }
         }
 
         return $threads;
+    }
+
+    /**
+     * Every reply under a comment, and the replies under those: the reviewer's
+     * answer to a question asked under a finding is a reply to that question.
+     *
+     * @param  Collection<int|string, Collection<int, array<string, mixed>>>  $byParent
+     * @return Collection<int, array<string, mixed>>
+     */
+    protected function descendants(Collection $byParent, mixed $id, int $depth = 0): Collection
+    {
+        if ($id === null || $depth > 20) {
+            return collect();
+        }
+
+        $found = [];
+
+        foreach ($byParent->get($id, collect()) as $reply) {
+            $found = [...$found, $reply, ...$this->descendants($byParent, $reply['id'], $depth + 1)->all()];
+        }
+
+        return collect($found);
     }
 
     /**
@@ -293,12 +377,12 @@ class PullRequestFeedback
     /**
      * @return array<int, array<string, mixed>>
      */
-    protected function earlierReviews(Repository $repository, int $id, ?ReviewRun $latest): array
+    protected function earlierReviews(Repository $repository, int $id, ?ReviewRun $latest, ?ReviewRun $attempt): array
     {
         return ReviewRun::query()
             ->where('repository_id', $repository->getKey())
             ->where('pull_request_id', $id)
-            ->when($latest !== null, fn ($query) => $query->whereKeyNot($latest->getKey()))
+            ->whereKeyNot(array_filter([$latest?->getKey(), $attempt?->getKey()]))
             ->latest('started_at')
             ->limit(self::HISTORY)
             ->get()

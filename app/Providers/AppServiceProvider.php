@@ -89,6 +89,10 @@ class AppServiceProvider extends ServiceProvider
         $this->app->beforeResolving(AuthorizationServer::class, fn () => app(PlatformSettings::class)->applyOAuthKeys());
         $this->app->beforeResolving(ResourceServer::class, fn () => app(PlatformSettings::class)->applyOAuthKeys());
 
+        // A client that asks for no scope, as a registered MCP client may, gets the one
+        // the MCP servers take: a token without it would be refused by both.
+        Passport::defaultScopes(['mcp:use']);
+
         // The consent screen an MCP client sends someone to before it gets a token.
         Passport::authorizationView(fn (array $parameters): Response => response()->view('mcp.authorize', $parameters));
 

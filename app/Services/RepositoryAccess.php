@@ -56,12 +56,16 @@ class RepositoryAccess
         }
 
         [$workspace, $slug] = $fullName;
+        $drivers = self::drivers(self::host($name));
 
         $found = $this->repositories($user)
-            ->with('tenant')
+            ->with(['tenant', 'integration'])
             ->whereRaw('lower(workspace) = ?', [mb_strtolower($workspace)])
             ->whereRaw('lower(slug) = ?', [mb_strtolower($slug)])
             ->when(filled($tenant), fn (Builder $query) => $query->whereHas('tenant', fn (Builder $scope) => $scope->where('slug', $tenant)))
+            // A remote or an address names its host, which tells a GitHub repository
+            // from a Bitbucket one of the same name.
+            ->when($drivers !== null, fn (Builder $query) => $query->whereHas('integration', fn (Builder $scope) => $scope->whereIn('driver', $drivers)))
             ->get();
 
         if ($found->isEmpty()) {
@@ -69,10 +73,27 @@ class RepositoryAccess
         }
 
         if ($found->count() > 1) {
-            throw new RepositoryNotFound("{$workspace}/{$slug} is in more than one of your tenants (".$found->map(fn (Repository $repository): string => $repository->tenant->slug)->implode(', ').'): name the tenant too.');
+            throw new RepositoryNotFound($found->pluck('tenant_id')->unique()->count() > 1
+                ? "{$workspace}/{$slug} is in more than one of your tenants (".$found->map(fn (Repository $repository): string => $repository->tenant->slug)->unique()->implode(', ').'): name the tenant too.'
+                : "{$workspace}/{$slug} is on more than one host (".$found->map(fn (Repository $repository): string => $repository->integration->name)->implode(', ').'): give its git remote or its address, which names the host.');
         }
 
         return $found->first();
+    }
+
+    /**
+     * The user's repositories, narrowed to the one named, or else to a tenant's
+     * when one is named.
+     *
+     * @return Builder<Repository>
+     *
+     * @throws RepositoryNotFound
+     */
+    public function scoped(User $user, ?string $repository = null, ?string $tenant = null): Builder
+    {
+        return filled($repository)
+            ? $this->repositories($user)->whereKey($this->find($user, (string) $repository, $tenant)->getKey())
+            : $this->repositories($user)->when(filled($tenant), fn (Builder $query) => $query->whereHas('tenant', fn (Builder $scope) => $scope->where('slug', $tenant)));
     }
 
     /**
@@ -106,6 +127,37 @@ class RepositoryAccess
         if (! $this->manages($user, $tenant)) {
             throw new ActionRefused("Only an admin of {$tenant->name} may do this. Ask one of them, or do it in Review Central yourself once you are one.");
         }
+    }
+
+    /**
+     * The host a remote or an address names, or null for workspace/slug.
+     */
+    public static function host(string $name): ?string
+    {
+        $name = trim($name);
+
+        if (preg_match('#^[\w.-]+@([\w.-]+):#', $name, $ssh) === 1) {
+            return mb_strtolower($ssh[1]);
+        }
+
+        $host = parse_url($name, PHP_URL_HOST);
+
+        return is_string($host) ? mb_strtolower($host) : null;
+    }
+
+    /**
+     * The connection drivers a host is reached by, or null when any may be.
+     *
+     * @return array<int, string>|null
+     */
+    public static function drivers(?string $host): ?array
+    {
+        return match (true) {
+            $host === null => null,
+            $host === 'github.com' || str_ends_with($host, '.github.com') => ['github', 'github-app'],
+            $host === 'bitbucket.org' || str_ends_with($host, '.bitbucket.org') => ['bitbucket'],
+            default => null,
+        };
     }
 
     /**
