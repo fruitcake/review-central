@@ -18,7 +18,7 @@ beforeEach(function () {
         'tenant_id' => $this->repository->tenant_id, 'connection_id' => $asana->id, 'name' => 'SHOP', 'style' => TicketStyle::Number, 'position' => 1,
     ]);
 
-    $this->task = ['gid' => '1220000000000001', 'name' => '#4512 - Export orders to CSV', 'notes' => 'Add a CSV download to the order overview.', 'permalink_url' => 'https://app.asana.com/0/1/1220000000000001'];
+    $this->task = ['gid' => '1220000000000001', 'workspace' => ['gid' => '1200000000000000'], 'name' => '#4512 - Export orders to CSV', 'notes' => 'Add a CSV download to the order overview.', 'permalink_url' => 'https://app.asana.com/0/1/1220000000000001'];
 
     // Asana as it answers a number: nothing has it as its custom ID, and the search
     // by name also returns a longer number and a task that only mentions it.
@@ -74,4 +74,17 @@ it('says the ticket could not be read when the search itself fails', function ()
     ($this->asana)([], 500);
 
     expect(($this->ticket)('#4512 - Add an order export'))->toMatchArray(['markdown' => null, 'error' => 'The ticket could not be read from SHOP.']);
+});
+
+it('reads no task by its id from a workspace other than the connection\'s', function () {
+    ($this->asana)();
+
+    expect(($this->ticket)("#{$this->task['gid']} Export orders"))->toMatchArray(['error' => null]);
+
+    $this->task['workspace']['gid'] = '1299999999999999';
+
+    expect(($this->ticket)("#{$this->task['gid']} Export orders"))->toMatchArray(['markdown' => null, 'error' => 'No ticket in SHOP matches this reference.']);
+
+    // Its subtasks were read for the first only.
+    expect(Http::recorded(fn (Request $request): bool => str_ends_with((string) parse_url($request->url(), PHP_URL_PATH), '/subtasks')))->toHaveCount(1);
 });

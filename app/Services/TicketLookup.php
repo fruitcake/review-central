@@ -8,6 +8,7 @@ use App\Exceptions\ActionRefused;
 use App\Exceptions\RepositoryNotFound;
 use App\Models\Repository;
 use App\Tickets\TicketResolver;
+use Throwable;
 
 /**
  * The ticket a change is for, read from the repository's ticket sources the way
@@ -15,56 +16,77 @@ use App\Tickets\TicketResolver;
  */
 class TicketLookup
 {
-    public function __construct(protected TicketResolver $tickets, protected PullRequestFeedback $feedback) {}
+    public function __construct(protected TicketResolver $tickets) {}
 
     /**
-     * @return array{reference: string, source: string, url: string|null, markdown: string|null}
+     * @return array{reference: string, source: string, url: string|null, markdown: string|null, graded: bool}
      *
      * @throws ActionRefused when no source reads the reference, or the ticket cannot be read
      */
     public function byReference(Repository $repository, string $reference): array
     {
         return $this->found(
+            $repository,
             $this->tickets->forReference($repository, $reference),
             "No ticket source of {$repository->fullName()} reads \"{$reference}\". Its sources are set up in Review Central, under Tickets.",
         );
     }
 
     /**
-     * The ticket the pull request's title names, as its review would read it now.
+     * The ticket the pull request's title names, as its review would read it now:
+     * the title as the host has it, by the pull request's number or as the open
+     * pull request of the branch.
      *
-     * @return array{reference: string, source: string, url: string|null, markdown: string|null, pull_request_id: int, title: string}
+     * @return array{reference: string, source: string, url: string|null, markdown: string|null, graded: bool, pull_request_id: int, title: string}
      *
      * @throws RepositoryNotFound
      * @throws ActionRefused
      */
     public function forPullRequest(Repository $repository, ?int $pullRequestId, ?string $branch = null): array
     {
-        $pullRequest = $this->feedback->resolve($repository, $pullRequestId, $branch);
-        $title = $pullRequest['record']->title
-            ?? rescue(fn () => $repository->sourceControl()->getPullRequest((string) $pullRequest['id'])['title'] ?? null, null, false);
+        if ($pullRequestId === null && blank($branch)) {
+            throw new RepositoryNotFound('Name the pull request: its number, or the branch it is from.');
+        }
+
+        try {
+            $pullRequest = $pullRequestId !== null
+                ? $repository->sourceControl()->getPullRequest((string) $pullRequestId)
+                : $repository->sourceControl()->findOpenPullRequestByBranch((string) $branch);
+        } catch (Throwable $exception) {
+            throw new ActionRefused("The pull request could not be read from {$repository->integration->name}: {$exception->getMessage()}");
+        }
+
+        if ($pullRequest === null || ! is_numeric($pullRequest['id'] ?? null)) {
+            throw new RepositoryNotFound($pullRequestId !== null
+                ? "{$repository->fullName()} has no pull request #{$pullRequestId}."
+                : "{$repository->fullName()} has no open pull request from {$branch}.");
+        }
+
+        $id = (int) $pullRequest['id'];
+        $title = $pullRequest['title'] ?? null;
 
         if (! is_string($title) || trim($title) === '') {
-            throw new ActionRefused("The title of pull request #{$pullRequest['id']} could not be read.");
+            throw new ActionRefused("Pull request #{$id} has no title to name a ticket.");
         }
 
         return [
             ...$this->found(
+                $repository,
                 $this->tickets->forTitle($repository, $title),
-                "The title of pull request #{$pullRequest['id']}, \"{$title}\", names no ticket a source of {$repository->fullName()} reads, so its review reads none either.",
+                "The title of pull request #{$id}, \"{$title}\", names no ticket a source of {$repository->fullName()} reads, so its review reads none either.",
             ),
-            'pull_request_id' => $pullRequest['id'],
+            'pull_request_id' => $id,
             'title' => $title,
         ];
     }
 
     /**
      * @param  array{reference: string, source: string, url: string|null, markdown: string|null, error: string|null}|null  $ticket
-     * @return array{reference: string, source: string, url: string|null, markdown: string|null}
+     * @return array{reference: string, source: string, url: string|null, markdown: string|null, graded: bool}
      *
      * @throws ActionRefused
      */
-    protected function found(?array $ticket, string $none): array
+    protected function found(Repository $repository, ?array $ticket, string $none): array
     {
         if ($ticket === null) {
             throw new ActionRefused($none);
@@ -74,6 +96,6 @@ class TicketLookup
             throw new ActionRefused("{$ticket['reference']}: {$ticket['error']}");
         }
 
-        return ['reference' => $ticket['reference'], 'source' => $ticket['source'], 'url' => $ticket['url'], 'markdown' => $ticket['markdown']];
+        return ['reference' => $ticket['reference'], 'source' => $ticket['source'], 'url' => $ticket['url'], 'markdown' => $ticket['markdown'], 'graded' => ReviewSettings::gradesTicket($repository)];
     }
 }
