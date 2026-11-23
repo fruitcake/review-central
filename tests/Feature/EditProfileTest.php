@@ -1,6 +1,7 @@
 <?php
 
 use App\Filament\Auth\EditProfile;
+use App\Models\Tenant;
 use App\Models\User;
 use Filament\Auth\Notifications\VerifyEmailChange;
 use Filament\Facades\Filament;
@@ -8,11 +9,37 @@ use Illuminate\Support\Facades\Notification;
 
 use function Pest\Livewire\livewire;
 
-it('opens the profile, which belongs to no tenant', function () {
-    $this->actingAs(User::factory()->create())
-        ->get(Filament::getPanel('app')->getProfileUrl())
+it('opens the profile as a page of the tenant, linked from the user menu', function () {
+    $tenant = Tenant::factory()->create(['slug' => 'acme']);
+    $user = User::factory()->create();
+    $user->tenants()->attach($tenant);
+
+    $this->actingAs($user)
+        ->get('/app/acme/profile')
         ->assertOk()
         ->assertSee([url('mcp/user'), url('mcp/agent')]);
+    $this->get('/app/acme')->assertSee(url('app/acme/profile'));
+});
+
+it('links the platform admin to their profile in the first tenant', function () {
+    Tenant::factory()->create(['name' => 'Zeta', 'slug' => 'zeta']);
+    Tenant::factory()->create(['name' => 'Acme', 'slug' => 'acme']);
+
+    $this->actingAs(User::factory()->create(['is_admin' => true]))
+        ->get('/admin')
+        ->assertSee(url('app/acme/profile'))
+        ->assertDontSee(url('app/zeta/profile'));
+});
+
+it('keeps the profile for a user in no tenant, and the admin of an installation without any', function () {
+    $this->actingAs(User::factory()->create())
+        ->get(route('home'))
+        ->assertSee(url('app/profile'));
+    $this->get('/app/profile')->assertOk();
+
+    $this->actingAs(User::factory()->create(['is_admin' => true]))
+        ->get('/admin')
+        ->assertSee(url('app/profile'));
 });
 
 it('changes the email only once the new address has opened the link mailed to it', function () {

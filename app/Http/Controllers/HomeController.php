@@ -28,7 +28,7 @@ class HomeController extends Controller
         $url = $landing->urlFor($user);
 
         return $url === null
-            ? view('no-tenant', ['user' => $user, 'logout' => Filament::getPanel('app')->getLogoutUrl()])
+            ? view('no-tenant', ['user' => $user, 'profile' => Filament::getPanel('app')->getProfileUrl(), 'logout' => Filament::getPanel('app')->getLogoutUrl()])
             : redirect()->to($url);
     }
 }

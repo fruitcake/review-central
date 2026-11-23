@@ -7,6 +7,7 @@ use Carbon\CarbonInterface;
 use Database\Factories\UserFactory;
 use Filament\Facades\Filament;
 use Filament\Models\Contracts\FilamentUser;
+use Filament\Models\Contracts\HasDefaultTenant;
 use Filament\Models\Contracts\HasTenants;
 use Filament\Panel;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -36,7 +37,7 @@ use Laravel\Passport\HasApiTokens;
  */
 #[Fillable(['name', 'email', 'password', 'is_admin', 'source_accounts'])]
 #[Hidden(['password', 'remember_token'])]
-class User extends Authenticatable implements FilamentUser, HasTenants, OAuthenticatable
+class User extends Authenticatable implements FilamentUser, HasDefaultTenant, HasTenants, OAuthenticatable
 {
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
@@ -134,6 +135,14 @@ class User extends Authenticatable implements FilamentUser, HasTenants, OAuthent
     public function getTenants(Panel $panel): Collection
     {
         return $this->is_admin ? Tenant::query()->orderBy('name')->get() : $this->tenants()->orderBy('name')->get();
+    }
+
+    /**
+     * The first of getTenants(), without loading the others.
+     */
+    public function getDefaultTenant(Panel $panel): ?Tenant
+    {
+        return ($this->is_admin ? Tenant::query() : $this->tenants())->orderBy('name')->first();
     }
 
     public function canAccessTenant(Model $tenant): bool

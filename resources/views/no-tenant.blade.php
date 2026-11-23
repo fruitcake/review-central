@@ -20,6 +20,7 @@
 <main>
     <h1>No tenant yet</h1>
     <p>You are signed in as {{ $user->email }}, but this account has not been added to a tenant. Ask an administrator of this installation to add you to one.</p>
+    <p class="muted">Your name, email address and password are under <a href="{{ $profile }}">your profile</a>.</p>
     <form method="post" action="{{ $logout }}">
         @csrf
         <button type="submit">Sign out</button>

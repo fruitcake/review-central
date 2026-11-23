@@ -32,7 +32,7 @@ class AppPanelProvider extends PanelProvider
             ->path('app')
             ->login()
             ->passwordReset()
-            // Simple: the profile belongs to no tenant, and the sidebar needs one.
+            // Without a tenant, for a user in none: simple, as the sidebar needs one.
             ->profile(EditProfile::class)
             // Google sign-in and an invitation trust the address on an account, so a
             // new one counts only once its owner has opened the link mailed to it.
@@ -40,8 +40,11 @@ class AppPanelProvider extends PanelProvider
             ->tenant(Tenant::class, slugAttribute: 'slug')
             ->discoverResources(in: app_path('Filament/App/Resources'), for: 'App\Filament\App\Resources')
             ->discoverPages(in: app_path('Filament/App/Pages'), for: 'App\Filament\App\Pages')
+            // And as a page of each tenant, with the sidebar and the way back.
+            ->pages([EditProfile::class])
             ->globalSearch(false)
             ->userMenuItems([
+                'profile' => fn (Action $action): Action => $action->url(EditProfile::urlForCurrentUser()),
                 Action::make('admin')
                     ->label('Platform admin')
                     ->icon(Heroicon::OutlinedCog6Tooth)
