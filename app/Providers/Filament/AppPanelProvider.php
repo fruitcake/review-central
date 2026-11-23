@@ -32,7 +32,8 @@ class AppPanelProvider extends PanelProvider
             ->path('app')
             ->login()
             ->passwordReset()
-            ->profile(EditProfile::class, isSimple: false)
+            // Simple: the profile belongs to no tenant, and the sidebar needs one.
+            ->profile(EditProfile::class)
             // Google sign-in and an invitation trust the address on an account, so a
             // new one counts only once its owner has opened the link mailed to it.
             ->emailChangeVerification()
