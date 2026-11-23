@@ -25,6 +25,13 @@ class FindingSettlement
 {
     public const AS_USER = 'you';
 
+    /**
+     * Under a reply posted as the user, so the reviewer does not take it for a
+     * question: on the reviewer's own account that went without saying. Hidden in
+     * the rendered comment, and no part of the user's own text can write it.
+     */
+    public const SETTLED_MARKER = '[//]: # (ai-settled)';
+
     public const AS_CONNECTION = 'the team\'s connection, with your name above it';
 
     public function __construct(protected PullRequestFeedback $feedback, protected FindingFeedback $verdicts, protected PersonalConnections $personal) {}
@@ -193,7 +200,7 @@ class FindingSettlement
     {
         $text = str_replace('@{', '@\\{', self::inert(trim($reply)));
 
-        return str_starts_with($text, '/') || str_starts_with($text, '@') ? '\\'.$text : $text;
+        return (str_starts_with($text, '/') || str_starts_with($text, '@') ? '\\'.$text : $text)."\n\n".self::SETTLED_MARKER;
     }
 
     /**

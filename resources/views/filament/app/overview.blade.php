@@ -115,8 +115,9 @@
                         <thead>
                             <tr>
                                 <th scope="col">Repository</th>
-                                <th scope="col">Runs on</th>
+                                <th scope="col" class="rc-num">Open PRs</th>
                                 <th scope="col" class="rc-num">Reviews</th>
+                                <th scope="col" class="rc-num" title="Reviews a pull request took in this period, and how many of them asked for changes">Per PR</th>
                                 <th scope="col" class="rc-num">Changes requested</th>
                                 <th scope="col" class="rc-num">Accepted</th>
                                 <th scope="col" class="rc-num">Cost</th>
@@ -134,14 +135,22 @@
                                             </span>
                                         </div>
                                     </td>
-                                    <td><span class="rc-tag">{{ $row['repository']->runner()->label() }}</span></td>
+                                    <td class="rc-num"><a href="{{ RepositoryResource::pullRequestsUrl($row['repository']) }}">{{ $row['open'] }}</a></td>
                                     <td class="rc-num">{{ $row['reviews'] }}</td>
+                                    <td class="rc-num">
+                                        @if ($row['per_pull_request'] === null)
+                                            —
+                                        @else
+                                            {{ $row['per_pull_request'] }}
+                                            <span class="rc-muted">{{ $row['rejected_per_pull_request'] }} rejected</span>
+                                        @endif
+                                    </td>
                                     <td class="rc-num">{{ $row['changes'] }}</td>
                                     <td class="rc-num"><strong class="rc-tone-primary">{{ $row['accepted'] }}</strong></td>
                                     <td class="rc-num">{{ Currency::show($row['cost']) }}</td>
                                 </tr>
                             @empty
-                                <tr><td colspan="6" class="rc-muted">No repositories yet.</td></tr>
+                                <tr><td colspan="7" class="rc-muted">No repositories yet.</td></tr>
                             @endforelse
                         </tbody>
                     </table>

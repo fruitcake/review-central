@@ -506,7 +506,7 @@ it('replies as the user on their own Bitbucket account where they connected it, 
     $settle('/review Not so, see CsvWriter::cell().')->assertOk()->assertStructuredContentPath('findings.0.replied_as', 'you');
 
     expect($lastPost()->header('Authorization'))->toBe(['Bearer sam-token'])
-        ->and($lastPost()['content']['raw'])->toBe('\\/review Not so, see CsvWriter::cell().')
+        ->and($lastPost()['content']['raw'])->toBe("\\/review Not so, see CsvWriter::cell().\n\n[//]: # (ai-settled)")
         ->and(ReviewRequest::isRequest($lastPost()['content']['raw']))->toBeFalse();
 
     // Its access ran out: renewed first, and kept.
@@ -570,7 +570,7 @@ it('posts a reply as the user no more than once, mentions nobody in it, and says
     // F1 once, as Sam; F2 as Sam, then by the connection; F3 as Sam, asking the reviewer nothing.
     expect($this->exportPosts)->toBe(1)
         ->and($posts)->toHaveCount(3)
-        ->and($posts[2]['content']['raw'])->toBe("**F3** · Wrong delimiter\n\n\\@\\{712020:bot} Fixed in the next push.")
+        ->and($posts[2]['content']['raw'])->toBe("**F3** · Wrong delimiter\n\n\\@\\{712020:bot} Fixed in the next push.\n\n[//]: # (ai-settled)")
         ->and(ReviewQuestions::isQuestion($posts[2]['content']['raw']))->toBeFalse()
         ->and(preg_match('~@\\{([^}\\s]+)\\}~', $posts[2]['content']['raw']))->toBe(0);
 });

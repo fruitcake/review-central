@@ -193,6 +193,12 @@ class ReviewQuestions
             return;
         }
 
+        // A reply to a finding settled through Review Central is for the next
+        // review to read, not a question to answer now.
+        if (str_contains((string) $event->comment, FindingSettlement::SETTLED_MARKER)) {
+            return;
+        }
+
         // Added to try a review on, or turned off: the reviewer is not its to ask.
         if (! $repository->reviews_enabled) {
             return;
