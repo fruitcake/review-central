@@ -129,8 +129,8 @@ Under **Review defaults → Open findings after a merge** a team can have them c
 
 Review Central is also an MCP server, so an AI assistant can read and act on the reviews as you. It has two addresses:
 
-- **`/mcp/agent`**, for a coding agent in a checkout, such as Claude Code: the review's instructions with the team's rules, to review a change the way the pull request's review will before it is pushed; a pull request's newest review with its findings, the team's verdicts and the replies in each finding's thread; the open findings of the files it touches. It can ask the reviewer about a finding, record your verdict on one, start the review again without a push, and, for an admin, add a rule.
-- **`/mcp/user`**, for a chat, such as Claude: your tenants and repositories, the open pull requests and whose turn each is (or only those waiting for you), and the same reviews, findings and rules.
+- **`/mcp/agent`**, for a coding agent in a checkout, such as Claude Code: the ticket the change is for, read from the tenant's ticket sources as the review reads it; the review's instructions with the team's rules, to review a change the way the pull request's review will before it is pushed; a pull request's newest review with its findings, the team's verdicts and the replies in each finding's thread; the open findings of the files it touches. It can ask the reviewer about a finding, record your verdict on one, start the review again without a push, and, for an admin, add a rule.
+- **`/mcp/user`**, for a chat, such as Claude: your tenants and repositories, the open pull requests and whose turn each is (or only those waiting for you), and the same tickets, reviews, findings and rules.
 
 Add it with its address, and the assistant signs you in on Review Central's own page:
 

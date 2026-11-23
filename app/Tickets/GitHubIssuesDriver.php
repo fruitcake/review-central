@@ -104,6 +104,12 @@ class GitHubIssuesDriver implements ExplainsSetup, TicketDriver
 
         $issue = $response->throw()->json();
 
+        // GitHub numbers issues and pull requests alike, and answers a pull request
+        // here too: that is a change, not a ticket.
+        if (isset($issue['pull_request'])) {
+            throw TicketNotFound::forReference("#{$number}");
+        }
+
         $comments = ($issue['comments'] ?? 0) > 0
             ? $this->request($connection)->get("{$url}/comments", ['per_page' => self::MAX_COMMENTS])->throw()->json()
             : [];

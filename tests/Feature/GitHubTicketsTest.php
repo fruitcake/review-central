@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\ConnectionFailed;
+use App\Exceptions\TicketNotFound;
 use App\Models\Connection;
 use App\Models\Repository;
 use App\Tickets\GitHubIssuesDriver;
@@ -27,5 +28,15 @@ it('follows no redirect from an address of the tenant\'s own, and does not read 
         ->toThrow(ConnectionFailed::class, 'redirects to http://10.0.0.5/issues/12');
 
     // Only the address that was entered was asked.
+    Http::assertSentCount(1);
+});
+
+it('reads no pull request as an issue', function () {
+    Http::fake(['api.github.com/*' => Http::response(['number' => 12, 'title' => 'Refactor the cart', 'body' => 'Internal notes.', 'comments' => 3, 'pull_request' => ['url' => 'https://api.github.com/repos/acme/shop/pulls/12']])]);
+
+    expect(fn () => (new GitHubIssuesDriver)->fetch(($this->connection)(), '#12', $this->repository))
+        ->toThrow(TicketNotFound::class);
+
+    // Its conversation was not read either.
     Http::assertSentCount(1);
 });

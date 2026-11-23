@@ -219,6 +219,19 @@ class ReviewSettings
     }
 
     /**
+     * Whether the repository's settings ask the review to grade a change against its
+     * ticket's acceptance criteria, as options() reads it: its own setting, or the
+     * team's. A preference: a reviewer that writes no grading, such as OpenCodeReview,
+     * leaves it out all the same.
+     */
+    public static function gradesTicket(Repository $repository): bool
+    {
+        $own = $repository->reviewSetting?->ticket_grading;
+
+        return self::options(['REVIEW_TICKET_GRADING' => (string) (filled($own) ? $own : self::defaults($repository->tenant)->ticket_grading)])['grade_ticket'];
+    }
+
+    /**
      * The follow-up rounds a pull request's review may add findings in: the
      * repository's own number, or the team's, or five.
      */

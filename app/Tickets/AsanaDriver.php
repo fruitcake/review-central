@@ -29,7 +29,7 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
 {
     protected const API = 'https://app.asana.com/api/1.0';
 
-    protected const TASK_FIELDS = 'name,notes,completed,due_on,permalink_url,assignee.name,projects.name,parent.name,custom_fields.name,custom_fields.display_value';
+    protected const TASK_FIELDS = 'workspace.gid,name,notes,completed,due_on,permalink_url,assignee.name,projects.name,parent.name,custom_fields.name,custom_fields.display_value';
 
     public function label(): string
     {
@@ -131,7 +131,9 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
 
         $task = $response->throw()->json('data');
 
-        if (! is_array($task) || ! isset($task['gid'])) {
+        // A task id reaches every workspace the account is in; only the connection's
+        // own workspace is its tickets.
+        if (! is_array($task) || ! isset($task['gid']) || (string) ($task['workspace']['gid'] ?? '') !== (string) $connection->setting('workspace')) {
             throw TicketNotFound::forReference($reference);
         }
 
