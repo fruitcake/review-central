@@ -120,4 +120,9 @@ final class ReadOnlyClient implements SourceControl
     {
         return $this->client->commitUrl($commit);
     }
+
+    public function fileUrl(string $commit, string $path, ?int $line = null): ?string
+    {
+        return $this->client->fileUrl($commit, $path, $line);
+    }
 }

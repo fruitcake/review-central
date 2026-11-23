@@ -25,10 +25,23 @@ beforeEach(function () {
         'tenant_id' => $this->tenant->id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop', 'branch' => 'feature/export',
         'commit' => str_repeat('a', 40), 'status' => ReviewRun::STATUS_FINISHED, 'result' => 'FAILED', 'started_at' => now()->subHour(),
         'findings' => [
-            ['id' => 'F1', 'severity' => 'HIGH', 'status' => 'new', 'category' => 'security', 'title' => 'Unescaped output'],
+            ['id' => 'F1', 'severity' => 'HIGH', 'status' => 'new', 'category' => 'security', 'title' => 'Unescaped output', 'path' => 'app/Views/Order View.php', 'line' => 7],
             ['id' => 'F2', 'severity' => 'LOW', 'status' => 'new', 'category' => 'tests', 'title' => 'No test'],
         ],
     ]);
+});
+
+it('asks of a finding that was fixed whether it was valid, not whether it will be fixed', function () {
+    $this->actingAs($this->user);
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+    Filament::setTenant($this->tenant);
+    Filament::bootCurrentPanel();
+
+    $this->run->update(['findings' => [['id' => 'F1', 'severity' => 'HIGH', 'status' => 'fixed', 'title' => 'Unescaped output']]]);
+
+    livewire(ViewReviewRun::class, ['record' => $this->run->uuid])
+        ->assertSee('Was valid')
+        ->assertDontSee('Valid, will fix');
 });
 
 it('keeps one verdict of a user on a finding, replaces it, and takes it back when given twice', function () {
@@ -70,6 +83,8 @@ it('takes a verdict and a rating from the review\'s own page', function () {
 
     livewire(ViewReviewRun::class, ['record' => $this->run->uuid])
         ->assertSee('Unescaped output')
+        // Its file on the host, as it was at the commit reviewed.
+        ->assertSeeHtml('href="https://bitbucket.org/'.$this->repository->workspace.'/'.$this->repository->slug.'/src/'.str_repeat('a', 40).'/app/Views/Order%20View.php#lines-7"')
         ->assertSee('Valid, will fix')
         ->call('judge', 'F1', 'valid')
         ->call('judge', 'F2', 'not-a-verdict')

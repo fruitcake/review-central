@@ -316,6 +316,19 @@ class BitbucketClient implements FiltersSecrets, SourceControl
         return "https://bitbucket.org/{$this->workspace}/{$this->slug}";
     }
 
+    public function fileUrl(string $commit, string $path, ?int $line = null): ?string
+    {
+        return "https://bitbucket.org/{$this->workspace}/{$this->slug}/src/{$commit}/".self::encodePath($path).($line === null ? '' : "#lines-{$line}");
+    }
+
+    /**
+     * A path as it goes in an address: each part encoded, the slashes kept.
+     */
+    protected static function encodePath(string $path): string
+    {
+        return implode('/', array_map(rawurlencode(...), explode('/', ltrim($path, '/'))));
+    }
+
     public function pullRequestUrl(int $pullRequestId): string
     {
         return "https://bitbucket.org/{$this->workspace}/{$this->slug}/pull-requests/{$pullRequestId}";

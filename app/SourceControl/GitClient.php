@@ -102,4 +102,9 @@ class GitClient implements SourceControl
     {
         return rtrim($this->base, '/')."/{$this->slug}";
     }
+
+    public function fileUrl(string $commit, string $path, ?int $line = null): ?string
+    {
+        return null;
+    }
 }

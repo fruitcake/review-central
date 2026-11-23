@@ -132,7 +132,12 @@
                             </div>
                             <h3>{{ $finding['title'] ?? '' }}</h3>
                             @if (filled($finding['path'] ?? null))
-                                <span class="rc-mono rc-muted">{{ $finding['path'] }}@if (filled($finding['line'] ?? null)):{{ $finding['line'] }}@endif</span>
+                                @php($at = $fileUrl((string) $finding['path'], $finding['line'] ?? null))
+                                @if ($at !== null)
+                                    <a class="rc-mono rc-muted rc-file-link" href="{{ $at }}" target="_blank" rel="noopener" title="As it was at {{ Str::limit((string) $run->commit, 8, '') }}">{{ $finding['path'] }}@if (filled($finding['line'] ?? null)):{{ $finding['line'] }}@endif</a>
+                                @else
+                                    <span class="rc-mono rc-muted">{{ $finding['path'] }}@if (filled($finding['line'] ?? null)):{{ $finding['line'] }}@endif</span>
+                                @endif
                             @endif
                             @if (filled($finding['details'] ?? null))
                                 <div class="rc-prose">{!! Str::markdown((string) $finding['details'], ['html_input' => 'strip', 'allow_unsafe_links' => false]) !!}</div>
@@ -147,7 +152,7 @@
                                 <span class="rc-muted">Was this right?</span>
                                 @foreach (\App\Enums\FindingVerdictKind::cases() as $kind)
                                     @php($given = ($verdicts[(string) ($finding['id'] ?? '')] ?? null) === $kind)
-                                    <button type="button" wire:click="judge(@js((string) ($finding['id'] ?? '')), '{{ $kind->value }}')" aria-pressed="{{ $given ? 'true' : 'false' }}" @class(['rc-verdict', "rc-verdict-{$kind->value}", 'rc-on' => $given])>{{ $kind->text() }}</button>
+                                    <button type="button" wire:click="judge(@js((string) ($finding['id'] ?? '')), '{{ $kind->value }}')" aria-pressed="{{ $given ? 'true' : 'false' }}" @class(['rc-verdict', "rc-verdict-{$kind->value}", 'rc-on' => $given])>{{ $kind === \App\Enums\FindingVerdictKind::Valid && $status === 'fixed' ? 'Was valid' : $kind->text() }}</button>
                                 @endforeach
                                 @php($mine = $verdicts[(string) ($finding['id'] ?? '')] ?? null)
                                 @if ($mine !== null && ! $mine->accepts())

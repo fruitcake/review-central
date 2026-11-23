@@ -331,6 +331,8 @@ class ViewReviewRun extends ViewRecord
                 ->limit(20)
                 ->get(),
             'verdicts' => auth()->user() instanceof User ? app(FindingFeedback::class)->of($run, auth()->user()) : [],
+            // A finding's file on the host, as it was at the commit this run reviewed.
+            'fileUrl' => fn (string $path, mixed $line): ?string => rescue(fn (): ?string => $run->repository->sourceControl()->fileUrl($run->commit, $path, is_numeric($line) ? (int) $line : null), null, false),
             'reasons' => auth()->user() instanceof User ? app(FindingFeedback::class)->reasons($run, auth()->user()) : [],
             // Why people in the team dismissed each finding, notes given from an AI assistant included.
             'explanations' => FindingVerdict::query()->with('user')->where('review_run_id', $run->getKey())

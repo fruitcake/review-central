@@ -211,4 +211,10 @@ interface SourceControl
     public function pullRequestUrl(int $pullRequestId): string;
 
     public function commitUrl(string $commit): string;
+
+    /**
+     * Where a person reads a file as it was at a commit, at a line when one is
+     * given; null for a host that shows no files.
+     */
+    public function fileUrl(string $commit, string $path, ?int $line = null): ?string;
 }

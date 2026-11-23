@@ -285,15 +285,18 @@ class PullRequestFeedback
         $failOn = ReviewPublisher::failOnSpec($run->fail_on);
         $verdicts = FindingVerdict::query()->with('user')->where('review_run_id', $run->getKey())->get()->groupBy('finding_id');
         $threads = $this->threads($comments);
+        $host = rescue(fn () => $run->repository->sourceControl(), null, false);
 
         return collect($run->findings ?? [])
-            ->map(function (array $finding) use ($failOn, $verdicts, $threads, $user): array {
+            ->map(function (array $finding) use ($failOn, $verdicts, $threads, $user, $host, $run): array {
                 $id = (string) ($finding['id'] ?? '');
                 /** @var Collection<int, FindingVerdict> $given */
                 $given = $verdicts->get($id, collect());
 
                 return array_filter([
                     ...$finding,
+                    // The file on the host as the review read it.
+                    'url' => $host === null || ! is_string($finding['path'] ?? null) ? null : $host->fileUrl($run->commit, $finding['path'], is_numeric($finding['line'] ?? null) ? (int) $finding['line'] : null),
                     'blocks' => ReviewPublisher::blocks($finding, $failOn),
                     'open' => in_array(strtolower((string) ($finding['status'] ?? 'new')), ReviewPublisher::OPEN, true),
                     'verdicts' => $given->isEmpty() ? null : $given->countBy(fn (FindingVerdict $verdict): string => $verdict->verdict->value)->all(),
