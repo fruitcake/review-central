@@ -218,11 +218,13 @@ it('lists a ticket\'s files, and gives an agent an image to look at and a log to
             ['id' => '10002', 'filename' => 'console.log', 'mimeType' => 'text/plain', 'size' => 18],
             ['id' => '10003', 'filename' => 'export.zip', 'mimeType' => 'application/zip', 'size' => 4],
             ['id' => '10005', 'filename' => 'orders.csv', 'mimeType' => 'text/csv', 'size' => 60 * 1024],
+            ['id' => '10006', 'filename' => '100% complete.pdf', 'mimeType' => 'application/pdf', 'size' => 8],
             ['id' => '10004', 'filename' => 'recording.mov', 'mimeType' => 'video/quicktime', 'size' => 50 * 1024 * 1024],
         ]]]),
         'acme.atlassian.net/rest/api/2/attachment/content/10001' => Http::response($png, 200, ['Content-Type' => 'image/png']),
         'acme.atlassian.net/rest/api/2/attachment/content/10002' => Http::response("TypeError: width\n", 200, ['Content-Type' => 'text/plain']),
         'acme.atlassian.net/rest/api/2/attachment/content/10003' => Http::response('PK..', 200, ['Content-Type' => 'application/zip']),
+        'acme.atlassian.net/rest/api/2/attachment/content/10006' => Http::response('%PDF-1.7', 200, ['Content-Type' => 'application/pdf']),
         'acme.atlassian.net/rest/api/2/attachment/content/10005' => Http::response("id;total\n".str_repeat("1;9.95\n", 9000), 200, ['Content-Type' => 'text/csv']),
     ]);
     $attachment = fn (int $number, ?User $user = null) => AgentServer::actingAs($user ?? $this->member)
@@ -239,8 +241,8 @@ it('lists a ticket\'s files, and gives an agent an image to look at and a log to
 
     $attachment(1)->assertOk()->assertSee(['button.png', base64_encode($png)]);
     $attachment(2)->assertOk()->assertSee("# console.log\n\nTypeError: width");
-    $attachment(5)->assertHasErrors(['recording.mov is larger than 10 MB, which is not read.']);
-    $attachment(6)->assertHasErrors(['PROJ-9 has no attachment 6: it has 5.']);
+    $attachment(6)->assertHasErrors(['recording.mov is larger than 10 MB, which is not read.']);
+    $attachment(7)->assertHasErrors(['PROJ-9 has no attachment 7: it has 6.']);
 
     // Anything else is for the checkout, not the conversation: an address to save it from.
     $attachment(4)->assertOk()->assertSee(['text/csv', 'Download it within 15 minutes', "Its first lines:\n\n```\nid;total\n1;9.95"]);
@@ -253,7 +255,20 @@ it('lists a ticket\'s files, and gives an agent an image to look at and a log to
         ->assertHeader('X-Content-Type-Options', 'nosniff')
         ->assertContent('PK..');
     $this->get($download($this->member).'0')->assertForbidden();
-    $this->get($download($this->member, 5))->assertNotFound();
+
+    // What the address signed holds, whatever a body of the request says: not another tenant's file.
+    $other = Repository::factory()->create(['workspace' => 'other', 'slug' => 'shop']);
+    $outsider = User::factory()->create();
+    $outsider->tenants()->attach($other->tenant);
+    $this->call('GET', $download($this->member), [], [], [], ['CONTENT_TYPE' => 'application/json'], json_encode(['user' => $outsider->id, 'repository' => $other->id, 'number' => 1]))
+        ->assertOk()
+        ->assertContent('PK..');
+
+    // A name the header could not take as it is.
+    $this->get($download($this->member, 5))->assertOk()
+        ->assertHeader('Content-Disposition', 'attachment; filename="100_ complete.pdf"')
+        ->assertContent('%PDF-1.7');
+    $this->get($download($this->member, 6))->assertNotFound();
     $expired = $download($this->member);
     $this->travel(16)->minutes();
     $this->get($expired)->assertForbidden();
