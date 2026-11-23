@@ -37,6 +37,15 @@ return [
         'redirect' => '/sign-in/google/callback',
     ],
 
+    // Acting on Bitbucket as yourself: an OAuth consumer of a Bitbucket workspace,
+    // with <APP_URL>/connections/bitbucket/callback as its callback URL. Without
+    // both values the profile offers no Bitbucket account to connect.
+    'bitbucket' => [
+        'client_id' => env('BITBUCKET_CLIENT_ID'),
+        'client_secret' => env('BITBUCKET_CLIENT_SECRET'),
+        'redirect' => '/connections/bitbucket/callback',
+    ],
+
     // Connecting Asana and Jira by signing in there instead of pasting a token:
     // this installation registered as an OAuth app at each, with
     // <APP_URL>/connections/oauth/callback as its redirect address. Without an

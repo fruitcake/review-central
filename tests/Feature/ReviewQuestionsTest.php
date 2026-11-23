@@ -10,6 +10,7 @@ use App\Models\ReviewRun;
 use App\Models\User;
 use App\Runners\Container\QuestionAnswer;
 use App\Runners\Container\ReviewSessions;
+use App\Services\FindingSettlement;
 use App\Services\ReviewQuestions;
 use Filament\Facades\Filament;
 use Illuminate\Http\Client\Factory;
@@ -438,6 +439,27 @@ it('tells the reviewer which finding a question in its thread is about', functio
     $step = collect($steps)->first(fn (array $step): bool => $step['command'][1] === 'run');
 
     expect($step['environment']['REVIEW_QUESTION'])->toContain('The finding:', 'The export escapes nothing.', 'The question:', 'explique-moi ça simplement');
+});
+
+it('takes no reply settled through Review Central for a question, under a finding or naming the reviewer', function () {
+    Queue::fake();
+    Http::swap(new Factory);
+    $finding = "The export escapes nothing.\n\n[//]: # (ai-finding id=F1 status=new severity=HIGH path=app/Export.php line=12)";
+    Http::fake([
+        'api.bitbucket.org/*/pullrequests/570/comments*' => Http::response(['values' => [['id' => 600, 'content' => ['raw' => $finding]]]]),
+        'api.bitbucket.org/*' => Http::response(['id' => 901]),
+    ]);
+
+    comment(FindingSettlement::ownBody('Could you look again? CsvWriter escapes it.'), 78, more: ['parent' => ['id' => 600]])->assertOk();
+    comment(FindingSettlement::ownBody('review, this is handled in CsvWriter.'), 79)->assertOk();
+
+    expect(ReviewQuestion::query()->count())->toBe(0);
+    Queue::assertNothingPushed();
+
+    // The same words typed by the person are still a reply to consider.
+    comment('Could you look again? CsvWriter escapes it.', 80, more: ['parent' => ['id' => 600]])->assertOk();
+
+    expect(ReviewQuestion::query()->sole()->comment_id)->toBe(80);
 });
 
 it('counts a reply under a finding against the hour only once it is for the reviewer', function () {

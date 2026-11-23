@@ -44,14 +44,14 @@ class IntegrationAppResource extends Resource
             Toggle::make('for_all_tenants')
                 ->label('For every tenant')
                 ->live()
-                ->visible(fn (Get $get): bool => filled($get('type')) && $get('type') !== 'google')
+                ->visible(fn (Get $get): bool => filled($get('type')) && ! in_array($get('type'), Integrations::FOR_EVERY_TENANT, true))
                 ->helperText('Off: only for the tenants picked below. A new app is for none until it is given to some.'),
             Select::make('tenants')
                 ->label('For these tenants')
                 ->relationship('tenants', 'name')
                 ->multiple()
                 ->preload()
-                ->visible(fn (Get $get): bool => filled($get('type')) && $get('type') !== 'google' && ! $get('for_all_tenants')),
+                ->visible(fn (Get $get): bool => filled($get('type')) && ! in_array($get('type'), Integrations::FOR_EVERY_TENANT, true) && ! $get('for_all_tenants')),
         ]);
     }
 
@@ -75,7 +75,8 @@ class IntegrationAppResource extends Resource
     }
 
     /**
-     * One of the platform's: signing in with Google is for everyone.
+     * One of the platform's: signing in with Google and a user's own Bitbucket
+     * account are for everyone.
      *
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
@@ -84,7 +85,7 @@ class IntegrationAppResource extends Resource
     {
         $type = $data['type'] ?? $record?->type;
 
-        return ['tenant_id' => null, 'for_all_tenants' => $type === 'google' || (bool) ($data['for_all_tenants'] ?? false)] + $data;
+        return ['tenant_id' => null, 'for_all_tenants' => in_array($type, Integrations::FOR_EVERY_TENANT, true) || (bool) ($data['for_all_tenants'] ?? false)] + $data;
     }
 
     public static function table(Table $table): Table

@@ -40,6 +40,10 @@ final class Integrations
             'client_id' => ['label' => 'Client ID', 'secret' => false, 'env' => 'services.google.client_id'],
             'client_secret' => ['label' => 'Client secret', 'secret' => true, 'env' => 'services.google.client_secret'],
         ]],
+        'bitbucket' => ['label' => 'Bitbucket: act as yourself', 'single' => true, 'tenants_add' => false, 'service' => 'Bitbucket', 'fields' => [
+            'client_id' => ['label' => 'Key', 'secret' => false, 'env' => 'services.bitbucket.client_id'],
+            'client_secret' => ['label' => 'Secret', 'secret' => true, 'env' => 'services.bitbucket.client_secret'],
+        ]],
         'asana' => ['label' => 'Asana: connect by signing in', 'single' => false, 'tenants_add' => true, 'service' => 'Asana', 'fields' => [
             'client_id' => ['label' => 'Client ID', 'secret' => false, 'env' => 'services.asana.client_id'],
             'client_secret' => ['label' => 'Client secret', 'secret' => true, 'env' => 'services.asana.client_secret'],
@@ -59,6 +63,23 @@ final class Integrations
     ];
 
     /**
+     * Types whose app is for the whole installation, never for some tenants only:
+     * signing in comes before a tenant is known, and a user's own Bitbucket
+     * account is theirs, not a tenant's.
+     *
+     * @var array<int, string>
+     */
+    public const FOR_EVERY_TENANT = ['google', 'bitbucket'];
+
+    /**
+     * The single types whose app is read from the configuration: Google's and
+     * Bitbucket's through Socialite, the GitHub App's by GitHubApp.
+     *
+     * @var array<int, string>
+     */
+    protected const APPLIED = ['google', 'bitbucket', 'github_app'];
+
+    /**
      * The configuration this put in from a single app of the list, where .env left
      * it empty, so a later change replaces it and what .env sets is told apart.
      *
@@ -68,7 +89,8 @@ final class Integrations
 
     /**
      * Puts the one app of each single type into the configuration, where .env
-     * leaves it empty: what signing in with Google and the GitHub App read.
+     * leaves it empty: what signing in with Google, a user's own Bitbucket
+     * account and the GitHub App read.
      */
     public static function apply(): void
     {
@@ -76,9 +98,9 @@ final class Integrations
             return;
         }
 
-        $singles = rescue(fn () => IntegrationApp::query()->whereNull('tenant_id')->whereIn('type', ['google', 'github_app'])->get()->keyBy('type'), collect(), false);
+        $singles = rescue(fn () => IntegrationApp::query()->whereNull('tenant_id')->whereIn('type', self::APPLIED)->get()->keyBy('type'), collect(), false);
 
-        foreach (['google', 'github_app'] as $type) {
+        foreach (self::APPLIED as $type) {
             $app = $singles->get($type);
 
             foreach (self::TYPES[$type]['fields'] as $field => ['env' => $key]) {

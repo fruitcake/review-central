@@ -84,6 +84,7 @@ See [`cloudflare/README.md`](https://github.com/fruitcake/review-central/blob/ma
 | Setting | What it does |
 |---|---|
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Sign in with Google. Also under Apps in the admin panel. See [Setting up a tenant](./tenants#signing-in-with-google). |
+| `BITBUCKET_CLIENT_ID`, `BITBUCKET_CLIENT_SECRET` | The key and secret of a Bitbucket OAuth consumer, for people to reply on Bitbucket as themselves. Also under Apps in the admin panel. See [Setting up a tenant](./tenants#replying-on-bitbucket-as-yourself). |
 | `ASANA_CLIENT_ID`, `ASANA_CLIENT_SECRET`, `ASANA_OAUTH_SCOPE` | Connect Asana by signing in there; the ID and secret also under Apps in the admin panel. See [Setting up a tenant](./tenants#signing-in-to-asana-and-jira). |
 | `ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLIENT_SECRET` | The same for Jira. Also under Apps in the admin panel. |
 | `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_WEBHOOK_SECRET` | Review on GitHub as a GitHub App. Also under Apps in the admin panel. See [Setting up a tenant](./tenants#github-as-an-app). |
