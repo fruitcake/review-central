@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\SignInRefused;
 use App\Filament\Auth\EditProfile;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\PersonalConnections;
+use App\Services\SingleSignOn;
 use Filament\Notifications\Notification;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -22,6 +24,9 @@ use Throwable;
  */
 class PersonalConnectionController extends Controller
 {
+    /** In the session while a sign-in with Bitbucket is under way. */
+    public const SIGN_IN = 'bitbucket_sign_in';
+
     /**
      * Off to Bitbucket, to say yes there.
      */
@@ -36,19 +41,29 @@ class PersonalConnectionController extends Controller
         $request->session()->put('personal_connection.return', $tenant !== null && $user instanceof User && $user->canAccessTenant($tenant)
             ? EditProfile::getUrl(panel: 'app', tenant: $tenant)
             : EditProfile::urlForCurrentUser());
+        $request->session()->forget(self::SIGN_IN);
 
         return $this->driver()->setScopes(PersonalConnections::BITBUCKET_SCOPES)->redirect();
     }
 
     /**
-     * Back from Bitbucket: the account is kept for the user who asked.
+     * Back from Bitbucket: a sign-in goes on to signing in, else the account is
+     * kept for the user who asked, and signs them in from now on.
      */
-    public function callback(Request $request, PersonalConnections $connections): RedirectResponse
+    public function callback(Request $request, PersonalConnections $connections, SingleSignOn $signOn): RedirectResponse
     {
         abort_unless(PersonalConnections::available(), 404);
 
+        // The consumer has one callback: a sign-in started there ends on its own route.
+        if ($request->session()->pull(self::SIGN_IN) === true) {
+            return redirect()->to(route('sign-in.callback', ['provider' => SingleSignOn::BITBUCKET]).'?'.http_build_query($request->query()));
+        }
+
         $user = $request->user();
-        abort_unless($user instanceof User, 403);
+
+        if (! $user instanceof User) {
+            return redirect()->guest(route('filament.app.auth.login'));
+        }
 
         $return = (string) ($request->session()->pull('personal_connection.return') ?? EditProfile::urlForCurrentUser());
 
@@ -58,6 +73,14 @@ class PersonalConnectionController extends Controller
         } catch (Throwable) {
             // Cancelled there, or a link that was opened twice: nothing to report.
             Notification::make()->title('Bitbucket was not connected')->body('Connecting did not complete. Try again.')->danger()->send();
+
+            return redirect()->to($return);
+        }
+
+        try {
+            $signOn->link($user, SingleSignOn::BITBUCKET, (string) $account->getId());
+        } catch (SignInRefused $exception) {
+            Notification::make()->title('Bitbucket was not connected')->body($exception->getMessage())->danger()->send();
 
             return redirect()->to($return);
         }

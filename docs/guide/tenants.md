@@ -75,9 +75,13 @@ A user whose address is already known signs in as that user, when Google holds t
 
 Replies to findings that an AI assistant posts for you are written by the tenant's connection, with your name above them. With a Bitbucket OAuth consumer added under **Admin → Apps**, or `BITBUCKET_CLIENT_ID` and `BITBUCKET_CLIENT_SECRET` in `.env`, each person can connect their own Bitbucket account under **Your Bitbucket account** on their profile, and their replies are then written as them.
 
-Make the consumer in any Bitbucket workspace you administer, under **Settings → OAuth consumers**, with `<APP_URL>/connections/bitbucket/callback` as its callback URL and the permissions **Account: Read** and **Pull requests: Read**, which includes commenting, and no others: Bitbucket gives every token the consumer's permissions, whatever is asked for. People of other workspaces connect through it too. The account is kept for that person only and used for nothing but their replies, though Bitbucket lets its token comment on every pull request they can. Connecting it also fills in their account under **Your accounts on the hosts**. When Bitbucket refuses a reply as them, as on a repository their account cannot reach, the connection posts it as before.
+Make the consumer in any Bitbucket workspace you administer, under **Settings → OAuth consumers**, with `<APP_URL>/connections/bitbucket/callback` as its callback URL and the permissions **Account: Email**, **Account: Read** and **Pull requests: Read**, which includes commenting, and no others: Bitbucket gives every token the consumer's permissions, whatever is asked for, signing in included. People of other workspaces connect through it too. The account is kept for that person only and used for nothing but their replies, though Bitbucket lets its token comment on every pull request they can. Connecting it also fills in their account under **Your accounts on the hosts**. When Bitbucket refuses a reply as them, as on a repository their account cannot reach, the connection posts it as before.
 
 The tenant's connection itself stays a token of its own: the review comments, approves and adds webhooks as it, whoever connects their account.
+
+### Signing in with Bitbucket
+
+With the same consumer, the sign-in page has a **Sign in with Bitbucket** button. Bitbucket names an account's address but does not deliver its mail, so its word alone is not enough: someone who had an address at a former employer may still have a Bitbucket account under it. A Bitbucket account signs in by itself once it is linked: by connecting it on the profile, or by signing in with it once and typing the code that is then mailed to the account's primary address. The code works for 15 minutes, in the browser that signed in. Someone without an account here gets one that way only when a tenant lists their address's domain under **Sign-in domains**, as with Google; the code shows the address is theirs.
 
 ## Signing in to Asana and Jira
 

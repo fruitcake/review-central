@@ -127,7 +127,7 @@ class SetupGuides
     public function bitbucket(): SetupGuide
     {
         return new SetupGuide(
-            title: 'A Bitbucket OAuth consumer to reply as yourself',
+            title: 'A Bitbucket OAuth consumer to reply and sign in as yourself',
             url: 'https://bitbucket.org/account/workspaces/',
             linkLabel: 'Your workspaces on Bitbucket',
             steps: [
@@ -137,11 +137,13 @@ class SetupGuides
                 'Open the consumer, and fill in its **Key** and **Secret** under **Apps** in the admin panel, or set `BITBUCKET_CLIENT_ID` and `BITBUCKET_CLIENT_SECRET` in `.env`, which goes first.',
             ],
             permissions: [
-                'Account: Read' => 'who the account is, which also fills in their account under "Your accounts on the hosts".',
+                'Account: Email' => 'the account\'s primary address, for signing in with Bitbucket.',
+                'Account: Read' => 'who the account is; it also fills in their account under "Your accounts on the hosts".',
                 'Pull requests: Read' => 'posts their replies to findings as them: reading includes commenting. Bitbucket ticks Repositories: Read with it.',
             ],
             notes: [
                 'Each person connects their own account on their profile; without it, their replies are posted by the team\'s connection with their name above them.',
+                'The sign-in page offers **Sign in with Bitbucket** too. An account that is not linked yet gets a code mailed to its address first.',
             ],
         );
     }

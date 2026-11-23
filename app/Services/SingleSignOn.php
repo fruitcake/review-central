@@ -26,15 +26,58 @@ class SingleSignOn
     public const GOOGLE = 'google';
 
     /**
+     * Bitbucket says which address an account has, not that it delivers that
+     * address's mail: an account it does not know yet signs in only once its
+     * address has answered a code ({@see SignInCodes}).
+     */
+    public const BITBUCKET = 'bitbucket';
+
+    /**
      * The providers this installation is set up for, with the name on the button.
      *
      * @return array<string, string>
      */
     public static function providers(): array
     {
-        return filled(config('services.google.client_id')) && filled(config('services.google.client_secret'))
-            ? [self::GOOGLE => 'Google']
-            : [];
+        return array_filter([
+            self::GOOGLE => filled(config('services.google.client_id')) && filled(config('services.google.client_secret')) ? 'Google' : null,
+            self::BITBUCKET => PersonalConnections::available() ? 'Bitbucket' : null,
+        ]);
+    }
+
+    /**
+     * The user an account at the provider was linked to, if any.
+     */
+    public function known(string $provider, string $id): ?User
+    {
+        return UserIdentity::query()->where('provider', $provider)->where('provider_id', $id)->first()?->user;
+    }
+
+    /**
+     * Links an account at the provider to a user who is signed in here, in place
+     * of one they linked before, so it signs them in from now on.
+     *
+     * @throws SignInRefused when the account is another user's
+     */
+    public function link(User $user, string $provider, string $id): void
+    {
+        $other = $this->known($provider, $id);
+
+        if ($other !== null && ! $other->is($user)) {
+            throw new SignInRefused('That account is already linked to another account here.');
+        }
+
+        UserIdentity::query()->updateOrCreate(['user_id' => $user->getKey(), 'provider' => $provider], ['provider_id' => $id]);
+    }
+
+    /**
+     * The tenants that let in the people of a domain without an invitation.
+     *
+     * @return Collection<int, Tenant>
+     */
+    public function tenantsForDomain(string $domain): Collection
+    {
+        return Tenant::query()->whereJsonContains('sign_in_domains', Str::lower($domain))->get();
     }
 
     /**
@@ -53,7 +96,7 @@ class SingleSignOn
             throw new SignInRefused('Your account there has no verified email address, so it cannot be used to sign in here.');
         }
 
-        $known = UserIdentity::query()->where('provider', $provider)->where('provider_id', $id)->first()?->user;
+        $known = $this->known($provider, $id);
 
         if ($known !== null) {
             $this->join($known, $provider, $email, $raw);
@@ -151,7 +194,7 @@ class SingleSignOn
             return Tenant::query()->whereRaw('1 = 0')->get();
         }
 
-        return Tenant::query()->whereJsonContains('sign_in_domains', $domain)->get();
+        return $this->tenantsForDomain($domain);
     }
 
     /**

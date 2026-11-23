@@ -4,6 +4,7 @@ use App\Filament\Auth\EditProfile;
 use App\Models\PersonalConnection;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Models\UserIdentity;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Http\RedirectResponse;
@@ -116,4 +117,21 @@ it('shows the account on the profile, says when it cannot write, and lets the us
     config(['services.bitbucket.client_id' => null]);
 
     livewire(EditProfile::class)->assertDontSee('Your Bitbucket account');
+});
+
+it('signs the user in with the account they connect from then on, and connects none that is someone else\'s', function () {
+    $other = User::factory()->create();
+    UserIdentity::query()->create(['user_id' => $other->id, 'provider' => 'bitbucket', 'provider_id' => '{sam-uuid}']);
+    $this->actingAs($this->user);
+
+    ($this->connect)()->assertRedirect(url('app/acme/profile'));
+
+    expect(PersonalConnection::query()->count())->toBe(0)
+        ->and(UserIdentity::query()->sole()->user_id)->toBe($other->id);
+
+    $other->delete();
+    ($this->connect)();
+
+    expect(UserIdentity::query()->sole()->only(['user_id', 'provider', 'provider_id']))->toBe(['user_id' => $this->user->id, 'provider' => 'bitbucket', 'provider_id' => '{sam-uuid}'])
+        ->and(PersonalConnection::query()->sole()->user_id)->toBe($this->user->id);
 });

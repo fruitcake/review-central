@@ -378,7 +378,7 @@ class SetupCheck
 
         foreach ([
             'Signing in with Google' => ['services.google.client_id', 'services.google.client_secret', 'the client ID and secret under Apps (or GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET), from an OAuth client with '.url('/sign-in/google/callback').' as redirect address', SetupGuides::GOOGLE],
-            'Replying on Bitbucket as yourself' => ['services.bitbucket.client_id', 'services.bitbucket.client_secret', 'the key and secret under Apps (or BITBUCKET_CLIENT_ID and BITBUCKET_CLIENT_SECRET), from an OAuth consumer with '.url('/connections/bitbucket/callback').' as callback URL', SetupGuides::BITBUCKET],
+            'Replying and signing in with Bitbucket' => ['services.bitbucket.client_id', 'services.bitbucket.client_secret', 'the key and secret under Apps (or BITBUCKET_CLIENT_ID and BITBUCKET_CLIENT_SECRET), from an OAuth consumer with '.url('/connections/bitbucket/callback').' as callback URL', SetupGuides::BITBUCKET],
             'Connecting Asana by signing in' => ['services.asana.client_id', 'services.asana.client_secret', 'the client ID and secret under Apps (or ASANA_CLIENT_ID and ASANA_CLIENT_SECRET), from an app with '.url('/connections/oauth/callback').' as redirect address', SetupGuides::ASANA],
             'Connecting Jira by signing in' => ['services.atlassian.client_id', 'services.atlassian.client_secret', 'the client ID and secret under Apps (or ATLASSIAN_CLIENT_ID and ATLASSIAN_CLIENT_SECRET), from an app with '.url('/connections/oauth/callback').' as redirect address', SetupGuides::ATLASSIAN],
         ] as $title => [$id, $secret, $needs, $guide]) {
