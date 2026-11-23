@@ -5,9 +5,7 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use App\Models\OpenPullRequest;
-use App\Services\ReviewRequest;
-use App\SourceControl\GitHubClient;
-use App\SourceControl\ReadOnlyClient;
+use App\Services\PullRequestSync;
 use Illuminate\Console\Command;
 use Throwable;
 
@@ -22,7 +20,7 @@ class SyncPullRequests extends Command
 
     protected $description = 'Read the open pull requests\' reviewers and state from their hosts again';
 
-    public function handle(ReviewRequest $reviews): int
+    public function handle(PullRequestSync $sync): int
     {
         $synced = 0;
         $failed = 0;
@@ -34,17 +32,7 @@ class SyncPullRequests extends Command
             }
 
             try {
-                $sourceControl = $record->repository->sourceControl();
-                $data = $sourceControl->getPullRequest((string) $record->pull_request_id);
-
-                // Reading the reviews is reading, also for a connection that posts nothing.
-                $reads = $sourceControl instanceof ReadOnlyClient ? $sourceControl->inner() : $sourceControl;
-
-                if ($data !== null && $reads instanceof GitHubClient) {
-                    $data = GitHubClient::withReviews($data, $reads->getPullRequestReviews((string) $record->pull_request_id));
-                }
-
-                $reviews->sync($record->repository, $record->pull_request_id, $data);
+                $sync->one($record);
                 $synced++;
             } catch (Throwable $exception) {
                 $failed++;

@@ -188,6 +188,12 @@ class GitHubClient implements FiltersSecrets, SourceControl
         return is_array($found) ? self::pullRequest($found) : null;
     }
 
+    public function openPullRequests(): array
+    {
+        // Open is what GitHub lists by default.
+        return array_map(fn (array $pull): array => self::pullRequest($pull), array_values(array_filter($this->all($this->url('pulls')), 'is_array')));
+    }
+
     /**
      * The remarks on the pull request and the ones on its lines, oldest first,
      * with whether each one's thread is resolved.

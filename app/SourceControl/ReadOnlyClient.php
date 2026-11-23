@@ -51,6 +51,11 @@ final class ReadOnlyClient implements SourceControl
         return $this->client->findOpenPullRequestByBranch($branch);
     }
 
+    public function openPullRequests(): array
+    {
+        return $this->client->openPullRequests();
+    }
+
     public function getPullRequestComments(string $id): array
     {
         return $this->client->getPullRequestComments($id);

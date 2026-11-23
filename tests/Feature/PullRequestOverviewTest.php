@@ -2,6 +2,7 @@
 
 use App\Enums\ReviewsFrom;
 use App\Filament\App\Resources\PullRequests\Pages\ListPullRequests;
+use App\Filament\App\Resources\Repositories\Pages\ManageRepositories;
 use App\Jobs\AnswerReviewQuestion;
 use App\Jobs\RunContainerReview;
 use App\Models\Connection;
@@ -9,6 +10,7 @@ use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\User;
 use Filament\Facades\Filament;
+use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -184,4 +186,72 @@ it('answers a question only from a trusted account where only theirs are reviewe
     $ask(2, 'trusted-dev')->assertOk();
 
     Queue::assertPushed(AnswerReviewQuestion::class, 1);
+});
+
+it('adds a repository its webhook tells of for the first time when the connection is set to, reviewing nothing by itself', function () {
+    $this->repository->update(['slug' => 'elsewhere']);
+
+    // Not set: the delivery for a repository that is not here is let go.
+    deliverPullRequest()->assertOk();
+
+    expect(Repository::query()->where('slug', 'shop')->exists())->toBeFalse();
+
+    $this->repository->integration->update(['settings' => ['workspace' => 'acme', 'add_repositories' => true]]);
+
+    deliverPullRequest()->assertOk();
+
+    $added = Repository::query()->where('slug', 'shop')->sole();
+
+    Queue::assertNothingPushed();
+    expect($added->only(['tenant_id', 'connection_id', 'workspace', 'reviews_enabled']))
+        ->toBe(['tenant_id' => $this->repository->tenant_id, 'connection_id' => $this->repository->connection_id, 'workspace' => 'acme', 'reviews_enabled' => false])
+        ->and(OpenPullRequest::query()->sole()->repository_id)->toBe($added->id);
+
+    // One removed here stays removed.
+    $added->delete();
+    OpenPullRequest::query()->delete();
+
+    deliverPullRequest()->assertOk();
+
+    expect(Repository::query()->where('slug', 'shop')->exists())->toBeFalse()
+        ->and(OpenPullRequest::query()->count())->toBe(0);
+});
+
+it('fetches a repository\'s open pull requests from its host without reviewing them, and lists them under that repository', function () {
+    OpenPullRequest::query()->create(['repository_id' => $this->repository->id, 'pull_request_id' => 3]);
+    $pullRequest = fn (int $id, string $state): array => [
+        'id' => $id, 'title' => "Change {$id}", 'state' => $state, 'updated_on' => '2026-11-19T10:00:00+00:00',
+        'author' => ['display_name' => 'Sam', 'nickname' => 'sam'], 'source' => ['branch' => ['name' => "feature/{$id}"], 'commit' => ['hash' => str_repeat('b', 12)]],
+    ];
+
+    // In place of the catch-all fake every test here starts with.
+    Http::swap(new HttpFactory);
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests?*' => Http::response(['values' => [$pullRequest(7, 'OPEN'), $pullRequest(8, 'OPEN')]]),
+        // Listed here, but merged since.
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/3' => Http::response($pullRequest(3, 'MERGED')),
+        '*' => Http::response([]),
+    ]);
+
+    $this->actingAs($user = User::factory()->create());
+    $user->tenants()->attach($this->repository->tenant);
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+    Filament::setTenant($this->repository->tenant);
+    Filament::bootCurrentPanel();
+
+    livewire(ManageRepositories::class)
+        ->callTableAction('fetchPullRequests', $this->repository)
+        ->assertNotified('2 open pull requests')
+        ->assertTableColumnStateSet('open_pull_requests_count', 2, $this->repository);
+
+    Queue::assertNothingPushed();
+    expect(OpenPullRequest::query()->orderBy('pull_request_id')->pluck('title', 'pull_request_id')->all())->toBe([7 => 'Change 7', 8 => 'Change 8']);
+
+    // The list narrows to one repository.
+    $other = OpenPullRequest::query()->create(['repository_id' => Repository::factory()->create(['tenant_id' => $this->repository->tenant_id])->id, 'pull_request_id' => 1]);
+
+    livewire(ListPullRequests::class)
+        ->filterTable('repository_id', $this->repository->id)
+        ->assertCanSeeTableRecords(OpenPullRequest::query()->where('repository_id', $this->repository->id)->get())
+        ->assertCanNotSeeTableRecords([$other]);
 });

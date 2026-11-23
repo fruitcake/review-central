@@ -6,6 +6,7 @@ use App\Connections\SourceControlDriver;
 use App\Enums\ConnectionKind;
 use App\Enums\ReviewProvider;
 use App\Enums\ReviewsFrom;
+use App\Filament\App\Resources\PullRequests\PullRequestResource;
 use App\Filament\App\Resources\Repositories\Pages\ManageRepositories;
 use App\Filament\App\Resources\Repositories\Pages\ViewRepository;
 use App\Filament\Components\ReviewSettingsForm;
@@ -16,6 +17,7 @@ use App\Models\Repository;
 use App\Models\Tenant;
 use App\Runners\Runners;
 use App\Services\Currency;
+use App\Services\PullRequestSync;
 use App\Services\RepositoryReadiness;
 use App\Services\RepositorySetup;
 use App\Services\ReviewSettings;
@@ -42,6 +44,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Validation\Rules\Unique;
+use Throwable;
 
 class RepositoryResource extends Resource
 {
@@ -162,6 +165,7 @@ class RepositoryResource extends Resource
             ->modifyQueryUsing(fn (Builder $query) => $query
                 ->with('integration')
                 ->withMax('reviewRuns', 'started_at')
+                ->withCount('openPullRequests')
                 ->withSum(['reviewRuns as cost_this_month' => fn (Builder $runs) => $runs->where('started_at', '>=', now()->startOfMonth())], 'cost'))
             ->columns([
                 TextColumn::make('slug')
@@ -176,6 +180,9 @@ class RepositoryResource extends Resource
                 TextColumn::make('review_available_providers')->label('Reviewers available')->badge()
                     ->formatStateUsing(fn (string $state): string => ReviewProvider::tryFrom($state)?->text() ?? $state)
                     ->placeholder('Known after the first review'),
+                TextColumn::make('open_pull_requests_count')->label('Open PRs')
+                    ->formatStateUsing(fn (int $state): string => (string) $state)
+                    ->url(fn (Repository $record): string => self::pullRequestsUrl($record)),
                 TextColumn::make('review_runs_max_started_at')->label('Last review')->since()->placeholder('Never'),
                 TextColumn::make('cost_this_month')->label('Cost this month')->state(fn (Repository $record): string => Currency::show($record->getAttribute('cost_this_month'))),
             ])
@@ -184,6 +191,7 @@ class RepositoryResource extends Resource
                 self::hostAction()->iconButton(),
                 self::readinessAction(),
                 ActionGroup::make([
+                    self::fetchPullRequestsAction(),
                     self::reviewSettingsAction(),
                     EditAction::make()
                         // Moved where a removed copy of it is, the two change places.
@@ -215,6 +223,44 @@ class RepositoryResource extends Resource
             ->icon(Heroicon::OutlinedArrowTopRightOnSquare)
             ->color('gray')
             ->url(fn (Repository $record): ?string => rescue(fn (): string => $record->sourceControl()->repositoryUrl(), null, false), shouldOpenInNewTab: true);
+    }
+
+    /**
+     * The address of the repository's open pull requests in the list of them.
+     */
+    public static function pullRequestsUrl(Repository $repository): string
+    {
+        return PullRequestResource::getUrl('index', ['filters' => ['repository_id' => ['value' => $repository->getKey()]]]);
+    }
+
+    /**
+     * Reads the repository's open pull requests from its host into the list, as
+     * their deliveries would have: starting no review. For one added after they
+     * were opened, or whose deliveries were missed.
+     */
+    public static function fetchPullRequestsAction(): Action
+    {
+        return Action::make('fetchPullRequests')
+            ->label('Fetch pull requests')
+            ->icon(Heroicon::OutlinedArrowPath)
+            ->color('gray')
+            // A plain git server has none.
+            ->visible(fn (Repository $record): bool => $record->integration?->driver !== 'git')
+            ->action(function (Repository $record, PullRequestSync $sync): void {
+                try {
+                    $found = $sync->repository($record);
+                } catch (Throwable $exception) {
+                    Notification::make()->title('The pull requests could not be read')->body($exception->getMessage())->danger()->send();
+
+                    return;
+                }
+
+                Notification::make()
+                    ->title($found['listed'] === 1 ? '1 open pull request' : "{$found['listed']} open pull requests")
+                    ->body(($found['closed'] > 0 ? "{$found['closed']} no longer open left the list. " : '').'No review was started.')
+                    ->success()
+                    ->send();
+            });
     }
 
     /**

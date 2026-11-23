@@ -11,6 +11,7 @@ use App\Filament\App\Resources\ReviewRuns\Pages\ListReviewRuns;
 use App\Filament\App\Resources\SourceControl\Pages\ManageSourceControl;
 use App\Filament\App\Resources\Tickets\Pages\ManageTickets;
 use App\Models\Connection;
+use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\ReviewInstruction;
 use App\Models\ReviewRun;
@@ -70,7 +71,7 @@ it('creates a connection the way the form is filled in: the service first, its f
         // The browser can only write into fields that have state: a section left
         // at null swallows what is typed into it.
         ->assertSet('mountedActions.0.data.credentials', ['access_token' => null])
-        ->assertSet('mountedActions.0.data.settings', ['workspace' => null, 'username' => null, 'posting' => null])
+        ->assertSet('mountedActions.0.data.settings', ['workspace' => null, 'username' => null, 'posting' => null, 'add_repositories' => false])
         ->set('mountedActions.0.data.credentials.access_token', 'secret-token')
         ->set('mountedActions.0.data.settings.workspace', 'acme')
         ->callMountedAction()
@@ -90,13 +91,14 @@ it('stores a connection\'s secret encrypted, with a webhook for source control',
             'driver' => 'bitbucket',
             'name' => 'Bitbucket',
             'credentials' => ['access_token' => 'secret-token'],
-            'settings' => ['workspace' => 'acme'],
+            'settings' => ['workspace' => 'acme', 'add_repositories' => true],
         ])
         ->assertHasNoFormErrors();
 
     $connection = Connection::query()->sole();
 
     expect($connection->tenant_id)->toBe($this->tenant->id)
+        ->and($connection->addsRepositories())->toBeTrue()
         ->and($connection->credential('access_token'))->toBe('secret-token')
         ->and($connection->getRawOriginal('credentials'))->not->toContain('secret-token')
         ->and($connection->webhook_key)->not->toBeNull()
@@ -515,6 +517,43 @@ it('links a repository and a review to their place on the host', function () {
         ->assertTableColumnStateSet('review_runner', 'Docker on this server (platform)', $repository);
 
     livewire(ListReviewRuns::class)->assertTableActionHasUrl('pullRequest', 'https://bitbucket.org/acme/shop/pull-requests/570', $run);
+});
+
+it('detects the repository and the branch from a pull request\'s link, number or ticket key, filling in the fields below', function () {
+    $repository = Repository::factory()->create(['tenant_id' => $this->tenant->id, 'connection_id' => Connection::factory()->create(['tenant_id' => $this->tenant->id])->id, 'workspace' => 'acme', 'slug' => 'shop']);
+
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/39' => Http::response(['id' => 39, 'state' => 'OPEN', 'source' => ['branch' => ['name' => 'feature/export']]]),
+        '*' => Http::response([], 404),
+    ]);
+    $detect = fn (string $input, ?int $repositoryId = null) => livewire(ListReviewRuns::class)
+        ->mountAction('review')
+        ->set('mountedActions.0.data.repository_id', $repositoryId)
+        ->set('mountedActions.0.data.detect', $input);
+
+    $detect('https://bitbucket.org/acme/shop/pull-requests/39/overview')
+        ->assertSet('mountedActions.0.data.repository_id', $repository->id)
+        ->assertSet('mountedActions.0.data.branch', 'feature/export')
+        ->assertSet('mountedActions.0.data.detected', 'Found: feature/export.');
+
+    // A number needs the repository first.
+    $detect('39')->assertSet('mountedActions.0.data.detected', 'Pick the repository below first, then detect again.');
+    $detect('#39', $repository->id)->assertSet('mountedActions.0.data.branch', 'feature/export');
+
+    OpenPullRequest::query()->create(['repository_id' => $repository->id, 'pull_request_id' => 40])->forceFill(['title' => 'VZ-959 Export the orders', 'branch' => 'feature/vz-959'])->save();
+
+    $detect('vz-959')
+        ->assertSet('mountedActions.0.data.repository_id', $repository->id)
+        ->assertSet('mountedActions.0.data.branch', 'feature/vz-959');
+
+    $detect('https://bitbucket.org/acme/elsewhere/pull-requests/1')
+        ->assertSet('mountedActions.0.data.branch', null)
+        ->assertSet('mountedActions.0.data.detected', 'No open pull request of this team\'s repositories found for "https://bitbucket.org/acme/elsewhere/pull-requests/1". Fill in the repository and the branch below.');
+
+    // A link left in the branch is no branch.
+    livewire(ListReviewRuns::class)
+        ->callAction('review', ['repository_id' => $repository->id, 'branch' => 'https://bitbucket.org/acme/shop/pull-requests/39'])
+        ->assertHasFormErrors(['branch']);
 });
 
 it('says what to set up when a review is asked for on a runner that is not', function () {

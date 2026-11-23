@@ -17,6 +17,7 @@ use App\Filament\Components\SetupGuideAction;
 use App\Filament\Concerns\ForTenantAdmins;
 use App\Models\Connection;
 use App\Services\Connections;
+use App\SourceControl\GitDriver;
 use App\Support\SetupGuide;
 use BackedEnum;
 use Closure;
@@ -26,6 +27,7 @@ use Filament\Actions\EditAction;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
@@ -165,8 +167,28 @@ class ConnectionResource extends Resource
             Section::make('Settings')
                 ->key('settings')
                 ->statePath('settings')
-                ->schema(fn (Get $get): array => $driver($get)?->settingFields() ?? [])
-                ->visible(fn (Get $get): bool => ($driver($get)?->settingFields() ?? []) !== []),
+                ->schema(fn (Get $get): array => [...$driver($get)?->settingFields() ?? [], ...self::webhookFields($driver($get))])
+                ->visible(fn (Get $get): bool => [...$driver($get)?->settingFields() ?? [], ...self::webhookFields($driver($get))] !== []),
+        ];
+    }
+
+    /**
+     * For a host whose webhook tells of every repository of the workspace: whether
+     * one not added yet is added by it. A plain git server sends none.
+     *
+     * @return array<int, Toggle>
+     */
+    protected static function webhookFields(?ConnectionDriver $driver): array
+    {
+        if (! $driver instanceof SourceControlDriver || $driver instanceof GitDriver) {
+            return [];
+        }
+
+        return [
+            Toggle::make('add_repositories')
+                ->label('Add new repositories from webhooks')
+                ->default(false)
+                ->helperText('A repository the webhook tells of that is not here yet is added, without reviewing its pull requests by itself: it shows in the overview, and its pull requests are kept, for someone to start a review from Pull requests. One that was removed here is not added again.'),
         ];
     }
 

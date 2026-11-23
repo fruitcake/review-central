@@ -82,6 +82,11 @@ class BitbucketClient implements FiltersSecrets, SourceControl
         return $pullRequests[0] ?? null;
     }
 
+    public function openPullRequests(): array
+    {
+        return array_values(array_filter($this->pages($this->url('pullrequests').'?state=OPEN&pagelen=50'), 'is_array'));
+    }
+
     public function publishes(): bool
     {
         return true;

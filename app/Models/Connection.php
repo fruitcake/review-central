@@ -89,6 +89,15 @@ class Connection extends Model
      * Whether a repository of this owner can be on this connection: one set up
      * for an owner, as a GitHub App's installation is, reaches only theirs.
      */
+    /**
+     * Whether a repository its webhook tells of for the first time is added, to be
+     * listed and have its pull requests kept, without reviewing them by itself.
+     */
+    public function addsRepositories(): bool
+    {
+        return ($this->settings['add_repositories'] ?? false) === true;
+    }
+
     public function reachesOwner(string $workspace): bool
     {
         $owner = $this->setting('workspace');

@@ -9,6 +9,7 @@ use App\Filament\App\Resources\ReviewRuns\ReviewRunResource;
 use App\Filament\CurrentTenant;
 use App\Filament\RunPresenter;
 use App\Models\OpenPullRequest;
+use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Models\User;
 use App\Services\PullRequestTurn;
@@ -19,6 +20,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
@@ -97,6 +99,11 @@ class PullRequestResource extends Resource
                     ->label('AI review')
                     ->state(fn (OpenPullRequest $record): HtmlString => ReviewRunResource::chip(...self::standing($record))),
                 TextColumn::make('updated_at')->label('Last change')->since()->sortable(),
+            ])
+            ->filters([
+                SelectFilter::make('repository_id')
+                    ->label('Repository')
+                    ->options(fn (): array => CurrentTenant::get()->repositories()->get()->mapWithKeys(fn (Repository $repository): array => [$repository->getKey() => $repository->fullName()])->all()),
             ])
             ->recordAction('details')
             ->recordActions([
