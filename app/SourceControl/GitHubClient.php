@@ -51,6 +51,9 @@ class GitHubClient implements FiltersSecrets, SourceControl
     /** What an issue comment written as a reply says its parent is. */
     public const PARENT_MARKER = '/\[\/\/\]:\s*#\s*\(ai-reply-to (\d+)\)/';
 
+    /** The line such a reply opens with, for people: the comment it answers, as a link. */
+    protected const PARENT_LINK = '/\A↪ \[In reply to this comment\]\([^)\s]*\)\n\n/u';
+
     protected const API = 'https://api.github.com';
 
     /** The account the token acts as, once asked. */
@@ -213,6 +216,11 @@ class GitHubClient implements FiltersSecrets, SourceControl
                 $id = (int) $comment['id'];
                 $body = (string) ($comment['body'] ?? '');
                 $parent = $comment['in_reply_to_id'] ?? (preg_match(self::PARENT_MARKER, $body, $match) === 1 ? (int) $match[1] : null);
+
+                // Read back as what was written: the link is for people on GitHub.
+                if ($parent !== null && ! isset($comment['in_reply_to_id'])) {
+                    $body = (string) preg_replace(self::PARENT_LINK, '', $body);
+                }
                 $resolved = $comment['kind'] === 'review'
                     ? ($threads['threads'][$id]['resolved'] ?? false)
                     : ($threads['minimized'][$id] ?? false);
@@ -255,8 +263,9 @@ class GitHubClient implements FiltersSecrets, SourceControl
 
             // Not a comment in a review thread: one on the pull request, which has
             // no threads, so the reply says which comment it answers.
+            // GitHub shows it on its own, so it links to what it answers.
             return (array) $this->request(15)->post($this->url("issues/{$id}/comments"), [
-                'body' => rtrim($content)."\n\n[//]: # (ai-reply-to {$parentId})",
+                'body' => '↪ [In reply to this comment]('.$this->commentLink((int) $id, $parentId).")\n\n".rtrim($content)."\n\n[//]: # (ai-reply-to {$parentId})",
             ])->throw()->json();
         }
 
@@ -692,6 +701,23 @@ class GitHubClient implements FiltersSecrets, SourceControl
             'username' => $this->token === null ? null : 'x-access-token',
             'password' => $this->token,
         ];
+    }
+
+    /**
+     * The address of a comment on the pull request: one on a line, as a reply in a
+     * thread that takes no reply of its own, or one on the pull request itself.
+     */
+    protected function commentLink(int $pullRequestId, int $commentId): string
+    {
+        foreach (["pulls/comments/{$commentId}", "issues/comments/{$commentId}"] as $path) {
+            $url = rescue(fn (): mixed => $this->request(10)->get($this->url($path))->json('html_url'), null, false);
+
+            if (is_string($url) && str_starts_with($url, 'https://')) {
+                return $url;
+            }
+        }
+
+        return $this->pullRequestUrl($pullRequestId)."#issuecomment-{$commentId}";
     }
 
     public function repositoryUrl(): string

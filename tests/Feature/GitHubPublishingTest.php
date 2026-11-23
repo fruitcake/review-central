@@ -123,7 +123,7 @@ beforeEach(function () {
 
         if ($path === "{$repo}/issues/12/comments") {
             if ($method === 'POST') {
-                $g->issueComments[] = $comment = ['id' => $g->next++, 'body' => $request['body'], 'user' => ['login' => 'review-bot', 'id' => 42], 'created_at' => now()->toIso8601String()];
+                $g->issueComments[] = $comment = ['id' => $id = $g->next++, 'body' => $request['body'], 'user' => ['login' => 'review-bot', 'id' => 42], 'created_at' => now()->toIso8601String(), 'html_url' => "https://github.com/acme/shop/pull/12#issuecomment-{$id}"];
 
                 return Http::response($comment, 201);
             }
@@ -133,7 +133,7 @@ beforeEach(function () {
 
         if ($path === "{$repo}/pulls/12/comments") {
             if ($method === 'POST') {
-                $g->reviewComments[] = $comment = ['id' => $g->next++, 'body' => $request['body'], 'path' => $request['path'], 'line' => $request['line'], 'user' => ['login' => 'review-bot', 'id' => 42], 'created_at' => now()->toIso8601String()];
+                $g->reviewComments[] = $comment = ['id' => $id = $g->next++, 'body' => $request['body'], 'path' => $request['path'], 'line' => $request['line'], 'user' => ['login' => 'review-bot', 'id' => 42], 'created_at' => now()->toIso8601String(), 'html_url' => "https://github.com/acme/shop/pull/12#discussion_r{$id}"];
                 $g->threads["PRRT_{$comment['id']}"] = ['resolved' => false, 'comments' => [$comment['id']]];
 
                 return Http::response($comment, 201);
@@ -149,7 +149,12 @@ beforeEach(function () {
                 return Http::response(['message' => 'Not Found'], 404);
             }
 
-            $g->reviewComments[] = $comment = ['id' => $g->next++, 'body' => $request['body'], 'path' => $parent['path'], 'line' => $parent['line'], 'in_reply_to_id' => $parent['id'], 'user' => ['login' => 'review-bot', 'id' => 42], 'created_at' => now()->toIso8601String()];
+            // As GitHub: a reply goes to a thread's first comment, not to a reply in it.
+            if (isset($parent['in_reply_to_id'])) {
+                return Http::response(['message' => 'Validation Failed'], 422);
+            }
+
+            $g->reviewComments[] = $comment = ['id' => $id = $g->next++, 'body' => $request['body'], 'path' => $parent['path'], 'line' => $parent['line'], 'in_reply_to_id' => $parent['id'], 'user' => ['login' => 'review-bot', 'id' => 42], 'created_at' => now()->toIso8601String(), 'html_url' => "https://github.com/acme/shop/pull/12#discussion_r{$id}"];
             $thread = collect($g->threads)->search(fn (array $thread): bool => in_array($parent['id'], $thread['comments'], true));
             $g->threads[$thread]['comments'][] = $comment['id'];
 
@@ -229,11 +234,24 @@ it('answers a comment on the pull request itself, which has no thread, with one 
     $question = $this->client->addPullRequestComment('12', 'Why is this slow?');
     $this->client->addPullRequestComment('12', 'Because it reads every row.', parentId: $question['id']);
 
+    // On GitHub it links to the comment it answers, which has no thread to sit in.
+    Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/issues/12/comments')
+        && str_starts_with((string) $request['body'], "↪ [In reply to this comment](https://github.com/{$this->repository->workspace}/{$this->repository->slug}/pull/12#issuecomment-{$question['id']})\n\nBecause it reads every row."));
+
     $comments = $this->client->getPullRequestComments('12');
 
     expect($comments[1]['parent'])->toBe(['id' => $question['id']])
-        ->and($comments[1]['content']['raw'])->toEndWith("[//]: # (ai-reply-to {$question['id']})")
+        ->and($comments[1]['content']['raw'])->toBe("Because it reads every row.\n\n[//]: # (ai-reply-to {$question['id']})")
         ->and($comments[1])->not->toHaveKey('inline');
+});
+
+it('answers a reply in a line\'s thread, which GitHub takes no reply to, with one that links to it', function () {
+    $finding = $this->client->addPullRequestComment('12', 'The export skips the last row.', 'app/Export.php', 12);
+    $question = $this->client->addPullRequestComment('12', '@review why?', parentId: $finding['id']);
+    $this->client->addPullRequestComment('12', 'Because the loop stops one early.', parentId: $question['id']);
+
+    Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/issues/12/comments')
+        && str_starts_with((string) $request['body'], "↪ [In reply to this comment](https://github.com/acme/shop/pull/12#discussion_r{$question['id']})\n\n"));
 });
 
 it('edits either kind of comment, and resolves a thread or folds a comment away as resolved', function () {
