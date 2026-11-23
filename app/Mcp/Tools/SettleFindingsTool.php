@@ -19,7 +19,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 
     Reasons: nitpick (too small to matter), out_of_scope (not for this change), intended (the behaviour or trade-off is deliberate), handled_elsewhere (a guard, caller or test the reviewer did not see), misread (the reviewer misread the code or the change), duplicate (the same as another finding), other (say why in the note).
 
-    The verdicts and reasons are the team's statistics of how good the review is, so give the user's judgement, not your own. A reply is posted in the finding's thread on the pull request: on Bitbucket as the user, where they connected their own account on their profile, else by Review Central with the user's name above it; `replied_as` says which. The next review reads it. A finding that was fixed needs no reply: the next review sees the fix. Reply to a finding that is wrong or not worth it, with the evidence (file:line) in one to three sentences.
+    The verdicts and reasons are the team's statistics of how good the review is, so give the user's judgement, not your own. A reply is posted in the finding's thread on the pull request: on Bitbucket as the user, where they connected their own account on their profile, else by Review Central with the user's name above it; each finding's `replied_as` says which. The next review reads it. A finding that was fixed needs no reply: the next review sees the fix. Reply to a finding that is wrong or not worth it, with the evidence (file:line) in one to three sentences.
 
     All verdicts are checked first: one unknown finding or bad reason records nothing. A reply that cannot be posted is reported per finding; the rest still are. Take `review_id` and the finding ids from `pull-request-feedback`.
     TXT)]

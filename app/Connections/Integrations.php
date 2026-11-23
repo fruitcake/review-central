@@ -63,6 +63,15 @@ final class Integrations
     ];
 
     /**
+     * Types whose app is for the whole installation, never for some tenants only:
+     * signing in comes before a tenant is known, and a user's own Bitbucket
+     * account is theirs, not a tenant's.
+     *
+     * @var array<int, string>
+     */
+    public const FOR_EVERY_TENANT = ['google', 'bitbucket'];
+
+    /**
      * The single types whose app is read from the configuration: Google's and
      * Bitbucket's through Socialite, the GitHub App's by GitHubApp.
      *

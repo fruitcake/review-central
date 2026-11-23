@@ -74,6 +74,13 @@ it('lets an administrator add apps, one of a single type, and keeps a secret lef
         // There is one to sign in with.
         ->and(IntegrationAppResource::types())->not->toHaveKey('google')->toHaveKey('asana');
 
+    // A user's own Bitbucket account is no tenant's: its app is for every one, whatever the form held.
+    livewire(ManageIntegrationApps::class)
+        ->callAction('create', data: ['type' => 'bitbucket', 'name' => 'Bitbucket', 'credentials' => ['client_id' => 'bb-key', 'client_secret' => 'bb-secret'], 'for_all_tenants' => false, 'tenants' => [$this->tenant->id]])
+        ->assertHasNoFormErrors();
+
+    expect(IntegrationApp::query()->where('type', 'bitbucket')->sole()->for_all_tenants)->toBeTrue();
+
     // Signing in with Google reads it, where .env sets none.
     Integrations::apply();
 

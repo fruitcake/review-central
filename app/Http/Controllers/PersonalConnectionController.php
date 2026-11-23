@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Filament\Auth\EditProfile;
+use App\Models\Tenant;
 use App\Models\User;
 use App\Services\PersonalConnections;
 use Filament\Notifications\Notification;
@@ -28,8 +29,13 @@ class PersonalConnectionController extends Controller
     {
         abort_unless(PersonalConnections::available(), 404);
 
-        // Back to the profile it was started from, in the tenant that was open.
-        $request->session()->put('personal_connection.return', EditProfile::urlForCurrentUser());
+        // Back to the profile it was started from, in the tenant it was open in
+        // where the user is in that one.
+        $tenant = Tenant::query()->where('slug', (string) $request->query('tenant'))->first();
+        $user = $request->user();
+        $request->session()->put('personal_connection.return', $tenant !== null && $user instanceof User && $user->canAccessTenant($tenant)
+            ? EditProfile::getUrl(panel: 'app', tenant: $tenant)
+            : EditProfile::urlForCurrentUser());
 
         return $this->driver()->setScopes(PersonalConnections::BITBUCKET_SCOPES)->redirect();
     }

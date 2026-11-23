@@ -12,6 +12,7 @@ use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Models\User;
 use App\SourceControl\SourceControl;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -22,6 +23,10 @@ use Throwable;
  */
 class FindingSettlement
 {
+    public const AS_USER = 'you';
+
+    public const AS_CONNECTION = 'the team\'s connection, with your name above it';
+
     public function __construct(protected PullRequestFeedback $feedback, protected FindingFeedback $verdicts, protected PersonalConnections $personal) {}
 
     /**
@@ -56,17 +61,17 @@ class FindingSettlement
         });
 
         $replies = array_filter($settled, fn (array $item): bool => filled($item['reply']));
-        ['errors' => $posted, 'as_user' => $asUser] = $replies === [] ? ['errors' => [], 'as_user' => false] : $this->reply($user, $repository, $pullRequest['id'], $run, $replies);
+        ['errors' => $posted, 'as' => $as] = $replies === [] ? ['errors' => [], 'as' => []] : $this->reply($user, $repository, $pullRequest['id'], $run, $replies);
 
         return [
             'review' => $run->uuid,
-            // Whose account the replies are on, so the assistant can say it.
-            ...($replies === [] ? [] : ['replied_as' => $asUser ? 'you' : 'the team\'s connection, with your name above each reply']),
             'findings' => array_map(fn (array $item): array => array_filter([
                 'finding_id' => $item['finding_id'],
                 'verdict' => $item['verdict']->value ?? 'none',
                 'reason' => $item['reason']?->value,
                 'replied' => filled($item['reply']) ? ($posted[$item['finding_id']] ?? null) === null : null,
+                // Whose account the reply is on, so the assistant can say it.
+                'replied_as' => $as[$item['finding_id']] ?? null,
                 'reply_error' => $posted[$item['finding_id']] ?? null,
             ], fn (mixed $value): bool => $value !== null), $settled),
         ];
@@ -104,17 +109,18 @@ class FindingSettlement
      * Posts each reply under its finding's comment, or on the pull request naming
      * the finding when it has none there: as the user where their own account is
      * connected, else by the tenant's connection, with their name above it. A
-     * reply their account may not post, as on a repository it cannot reach, goes
-     * the second way.
+     * reply Bitbucket refuses from their account, as on a repository it cannot
+     * reach, goes the second way; one whose answer was lost may have been posted,
+     * and is not posted again.
      *
      * @param  array<int, array{finding_id: string, reply: string|null}>  $items
-     * @return array{errors: array<string, string>, as_user: bool} what went wrong, by finding id, and whether every reply is the user's own
+     * @return array{errors: array<string, string>, as: array<string, string>} what went wrong, and whose account each reply is on, by finding id
      */
     protected function reply(User $user, Repository $repository, int $pullRequestId, ReviewRun $run, array $items): array
     {
         // A trial posts nothing on the pull request: its F1 is not the F1 there.
         if ($run->custom) {
-            return ['errors' => array_fill_keys(array_column($items, 'finding_id'), 'This review is a trial, which is not on the pull request: the reply was not posted.'), 'as_user' => false];
+            return ['errors' => array_fill_keys(array_column($items, 'finding_id'), 'This review is a trial, which is not on the pull request: the reply was not posted.'), 'as' => []];
         }
 
         $errors = [];
@@ -123,11 +129,11 @@ class FindingSettlement
             $host = $repository->sourceControl();
             $threads = $this->feedback->threads(ReviewContext::compactComments($host->getPullRequestComments((string) $pullRequestId), null));
         } catch (Throwable $exception) {
-            return ['errors' => array_fill_keys(array_column($items, 'finding_id'), 'The pull request\'s comments could not be read: '.$exception->getMessage()), 'as_user' => false];
+            return ['errors' => array_fill_keys(array_column($items, 'finding_id'), 'The pull request\'s comments could not be read: '.$exception->getMessage()), 'as' => []];
         }
 
         $own = $this->personal->writerFor($user, $repository);
-        $asUser = $own !== null;
+        $as = [];
         $titles = collect($run->findings ?? [])->pluck('title', 'id');
 
         foreach ($items as $item) {
@@ -141,21 +147,27 @@ class FindingSettlement
                 if ($own !== null) {
                     try {
                         $post($own, self::ownBody((string) $item['reply']));
+                        $as[$id] = self::AS_USER;
 
                         continue;
-                    } catch (Throwable $exception) {
+                    } catch (RequestException $exception) {
+                        // Only a refusal says nothing was posted; any other failure is reported below.
+                        if (! in_array($exception->response->status(), [401, 403, 404], true)) {
+                            throw $exception;
+                        }
+
                         report($exception);
-                        $asUser = false;
                     }
                 }
 
                 $post($host, self::body($user, (string) $item['reply']));
+                $as[$id] = self::AS_CONNECTION;
             } catch (Throwable $exception) {
                 $errors[$id] = 'The reply could not be posted: '.$exception->getMessage();
             }
         }
 
-        return ['errors' => $errors, 'as_user' => $asUser];
+        return ['errors' => $errors, 'as' => $as];
     }
 
     /**
@@ -173,12 +185,13 @@ class FindingSettlement
 
     /**
      * A reply posted on the user's own account: theirs without a name above it,
-     * yet no more a command or a marker than one with it. A backslash before an
-     * opening / or @ is how Markdown shows the character itself.
+     * yet no more a command, a question to the reviewer or a marker than one with
+     * it. A backslash before an opening / or @, or between an @ and the account
+     * it names, is how Markdown shows the characters themselves.
      */
     public static function ownBody(string $reply): string
     {
-        $text = self::inert(trim($reply));
+        $text = str_replace('@{', '@\\{', self::inert(trim($reply)));
 
         return str_starts_with($text, '/') || str_starts_with($text, '@') ? '\\'.$text : $text;
     }

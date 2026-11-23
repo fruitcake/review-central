@@ -126,7 +126,8 @@ class EditProfile extends BaseEditProfile
                     Action::make('connectBitbucket')
                         ->label(fn (): string => $connections->of($user()) === null ? 'Connect' : 'Connect again')
                         ->icon(Heroicon::OutlinedLink)
-                        ->url(route('connections.bitbucket.redirect')),
+                        // Back to this profile, in the tenant it is open in.
+                        ->url(fn (): string => route('connections.bitbucket.redirect', array_filter(['tenant' => Filament::getTenant()?->getAttribute('slug')]))),
                     Action::make('disconnectBitbucket')
                         ->label('Disconnect')
                         ->color('gray')
