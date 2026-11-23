@@ -3,6 +3,7 @@
 use App\Enums\FindingVerdictKind;
 use App\Enums\FindingVerdictReason;
 use App\Enums\ReviewRuleKind;
+use App\Enums\TicketStyle;
 use App\Filament\TenantRole;
 use App\Jobs\AnswerReviewQuestion;
 use App\Jobs\RunContainerReview;
@@ -38,6 +39,7 @@ use App\Services\PullRequestFeedback;
 use App\Services\ReviewContext;
 use App\Services\ReviewRequest;
 use App\Services\ReviewSettings;
+use App\Services\TicketLookup;
 use App\SourceControl\GitHubClient;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request;
@@ -244,6 +246,35 @@ it('lists a ticket\'s files, and gives an agent an image to look at and a log to
 
     // Someone outside the tenant reads none of it.
     $attachment(1, User::factory()->create())->assertHasErrors();
+});
+
+it('reads a file of a ticket by the reference the ticket came back with, and its text as UTF-8 whatever it was written in', function () {
+    TicketSource::factory()->create([
+        'connection_id' => Connection::factory()->jira()->create(['tenant_id' => $this->tenant->id]),
+        'style' => TicketStyle::Number,
+        'reference_prefix' => 'SHOP-',
+    ]);
+
+    Http::swap(new HttpFactory);
+    Http::fake([
+        'acme.atlassian.net/rest/api/2/issue/SHOP-29386/comment*' => Http::response(['comments' => [], 'total' => 0]),
+        'acme.atlassian.net/rest/api/2/issue/SHOP-29386*' => Http::response(['key' => 'SHOP-29386', 'fields' => ['summary' => 'Export fails', 'attachment' => [
+            ['id' => '10001', 'filename' => 'export.log', 'mimeType' => 'text/plain', 'size' => 24],
+        ]]]),
+        // Written on Windows: "é" is one byte, which is no UTF-8.
+        'acme.atlassian.net/rest/api/2/attachment/content/10001' => Http::response("Caf\xE9 export failed\r\n", 200, ['Content-Type' => 'text/plain']),
+    ]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'reference' => '#29386'])
+        ->assertStructuredContentPath('reference', 'SHOP-29386');
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketAttachmentTool::class, ['repository' => 'acme/shop', 'reference' => 'SHOP-29386', 'number' => 1])
+        ->assertOk()
+        ->assertSee("# export.log\n\nCafé export failed");
+
+    expect(json_encode(app(TicketLookup::class)->attachment($this->repository, 'SHOP-29386', 1)->text(), JSON_THROW_ON_ERROR))->toContain('Caf\\u00e9');
 });
 
 it('reads a ticket from the tenant\'s ticket sources by its reference or by the pull request whose title names it', function () {

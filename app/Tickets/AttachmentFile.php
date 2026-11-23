@@ -85,6 +85,17 @@ final readonly class AttachmentFile
     }
 
     /**
+     * The contents as UTF-8 text: a file in another encoding, as a log written on
+     * Windows often is, is read as Windows-1252, which every byte is valid in.
+     */
+    public function text(): string
+    {
+        $text = str_starts_with($this->contents, "\xEF\xBB\xBF") ? substr($this->contents, 3) : $this->contents;
+
+        return mb_check_encoding($text, 'UTF-8') ? $text : mb_convert_encoding($text, 'UTF-8', 'Windows-1252');
+    }
+
+    /**
      * The image scaled down to this longest side, or itself when it is smaller or
      * cannot be scaled here: a larger image costs tokens without showing more.
      */

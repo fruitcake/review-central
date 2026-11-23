@@ -74,10 +74,32 @@ class TicketResolver
      */
     public function forReference(Repository $repository, string $reference): ?array
     {
-        $reference = trim($reference);
-        $match = $this->match($this->sources($repository), ctype_digit($reference) ? "#{$reference}" : $reference);
+        $match = $this->matchReference($this->sources($repository), $reference);
 
         return $match === null ? null : $this->read($repository, ...$match);
+    }
+
+    /**
+     * The source a reference is for: as a title would carry it, or as a ticket
+     * that was read gave it back, with the prefix a numbered source adds
+     * (`SHOP-29386` for `#29386`).
+     *
+     * @param  Collection<int, TicketSource>  $sources
+     * @return array{0: TicketSource, 1: string}|null
+     */
+    public function matchReference(Collection $sources, string $reference): ?array
+    {
+        $reference = trim($reference);
+
+        foreach ($sources as $source) {
+            $prefix = (string) $source->reference_prefix;
+
+            if ($source->style === TicketStyle::Number && $prefix !== '' && stripos($reference, $prefix) === 0 && ctype_digit(substr($reference, strlen($prefix)))) {
+                return [$source, $prefix.substr($reference, strlen($prefix))];
+            }
+        }
+
+        return $this->match($sources, ctype_digit($reference) ? "#{$reference}" : $reference);
     }
 
     /**
@@ -91,8 +113,7 @@ class TicketResolver
      */
     public function attachment(Repository $repository, string $reference, int $number): AttachmentFile
     {
-        $reference = trim($reference);
-        [$source, $reference] = $this->match($this->sources($repository), ctype_digit($reference) ? "#{$reference}" : $reference)
+        [$source, $reference] = $this->matchReference($this->sources($repository), $reference)
             ?? throw new AttachmentRefused("No ticket source of {$repository->fullName()} reads \"{$reference}\".");
 
         /** @var TicketDriver $driver */

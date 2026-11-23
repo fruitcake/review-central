@@ -51,7 +51,7 @@ class TicketAttachmentTool extends ReviewTool
         }
 
         if ($file->isText()) {
-            return Response::text("# {$file->name}\n\n".$file->contents);
+            return Response::text("# {$file->name}\n\n".$file->text());
         }
 
         return Response::error("{$file->name} is a {$file->mimeType} file; only images and text files are read.");
