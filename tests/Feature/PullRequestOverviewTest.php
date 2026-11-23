@@ -2,6 +2,7 @@
 
 use App\Enums\ReviewsFrom;
 use App\Filament\App\Resources\PullRequests\Pages\ListPullRequests;
+use App\Filament\App\Resources\Repositories\Pages\ManageRepositories;
 use App\Jobs\AnswerReviewQuestion;
 use App\Jobs\RunContainerReview;
 use App\Models\Connection;
@@ -9,6 +10,8 @@ use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\User;
 use Filament\Facades\Filament;
+use Filament\Notifications\Notification;
+use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -184,4 +187,85 @@ it('answers a question only from a trusted account where only theirs are reviewe
     $ask(2, 'trusted-dev')->assertOk();
 
     Queue::assertPushed(AnswerReviewQuestion::class, 1);
+});
+
+it('adds a repository its webhook tells of for the first time when the connection is set to, reviewing nothing by itself', function () {
+    $this->repository->update(['slug' => 'elsewhere']);
+
+    // Not set: the delivery for a repository that is not here is let go.
+    deliverPullRequest()->assertOk();
+
+    expect(Repository::query()->where('slug', 'shop')->exists())->toBeFalse();
+
+    $this->repository->integration->update(['settings' => ['workspace' => 'acme', 'add_repositories' => true]]);
+
+    deliverPullRequest()->assertOk();
+
+    $added = Repository::query()->where('slug', 'shop')->sole();
+
+    Queue::assertNothingPushed();
+    expect($added->only(['tenant_id', 'connection_id', 'workspace', 'reviews_enabled']))
+        ->toBe(['tenant_id' => $this->repository->tenant_id, 'connection_id' => $this->repository->connection_id, 'workspace' => 'acme', 'reviews_enabled' => false])
+        ->and(OpenPullRequest::query()->sole()->repository_id)->toBe($added->id);
+
+    // A payload that writes the owner otherwise is the same repository.
+    deliverPullRequest([], 'outsider', 'pullrequest:updated', ['repository' => ['full_name' => 'ACME/Shop']])->assertOk();
+
+    expect(Repository::query()->where('slug', 'shop')->count())->toBe(1);
+
+    // One removed here stays removed, also when it was removed from another connection to the host.
+    $added->forceFill(['connection_id' => Connection::factory()->create(['tenant_id' => $this->repository->tenant_id])->id])->save();
+    $added->delete();
+    OpenPullRequest::query()->delete();
+
+    deliverPullRequest()->assertOk();
+
+    expect(Repository::query()->where('slug', 'shop')->exists())->toBeFalse()
+        ->and(OpenPullRequest::query()->count())->toBe(0);
+});
+
+it('fetches a repository\'s open pull requests from its host without reviewing them, and lists them under that repository', function () {
+    OpenPullRequest::query()->create(['repository_id' => $this->repository->id, 'pull_request_id' => 3]);
+    // Listed here, but the host refuses to say what became of it: it stays.
+    OpenPullRequest::query()->create(['repository_id' => $this->repository->id, 'pull_request_id' => 4]);
+    $pullRequest = fn (int $id, string $state): array => [
+        'id' => $id, 'title' => "Change {$id}", 'state' => $state, 'updated_on' => '2026-11-19T10:00:00+00:00',
+        'author' => ['display_name' => 'Sam', 'nickname' => 'sam'], 'source' => ['branch' => ['name' => "feature/{$id}"], 'commit' => ['hash' => str_repeat('b', 12)]],
+    ];
+
+    // In place of the catch-all fake every test here starts with.
+    Http::swap(new HttpFactory);
+    Http::fake([
+        // The list leaves out who reviewed; each is read whole.
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests?*' => Http::response(['values' => [['id' => 7], ['id' => 8]]]),
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/7' => Http::response($pullRequest(7, 'OPEN') + ['participants' => [['role' => 'REVIEWER', 'approved' => true, 'state' => 'approved', 'user' => ['display_name' => 'Alex', 'nickname' => 'alex', 'account_id' => 'id-alex']]]]),
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/8' => Http::response($pullRequest(8, 'OPEN')),
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/4' => Http::response([], 404),
+        // Listed here, but merged since.
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/3' => Http::response($pullRequest(3, 'MERGED')),
+        '*' => Http::response([]),
+    ]);
+
+    $this->actingAs($user = User::factory()->create());
+    $user->tenants()->attach($this->repository->tenant);
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+    Filament::setTenant($this->repository->tenant);
+    Filament::bootCurrentPanel();
+
+    livewire(ManageRepositories::class)
+        ->callTableAction('fetchPullRequests', $this->repository)
+        ->assertNotified(Notification::make()->title('2 open pull requests')->body('1 no longer open left the list. No review was started.')->success())
+        ->assertTableColumnStateSet('open_pull_requests_count', 3, $this->repository);
+
+    Queue::assertNothingPushed();
+    expect(OpenPullRequest::query()->orderBy('pull_request_id')->pluck('title', 'pull_request_id')->all())->toBe([4 => null, 7 => 'Change 7', 8 => 'Change 8'])
+        ->and(collect(OpenPullRequest::query()->where('pull_request_id', 7)->sole()->reviewers)->pluck('state')->all())->toBe(['approved']);
+
+    // The list narrows to one repository.
+    $other = OpenPullRequest::query()->create(['repository_id' => Repository::factory()->create(['tenant_id' => $this->repository->tenant_id])->id, 'pull_request_id' => 1]);
+
+    livewire(ListPullRequests::class)
+        ->filterTable('repository_id', $this->repository->id)
+        ->assertCanSeeTableRecords(OpenPullRequest::query()->where('repository_id', $this->repository->id)->get())
+        ->assertCanNotSeeTableRecords([$other]);
 });

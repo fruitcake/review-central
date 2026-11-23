@@ -57,6 +57,14 @@ interface SourceControl
     public function findOpenPullRequestByBranch(string $branch): ?array;
 
     /**
+     * Every open pull request, as getPullRequest() gives each; none for a host
+     * without pull requests.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function openPullRequests(): array;
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     public function getPullRequestComments(string $id): array;

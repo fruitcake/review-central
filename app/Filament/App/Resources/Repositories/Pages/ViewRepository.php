@@ -6,7 +6,6 @@ namespace App\Filament\App\Resources\Repositories\Pages;
 
 use App\Filament\App\Pages\Overview;
 use App\Filament\App\Resources\OpenFindings\OpenFindingResource;
-use App\Filament\App\Resources\PullRequests\PullRequestResource;
 use App\Filament\App\Resources\Repositories\RepositoryResource;
 use App\Filament\App\Resources\ReviewRules\ReviewRuleResource;
 use App\Filament\App\Resources\ReviewRuns\ReviewRunResource;
@@ -82,6 +81,7 @@ class ViewRepository extends ViewRecord
                 }),
             RepositoryResource::hostAction(),
             ActionGroup::make([
+                RepositoryResource::fetchPullRequestsAction(),
                 RepositoryResource::readinessAction()->label('Can it be reviewed?'),
                 RepositoryResource::reviewSettingsAction(),
                 EditAction::make()
@@ -111,7 +111,7 @@ class ViewRepository extends ViewRecord
             'isAdmin' => TenantRole::isAdmin(),
             'targets' => [
                 'reviews' => ReviewRunResource::getUrl('index', ['filters' => ['repository_id' => ['value' => $id]]]),
-                'pullRequests' => PullRequestResource::getUrl(),
+                'pullRequests' => RepositoryResource::pullRequestsUrl($this->record),
                 'openFindings' => OpenFindingResource::getUrl('index', ['filters' => ['repository' => ['value' => $id]]]),
                 'rules' => ReviewRuleResource::getUrl('index', ['filters' => ['repository_id' => ['value' => $id]]]),
             ],

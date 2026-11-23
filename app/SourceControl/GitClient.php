@@ -34,6 +34,11 @@ class GitClient implements SourceControl
         return null;
     }
 
+    public function openPullRequests(): array
+    {
+        return [];
+    }
+
     public function getPullRequestComments(string $id): array
     {
         return [];
