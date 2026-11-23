@@ -55,35 +55,48 @@ class TicketResolver
      * The ticket the title names, for the review's context, or null when it names
      * none a source of this repository reads.
      *
-     * @return array{reference: string, source: string, url: string|null, markdown: string|null, error: string|null}|null
+     * @return array{reference: string, source: string, source_id: int, url: string|null, markdown: string|null, error: string|null}|null
      */
     public function forTitle(Repository $repository, ?string $title): ?array
     {
-        $match = $this->match($this->sources($repository), $title);
+        $match = $this->matchTitle($repository, $title);
 
         return $match === null ? null : $this->read($repository, ...$match);
     }
 
     /**
-     * The ticket a reference names, as a title would carry it: `PROJ-123`, `#1234`
-     * or `1234`. Null when no source of this repository reads it.
+     * The source of this repository that reads a reference in the title, with the
+     * reference, without reading the ticket.
      *
-     * @return array{reference: string, source: string, url: string|null, markdown: string|null, error: string|null}|null
+     * @return array{0: TicketSource, 1: string}|null
      */
-    public function forReference(Repository $repository, string $reference): ?array
+    public function matchTitle(Repository $repository, ?string $title): ?array
+    {
+        return $this->match($this->sources($repository), $title);
+    }
+
+    /**
+     * The same for a reference given by itself, as a title would carry it:
+     * `PROJ-123`, `#1234` or `1234`.
+     *
+     * @return array{0: TicketSource, 1: string}|null
+     */
+    public function matchReference(Repository $repository, string $reference): ?array
     {
         $reference = trim($reference);
-        $match = $this->match($this->sources($repository), ctype_digit($reference) ? "#{$reference}" : $reference);
 
-        return $match === null ? null : $this->read($repository, ...$match);
+        return $this->matchTitle($repository, ctype_digit($reference) ? "#{$reference}" : $reference);
     }
 
     /**
-     * @return array{reference: string, source: string, url: string|null, markdown: string|null, error: string|null}
+     * The ticket from the source, kept with the run as the review's input. The
+     * source's id says later where it came from.
+     *
+     * @return array{reference: string, source: string, source_id: int, url: string|null, markdown: string|null, error: string|null}
      */
-    protected function read(Repository $repository, TicketSource $source, string $reference): array
+    public function read(Repository $repository, TicketSource $source, string $reference): array
     {
-        $ticket = ['reference' => $reference, 'source' => $source->name, 'url' => null, 'markdown' => null, 'error' => null];
+        $ticket = ['reference' => $reference, 'source' => $source->name, 'source_id' => (int) $source->getKey(), 'url' => null, 'markdown' => null, 'error' => null];
 
         try {
             /** @var TicketDriver $driver */

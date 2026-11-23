@@ -219,8 +219,10 @@ class ReviewSettings
     }
 
     /**
-     * Whether the repository's reviews grade a change against its ticket's acceptance
-     * criteria, as options() reads it: its own setting, or the team's.
+     * Whether the repository's settings ask the review to grade a change against its
+     * ticket's acceptance criteria, as options() reads it: its own setting, or the
+     * team's. A preference: a reviewer that writes no grading, such as OpenCodeReview,
+     * leaves it out all the same.
      */
     public static function gradesTicket(Repository $repository): bool
     {

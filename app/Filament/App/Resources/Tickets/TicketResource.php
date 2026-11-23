@@ -19,6 +19,7 @@ use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -94,6 +95,13 @@ class TicketResource extends Resource
                             ->helperText('One for a single repository is tried before the ones for every repository.'),
                         TextInput::make('position')->label('Order')->integer()->default(0)->required()
                             ->helperText('Tried from low to high; the first whose kind of reference the title carries is used.'),
+                    ]),
+                Section::make('Outside the review')
+                    ->schema([
+                        Toggle::make('readable_over_mcp')
+                            ->label('Readable over MCP')
+                            ->default(false)
+                            ->helperText('Lets every member of the tenant read this service\'s tickets in full from their AI assistant, with the connection\'s access: also tickets they could not open in the tracker themselves. Off, they get only the reference and the link.'),
                     ]),
             ])
             ->columns(1);
