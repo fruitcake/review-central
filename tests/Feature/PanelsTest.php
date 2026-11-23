@@ -558,6 +558,18 @@ it('detects the repository and the branch from a pull request\'s link, number or
         ->assertSet('mountedActions.0.data.branch', null)
         ->assertSet('mountedActions.0.data.repository_id', null);
 
+    // So does emptying the field; a branch typed by hand since stays.
+    livewire(ListReviewRuns::class)
+        ->mountAction('review')
+        ->set('mountedActions.0.data.detect', 'https://bitbucket.org/acme/shop/pull-requests/39')
+        ->set('mountedActions.0.data.detect', '')
+        ->assertSet('mountedActions.0.data.branch', null)
+        ->assertSet('mountedActions.0.data.detected', null)
+        ->set('mountedActions.0.data.detect', 'https://bitbucket.org/acme/shop/pull-requests/39')
+        ->set('mountedActions.0.data.branch', 'feature/mine')
+        ->set('mountedActions.0.data.detect', '')
+        ->assertSet('mountedActions.0.data.branch', 'feature/mine');
+
     // A ticket key whole: VZ-95 is not VZ-959.
     livewire(ListReviewRuns::class)
         ->mountAction('review')

@@ -83,27 +83,22 @@ class ListReviewRuns extends ListRecords
     protected static function detect(Get $get, Set $set): void
     {
         $input = trim((string) $get('detect'));
-
-        if ($input === '') {
-            $set('detected', null);
-
-            return;
-        }
-
-        $found = self::pullRequestFrom($input, $get('repository_id'));
+        $found = $input === '' ? null : self::pullRequestFrom($input, $get('repository_id'));
 
         if ($found === null) {
-            // What an earlier detection filled in is not this one's: cleared, unless
-            // someone changed it by hand since.
+            // What an earlier detection filled in is not this one's, nor the empty
+            // field's: cleared, unless someone changed it by hand since.
             if (filled($get('detected_branch')) && $get('branch') === $get('detected_branch')) {
                 $set('branch', null);
                 $set('repository_id', null);
             }
 
             $set('detected_branch', null);
-            $set('detected', preg_match('/^#?\\d+$/', $input) === 1 && blank($get('repository_id'))
-                ? 'Pick the repository below first, then detect again.'
-                : "Nothing found for \"{$input}\": no open pull request of this team's repositories, or its repository is on more than one connection. Pick the repository below and detect again, or fill in the branch.");
+            $set('detected', match (true) {
+                $input === '' => null,
+                preg_match('/^#?\\d+$/', $input) === 1 && blank($get('repository_id')) => 'Pick the repository below first, then detect again.',
+                default => "Nothing found for \"{$input}\": no open pull request of this team's repositories, or its repository is on more than one connection. Pick the repository below and detect again, or fill in the branch.",
+            });
 
             return;
         }
