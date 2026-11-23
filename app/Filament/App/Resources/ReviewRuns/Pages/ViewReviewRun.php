@@ -332,6 +332,13 @@ class ViewReviewRun extends ViewRecord
                 ->get(),
             'verdicts' => auth()->user() instanceof User ? app(FindingFeedback::class)->of($run, auth()->user()) : [],
             'reasons' => auth()->user() instanceof User ? app(FindingFeedback::class)->reasons($run, auth()->user()) : [],
+            // Why people in the team dismissed each finding, notes given from an AI assistant included.
+            'explanations' => FindingVerdict::query()->with('user')->where('review_run_id', $run->getKey())
+                ->where(fn ($query) => $query->whereNotNull('reason')->orWhereNotNull('note'))
+                ->get()
+                ->groupBy('finding_id')
+                ->map(fn ($verdicts): array => $verdicts->map->explanation()->all())
+                ->all(),
             // Anyone in the team judging a finding not to be one is enough to make a rule of it.
             'dismissed' => FindingVerdict::query()
                 ->where('review_run_id', $run->getKey())

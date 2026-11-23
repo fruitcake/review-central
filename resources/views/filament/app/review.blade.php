@@ -140,6 +140,9 @@
                             @if (filled($finding['suggestion'] ?? null))
                                 <pre class="rc-code">{{ $finding['suggestion'] }}</pre>
                             @endif
+                            @foreach ($explanations[(string) ($finding['id'] ?? '')] ?? [] as $explanation)
+                                <span class="rc-muted">{{ $explanation }}</span>
+                            @endforeach
                             <div class="rc-verdicts">
                                 <span class="rc-muted">Was this right?</span>
                                 @foreach (\App\Enums\FindingVerdictKind::cases() as $kind)

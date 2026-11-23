@@ -36,6 +36,22 @@ class FindingVerdict extends Model
     }
 
     /**
+     * @return BelongsTo<User, $this>
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Why it was dismissed, as a line for the team: "Sam: Not a problem · Nitpick: too small".
+     */
+    public function explanation(): string
+    {
+        return trim(($this->user->name ?? 'Someone').': '.$this->verdict->text().($this->reason === null ? '' : ' · '.$this->reason->text()).(filled($this->note) ? " — {$this->note}" : ''));
+    }
+
+    /**
      * @return BelongsTo<ReviewRun, $this>
      */
     public function run(): BelongsTo

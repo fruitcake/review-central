@@ -1,9 +1,9 @@
 {{-- How the period's findings ended, and why people dismissed the ones they did. --}}
-@php($fills = ['fixed' => 'rc-fill-primary', 'acknowledged' => 'rc-fill-sky', 'false_positive' => 'rc-fill-danger', 'open' => 'rc-fill-accent', 'gone' => 'rc-fill-grey'])
+@php($fills = ['fixed' => 'rc-fill-primary', 'acknowledged' => 'rc-fill-sky', 'false_positive' => 'rc-fill-danger', 'open' => 'rc-fill-ink', 'outdated' => 'rc-fill-grey', 'unreported' => 'rc-fill-hatch'])
 <div class="rc-outcomes">
     <div>
         <h3 id="rc-outcomes">How findings ended</h3>
-        <span class="rc-muted">As the newest review of each pull request left them, however people answered</span>
+        <span class="rc-muted">As the reviews of each pull request last reported them, however people answered</span>
     </div>
     @if ($outcomes['total'] === 0)
         <span class="rc-muted">No findings in this period.</span>

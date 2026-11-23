@@ -121,6 +121,9 @@
     .rc-fill-accent { background: var(--rc-accent); }
     /* Striped, so a cache write is told from plain input without a colour of its own. */
     .rc-fill-sky { background: repeating-linear-gradient(45deg, var(--rc-grey), var(--rc-grey) 3px, var(--rc-soft) 3px, var(--rc-soft) 6px); }
+    .rc-fill-ink { background: var(--rc-ink-soft); }
+    /* Striped the other way, for a second shade of grey in one bar. */
+    .rc-fill-hatch { background: repeating-linear-gradient(-45deg, var(--rc-ink-soft), var(--rc-ink-soft) 2px, var(--rc-soft) 2px, var(--rc-soft) 6px); }
     .rc-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
     .rc-chip { align-self: flex-start; display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 100px; white-space: nowrap; }

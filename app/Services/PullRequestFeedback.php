@@ -273,7 +273,7 @@ class PullRequestFeedback
     public function findings(ReviewRun $run, ?User $user = null, array $comments = []): array
     {
         $failOn = ReviewPublisher::failOnSpec($run->fail_on);
-        $verdicts = FindingVerdict::query()->where('review_run_id', $run->getKey())->get()->groupBy('finding_id');
+        $verdicts = FindingVerdict::query()->with('user')->where('review_run_id', $run->getKey())->get()->groupBy('finding_id');
         $threads = $this->threads($comments);
 
         return collect($run->findings ?? [])
@@ -288,6 +288,8 @@ class PullRequestFeedback
                     'open' => in_array(strtolower((string) ($finding['status'] ?? 'new')), ReviewPublisher::OPEN, true),
                     'verdicts' => $given->isEmpty() ? null : $given->countBy(fn (FindingVerdict $verdict): string => $verdict->verdict->value)->all(),
                     'your_verdict' => $user === null ? null : $given->firstWhere('user_id', $user->getKey())?->verdict->value,
+                    // Why people dismissed it, notes included, which a reply on the host may not say.
+                    'dismissals' => ($why = $given->filter(fn (FindingVerdict $verdict): bool => $verdict->reason !== null || filled($verdict->note))->map->explanation()->values()->all()) === [] ? null : $why,
                     'thread' => $threads[$id] ?? null,
                 ], fn (mixed $value): bool => $value !== null);
             })
@@ -309,7 +311,9 @@ class PullRequestFeedback
         $byParent = collect($comments)->groupBy('parent_id');
 
         foreach ($comments as $comment) {
-            if (! $comment['is_review'] || ! preg_match_all(ReviewContext::FINDING_MARKER, (string) $comment['text'], $markers)) {
+            // A finding's own comment; an older review's summary also carries the
+            // markers of its findings, but is the thread of none of them.
+            if (! $comment['is_review'] || preg_match(ReviewContext::REVIEW_MARKER, (string) $comment['text']) || ! preg_match_all(ReviewContext::FINDING_MARKER, (string) $comment['text'], $markers)) {
                 continue;
             }
 

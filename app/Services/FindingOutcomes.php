@@ -11,9 +11,9 @@ use Illuminate\Support\Collection;
 
 /**
  * How the findings of a period ended, whichever way people answered them: on the
- * pull request, on the review's page or from an AI assistant. The next review sets
- * each finding's status from what it then sees, so the newest review of each pull
- * request has the end of every finding raised on it.
+ * pull request, on the review's page or from an AI assistant. Each review sets the
+ * status of the findings it reports from what it then sees, so the last status a
+ * review reported for a finding is how it ended.
  */
 class FindingOutcomes
 {
@@ -27,7 +27,9 @@ class FindingOutcomes
         'acknowledged' => ['acknowledged'],
         'false_positive' => ['false_positive'],
         'open' => ReviewPublisher::OPEN,
-        'gone' => ['outdated', 'unreported'],
+        'outdated' => ['outdated'],
+        // The reviewer could no longer establish it, on code that did not change.
+        'unreported' => ['unreported'],
     ];
 
     public const LABELS = [
@@ -35,7 +37,8 @@ class FindingOutcomes
         'acknowledged' => 'Acknowledged',
         'false_positive' => 'False positive',
         'open' => 'Still open',
-        'gone' => 'Code changed',
+        'outdated' => 'Code changed',
+        'unreported' => 'Not reported again',
     ];
 
     /**
@@ -46,14 +49,10 @@ class FindingOutcomes
     {
         $counts = array_fill_keys(array_keys(self::OUTCOMES), 0);
 
-        foreach ($this->newestPerPullRequest($runs) as $run) {
-            foreach ($run->findings ?? [] as $finding) {
-                $status = strtolower((string) ($finding['status'] ?? 'new'));
-
-                foreach (self::OUTCOMES as $outcome => $statuses) {
-                    if (in_array($status, $statuses, true)) {
-                        $counts[$outcome]++;
-                    }
+        foreach ($this->lastStatuses($runs) as $status) {
+            foreach (self::OUTCOMES as $outcome => $statuses) {
+                if (in_array($status, $statuses, true)) {
+                    $counts[$outcome]++;
                 }
             }
         }
@@ -77,17 +76,29 @@ class FindingOutcomes
     }
 
     /**
-     * The newest review of each pull request among the runs, trials left out.
+     * The last status reviews reported for each finding of each pull request: a
+     * review that leaves out a finding settled before leaves its status as it was.
+     * Only reviews that reported count, not one that failed to publish, and no trial.
      *
      * @param  Collection<int, ReviewRun>  $runs
-     * @return Collection<int, ReviewRun>
+     * @return array<string, string> by "repository:pull request:finding"
      */
-    protected function newestPerPullRequest(Collection $runs): Collection
+    protected function lastStatuses(Collection $runs): array
     {
-        return $runs
-            ->filter(fn (ReviewRun $run): bool => $run->pull_request_id !== null && ! $run->custom && $run->findings !== null)
-            ->sortByDesc('started_at')
-            ->unique(fn (ReviewRun $run): string => "{$run->repository_id}:{$run->pull_request_id}")
-            ->values();
+        $statuses = [];
+
+        $reported = $runs
+            ->filter(fn (ReviewRun $run): bool => $run->pull_request_id !== null && ! $run->custom && in_array($run->status, PullRequestFeedback::REPORTED, true))
+            ->sortBy('started_at');
+
+        foreach ($reported as $run) {
+            foreach ($run->findings ?? [] as $finding) {
+                if (filled($finding['id'] ?? null)) {
+                    $statuses["{$run->repository_id}:{$run->pull_request_id}:{$finding['id']}"] = strtolower((string) ($finding['status'] ?? 'new'));
+                }
+            }
+        }
+
+        return $statuses;
     }
 }

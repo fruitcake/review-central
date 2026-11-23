@@ -27,17 +27,24 @@ class FindingSettlement
      * Every verdict is checked before any is stored, and all are stored or none.
      * The replies follow; one that cannot be posted is said so, the rest still are.
      *
+     * @param  string  $reviewId  the review the findings were read from
      * @param  array<int, array{finding_id: string, verdict: string, reason?: string|null, note?: string|null, reply?: string|null}>  $items
      * @return array{review: string, findings: array<int, array<string, mixed>>}
      *
      * @throws RepositoryNotFound
      * @throws ActionRefused
      */
-    public function settle(User $user, Repository $repository, ?int $pullRequestId, ?string $branch, array $items): array
+    public function settle(User $user, Repository $repository, ?int $pullRequestId, ?string $branch, string $reviewId, array $items): array
     {
         $pullRequest = $this->feedback->resolve($repository, $pullRequestId, $branch);
         $run = $this->feedback->latestRun($repository, $pullRequest['id'])
             ?? throw new ActionRefused("Pull request #{$pullRequest['id']} has no review with findings yet.");
+
+        // Finding ids start again at F1 in another review: a verdict on the F1 that
+        // was read has to land on that review, not on one that came after it.
+        if ($run->uuid !== $reviewId) {
+            throw new ActionRefused("The newest review of pull request #{$pullRequest['id']} is {$run->uuid}, not {$reviewId}. Read it with pull-request-feedback and settle its findings. Nothing was recorded.");
+        }
 
         $settled = array_map(fn (array $item): array => $this->parse($run, $item), $items);
 
@@ -99,10 +106,10 @@ class FindingSettlement
      */
     protected function reply(User $user, Repository $repository, int $pullRequestId, ReviewRun $run, array $items): array
     {
-        $host = $repository->sourceControl();
         $errors = [];
 
         try {
+            $host = $repository->sourceControl();
             $threads = $this->feedback->threads(ReviewContext::compactComments($host->getPullRequestComments((string) $pullRequestId), null));
         } catch (Throwable $exception) {
             return array_fill_keys(array_column($items, 'finding_id'), 'The pull request\'s comments could not be read: '.$exception->getMessage());
@@ -112,8 +119,7 @@ class FindingSettlement
 
         foreach ($items as $item) {
             $id = $item['finding_id'];
-            // Posted by Review Central's own account, so it says whose it is.
-            $body = rtrim((string) $item['reply'])."\n\n— {$user->name}, via Review Central";
+            $body = self::body($user, (string) $item['reply']);
             $parent = $threads[$id]['comment_id'] ?? null;
 
             try {
@@ -126,5 +132,17 @@ class FindingSettlement
         }
 
         return $errors;
+    }
+
+    /**
+     * A reply as Review Central posts it, on its own account: whose it is first, so
+     * it can never open with a command such as /review or @review, and none of its
+     * lines read as the review's own markers.
+     */
+    public static function body(User $user, string $reply): string
+    {
+        $inert = (string) preg_replace('/^(\s*)\[\/\/\]:/m', '$1\\[//]:', trim($reply));
+
+        return "**{$user->name}**, via Review Central:\n\n{$inert}";
     }
 }

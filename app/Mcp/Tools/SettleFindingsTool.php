@@ -21,7 +21,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 
     The verdicts and reasons are the team's statistics of how good the review is, so give the user's judgement, not your own. A reply is posted in the finding's thread on the pull request by Review Central, signed with the user's name; the next review reads it. A finding that was fixed needs no reply: the next review sees the fix. Reply to a finding that is wrong or not worth it, with the evidence (file:line) in one to three sentences.
 
-    All verdicts are checked first: one unknown finding or bad reason records nothing. A reply that cannot be posted is reported per finding; the rest still are. Take the finding ids from `pull-request-feedback`.
+    All verdicts are checked first: one unknown finding or bad reason records nothing. A reply that cannot be posted is reported per finding; the rest still are. Take `review_id` and the finding ids from `pull-request-feedback`.
     TXT)]
 class SettleFindingsTool extends ReviewTool
 {
@@ -31,6 +31,7 @@ class SettleFindingsTool extends ReviewTool
     {
         $validated = $request->validate([
             ...$this->pullRequestRules(),
+            'review_id' => ['required', 'string', 'max:64'],
             'findings' => ['required', 'array', 'min:1', 'max:50'],
             'findings.*.finding_id' => ['required', 'string', 'max:64', 'distinct'],
             'findings.*.verdict' => ['required', Rule::in(['valid', 'not_a_problem', 'wrong', 'none'])],
@@ -44,6 +45,7 @@ class SettleFindingsTool extends ReviewTool
             $this->repository($request),
             isset($validated['pull_request_id']) ? (int) $validated['pull_request_id'] : null,
             $validated['branch'] ?? null,
+            (string) $validated['review_id'],
             array_values($validated['findings']),
         ));
     }
@@ -55,6 +57,7 @@ class SettleFindingsTool extends ReviewTool
     {
         return [
             ...$this->pullRequestSchema($schema),
+            'review_id' => $schema->string()->description('The id of the review the findings were read from, `review.id` in `pull-request-feedback`. Refused when a newer review has come since.')->required(),
             'findings' => $schema->array()->items($schema->object([
                 'finding_id' => $schema->string()->description('The finding\'s id, such as F1.')->required(),
                 'verdict' => $schema->string()->enum(['valid', 'not_a_problem', 'wrong', 'none'])->required(),
