@@ -45,6 +45,7 @@ use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Laravel\Passport\Passport;
 
@@ -216,11 +217,13 @@ it('lists a ticket\'s files, and gives an agent an image to look at and a log to
             ['id' => '10001', 'filename' => 'button.png', 'mimeType' => 'image/png', 'size' => strlen($png)],
             ['id' => '10002', 'filename' => 'console.log', 'mimeType' => 'text/plain', 'size' => 18],
             ['id' => '10003', 'filename' => 'export.zip', 'mimeType' => 'application/zip', 'size' => 4],
+            ['id' => '10005', 'filename' => 'orders.csv', 'mimeType' => 'text/csv', 'size' => 60 * 1024],
             ['id' => '10004', 'filename' => 'recording.mov', 'mimeType' => 'video/quicktime', 'size' => 50 * 1024 * 1024],
         ]]]),
         'acme.atlassian.net/rest/api/2/attachment/content/10001' => Http::response($png, 200, ['Content-Type' => 'image/png']),
         'acme.atlassian.net/rest/api/2/attachment/content/10002' => Http::response("TypeError: width\n", 200, ['Content-Type' => 'text/plain']),
         'acme.atlassian.net/rest/api/2/attachment/content/10003' => Http::response('PK..', 200, ['Content-Type' => 'application/zip']),
+        'acme.atlassian.net/rest/api/2/attachment/content/10005' => Http::response("id;total\n".str_repeat("1;9.95\n", 9000), 200, ['Content-Type' => 'text/csv']),
     ]);
     $attachment = fn (int $number, ?User $user = null) => AgentServer::actingAs($user ?? $this->member)
         ->tool(TicketAttachmentTool::class, ['repository' => 'acme/shop', 'reference' => 'PROJ-9', 'number' => $number]);
@@ -230,15 +233,36 @@ it('lists a ticket\'s files, and gives an agent an image to look at and a log to
         ->assertOk()
         ->assertStructuredContentPaths([
             'attachments.0' => ['number' => 1, 'name' => 'button.png', 'type' => 'image/png', 'size' => strlen($png), 'readable' => true],
-            'attachments.3.name' => 'recording.mov',
+            'attachments.3.name' => 'orders.csv',
         ])
         ->assertSee('1. button.png (image/png, ');
 
     $attachment(1)->assertOk()->assertSee(['button.png', base64_encode($png)]);
     $attachment(2)->assertOk()->assertSee("# console.log\n\nTypeError: width");
-    $attachment(3)->assertHasErrors(['export.zip is a application/zip file; only images and text files are read.']);
-    $attachment(4)->assertHasErrors(['recording.mov is larger than 10 MB, which is not read.']);
-    $attachment(5)->assertHasErrors(['PROJ-9 has no attachment 5: it has 4.']);
+    $attachment(5)->assertHasErrors(['recording.mov is larger than 10 MB, which is not read.']);
+    $attachment(6)->assertHasErrors(['PROJ-9 has no attachment 6: it has 5.']);
+
+    // Anything else is for the checkout, not the conversation: an address to save it from.
+    $attachment(4)->assertOk()->assertSee(['text/csv', 'Download it within 15 minutes', "Its first lines:\n\n```\nid;total\n1;9.95"]);
+    $attachment(3)->assertOk()->assertSee(["curl -fsSL -o 'export.zip' '".url('tickets/attachment').'?']);
+
+    $download = fn (User $user, int $number = 3): string => URL::temporarySignedRoute('tickets.attachment', now()->addMinutes(15), ['user' => $user->id, 'repository' => $this->repository->id, 'reference' => 'PROJ-9', 'number' => $number]);
+
+    $this->get($download($this->member))->assertOk()
+        ->assertHeader('Content-Disposition', 'attachment; filename=export.zip')
+        ->assertHeader('X-Content-Type-Options', 'nosniff')
+        ->assertContent('PK..');
+    $this->get($download($this->member).'0')->assertForbidden();
+    $this->get($download($this->member, 5))->assertNotFound();
+    $expired = $download($this->member);
+    $this->travel(16)->minutes();
+    $this->get($expired)->assertForbidden();
+    $this->travelBack();
+
+    // Out of the tenant since the address was given: nothing.
+    $this->member->tenants()->detach();
+    $this->get($download($this->member))->assertNotFound();
+    $this->member->tenants()->attach($this->tenant);
 
     // With the source's own sign-in, the same as the ticket.
     Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'attachment/content/10001') && $request->hasHeader('Authorization') && $request->header('Accept') === ['*/*']);
