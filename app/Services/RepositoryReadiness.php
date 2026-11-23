@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\ConnectionKind;
+use App\Enums\ReviewProvider;
+use App\Enums\ReviewsFrom;
 use App\Models\Repository;
 use App\Runners\DiffRunner;
 use Throwable;
@@ -27,7 +29,7 @@ class RepositoryReadiness
      */
     public function checks(Repository $repository): array
     {
-        $checks = [$this->readable($repository), $this->provider($repository)];
+        $checks = [$this->enabled($repository), $this->readable($repository), $this->provider($repository), $this->reviewers($repository)];
 
         $runner = $repository->runner();
 
@@ -35,7 +37,7 @@ class RepositoryReadiness
             ! $runner->available() => ['label' => 'Runner', 'note' => "{$runner->label()} is not set up on this installation. {$runner->setupHint()} Or pick another runner under \"Runs on\".", 'state' => self::PROBLEM],
             // A git server has no pull requests, so no diff to review.
             $runner instanceof DiffRunner && ! $repository->sourceControl()->publishes() && $repository->integration?->driver === 'git' => ['label' => 'Runner', 'note' => 'The diff alone needs a host with pull requests (Bitbucket or GitHub). A git server\'s repositories need Docker or a Cloudflare sandbox, for the security review.', 'state' => self::PROBLEM],
-            default => ['label' => 'Runner', 'note' => "{$runner->label()}. Nothing is needed in the repository.", 'state' => self::OK],
+            default => ['label' => 'Runner', 'note' => $runner->label().($repository->review_runner === null ? ', as the platform' : '').'. Nothing is needed in the repository.', 'state' => self::OK],
         };
         $checks[] = $this->webhook($repository);
         $checks[] = $this->tickets($repository);
@@ -62,6 +64,34 @@ class RepositoryReadiness
         return $found === null
             ? ['label' => 'Connection can read the repository', 'note' => "{$repository->integration->name} cannot see {$repository->fullName()}: check its name and the token.", 'state' => self::PROBLEM]
             : ['label' => 'Connection can read the repository', 'note' => "{$repository->integration->name} · {$repository->workspace}", 'state' => self::OK];
+    }
+
+    /**
+     * Off is no problem: such a repository is reviewed when a person starts it.
+     *
+     * @return array{label: string, note: string, state: string}
+     */
+    protected function enabled(Repository $repository): array
+    {
+        return match (true) {
+            ! $repository->reviews_enabled => ['label' => 'Reviews', 'note' => 'Off: nothing starts a review by itself; a person starts each one from Pull requests.', 'state' => self::UNKNOWN],
+            $repository->reviews_from === ReviewsFrom::Trusted => ['label' => 'Reviews', 'note' => 'On, for the trusted accounts\' pull requests; the others wait under Pull requests.', 'state' => self::OK],
+            default => ['label' => 'Reviews', 'note' => 'On, for every pull request.', 'state' => self::OK],
+        };
+    }
+
+    /**
+     * The reviewers the runner said it can run, which it says when it runs.
+     *
+     * @return array{label: string, note: string, state: string}
+     */
+    protected function reviewers(Repository $repository): array
+    {
+        $available = (array) ($repository->review_available_providers ?? []);
+
+        return $available === []
+            ? ['label' => 'Reviewers available', 'note' => 'Known after the first review.', 'state' => self::UNKNOWN]
+            : ['label' => 'Reviewers available', 'note' => implode(', ', array_map(fn (string $name): string => ReviewProvider::tryFrom($name)?->text() ?? $name, $available)), 'state' => self::OK];
     }
 
     /**

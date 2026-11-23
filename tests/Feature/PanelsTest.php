@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\ConnectionKind;
+use App\Enums\ReviewProvider;
 use App\Enums\TicketStyle;
 use App\Filament\Admin\Resources\ReviewInstructions\Pages\EditReviewInstruction as EditDefaultInstruction;
 use App\Filament\Admin\Resources\Tenants\Pages\ManageTenants;
@@ -208,8 +209,10 @@ it('checks against the host whether a repository can be reviewed', function () {
 
     // Nothing set up: no AI provider, a runner that is turned off, and no webhook to start a review.
     expect($states())->toBe([
+        'Reviews' => 'ok',
         'Connection can read the repository' => 'ok',
         'AI provider' => 'problem',
+        'Reviewers available' => 'unknown',
         'Runner' => 'problem',
         'Webhook' => 'problem',
         'Ticket source' => 'unknown',
@@ -220,8 +223,10 @@ it('checks against the host whether a repository can be reviewed', function () {
 
     // Nothing is needed in the repository, but nothing starts a review without the webhook.
     expect($states())->toBe([
+        'Reviews' => 'ok',
         'Connection can read the repository' => 'ok',
         'AI provider' => 'ok',
+        'Reviewers available' => 'unknown',
         'Runner' => 'ok',
         'Webhook' => 'problem',
         'Ticket source' => 'unknown',
@@ -239,6 +244,15 @@ it('checks against the host whether a repository can be reviewed', function () {
 
     expect(collect(app(RepositoryReadiness::class)->checks($repository))->firstWhere('label', 'Webhook')['note'])->toBe('Last delivery 3 minutes ago.');
 
+    // Turned off, or with the reviewers its runner reported, it says so; off still lets a person start one.
+    $repository->forceFill(['reviews_enabled' => false, 'review_available_providers' => ['claude-code', 'codex-cli']])->save();
+    $notes = collect(app(RepositoryReadiness::class)->checks($repository))->pluck('note', 'label');
+
+    expect($notes['Reviews'])->toStartWith('Off: nothing starts a review by itself')
+        ->and($notes['Reviewers available'])->toBe(ReviewProvider::ClaudeCode->text().', '.ReviewProvider::CodexCli->text())
+        ->and($notes['Runner'])->toBe('Docker on this server, as the platform. Nothing is needed in the repository.')
+        ->and(app(RepositoryReadiness::class)->ready($repository))->toBeTrue();
+
     livewire(ManageRepositories::class)->assertActionVisible(TestAction::make('readiness')->table($repository));
 });
 
@@ -247,7 +261,7 @@ it('says so when the token cannot see the repository', function () {
 
     Http::fake(['api.bitbucket.org/*' => Http::response([], 404)]);
 
-    expect(app(RepositoryReadiness::class)->checks($repository)[0])->toBe([
+    expect(collect(app(RepositoryReadiness::class)->checks($repository))->firstWhere('label', 'Connection can read the repository'))->toBe([
         'label' => 'Connection can read the repository',
         'note' => 'Bitbucket Cloud cannot see acme/gone: check its name and the token.',
         'state' => 'problem',
@@ -385,6 +399,44 @@ it('refuses a repository on another tenant\'s connection', function () {
     expect(Repository::query()->withoutGlobalScopes()->where('slug', 'stolen')->exists())->toBeFalse();
 });
 
+it('lists whether each repository is reviewed by itself, which an admin turns from the list, and its reviews of the last 30 days', function () {
+    $repository = Repository::factory()->create(['connection_id' => Connection::factory()->create(['tenant_id' => $this->tenant->id])]);
+    $run = fn (string $status, int $daysAgo) => ReviewRun::query()->create([
+        'tenant_id' => $this->tenant->id, 'repository_id' => $repository->id, 'workspace' => 'acme', 'slug' => $repository->slug, 'branch' => 'main',
+        'commit' => str_repeat('a', 40), 'status' => $status, 'started_at' => now()->subDays($daysAgo),
+    ]);
+    $run(ReviewRun::STATUS_FINISHED, 2);
+    $run(ReviewRun::STATUS_FAILED, 29);
+    // Too long ago, or never a review.
+    $run(ReviewRun::STATUS_FINISHED, 31);
+    $run(ReviewRun::STATUS_SKIPPED, 1);
+
+    livewire(ManageRepositories::class)
+        ->assertTableColumnStateSet('reviews_last_30_days', 2, $repository)
+        ->call('updateTableColumnState', 'reviews_enabled', (string) $repository->getKey(), false);
+
+    expect($repository->refresh()->reviews_enabled)->toBeFalse();
+
+    $member = User::factory()->create();
+    $member->tenants()->attach($this->tenant);
+    $this->actingAs($member);
+
+    livewire(ManageRepositories::class)
+        ->call('updateTableColumnState', 'reviews_enabled', (string) $repository->getKey(), true);
+
+    expect($repository->refresh()->reviews_enabled)->toBeFalse();
+});
+
+it('adds a repository that is not reviewed by itself when the toggle is off', function () {
+    $connection = Connection::factory()->create(['tenant_id' => $this->tenant->id]);
+
+    livewire(ManageRepositories::class)
+        ->callAction('create', ['connection_id' => $connection->id, 'workspace' => 'acme', 'slug' => 'manual', 'reviews_enabled' => false])
+        ->assertHasNoFormErrors();
+
+    expect(Repository::query()->where('slug', 'manual')->sole()->reviews_enabled)->toBeFalse();
+});
+
 it('lets a repository choose its runner among the ones that are set up, or follow the platform\'s', function () {
     config(['review.docker.enabled' => true, 'review.cloudflare.local' => false]);
 
@@ -510,9 +562,7 @@ it('links a repository and a review to their place on the host', function () {
     ]);
 
     livewire(ManageRepositories::class)
-        ->assertTableActionHasUrl('host', 'https://bitbucket.org/acme/shop', $repository)
-        // One that picks no runner says it follows the platform.
-        ->assertTableColumnStateSet('review_runner', 'Docker on this server (platform)', $repository);
+        ->assertTableActionHasUrl('host', 'https://bitbucket.org/acme/shop', $repository);
 
     livewire(ListReviewRuns::class)->assertTableActionHasUrl('pullRequest', 'https://bitbucket.org/acme/shop/pull-requests/570', $run);
 });
