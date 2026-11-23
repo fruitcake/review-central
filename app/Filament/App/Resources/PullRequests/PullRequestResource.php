@@ -12,6 +12,7 @@ use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Models\User;
+use App\Services\Currency;
 use App\Services\MergeState;
 use App\Services\PullRequestTurn;
 use App\Services\ReviewRequest;
@@ -51,6 +52,23 @@ class PullRequestResource extends Resource
     // Through its repository: an open pull request has no tenant of its own.
     protected static bool $isScopedToTenant = false;
 
+    /**
+     * Runs that were never a review of their own: skipped, started again, or not begun.
+     */
+    private const array NOT_A_REVIEW = [ReviewRun::STATUS_SKIPPED, ReviewRun::STATUS_RESTARTED, ReviewRun::STATUS_PENDING];
+
+    /**
+     * The runs of the list's row, for a subquery of the list.
+     *
+     * @return Builder<ReviewRun>
+     */
+    private static function runsOf(): Builder
+    {
+        return ReviewRun::query()
+            ->whereColumn('repository_id', 'open_pull_requests.repository_id')
+            ->whereColumn('pull_request_id', 'open_pull_requests.pull_request_id');
+    }
+
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()->whereHas('repository', fn (Builder $query): Builder => $query->where('tenant_id', CurrentTenant::get()->getKey()));
@@ -71,13 +89,11 @@ class PullRequestResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            // Each row's newest review, in the list's own query.
+            // Each row's newest review, how many it had and what they cost, in the list's own query.
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('repository.integration')->addSelect([
-                'latest_review' => ReviewRun::query()->select('uuid')
-                    ->whereColumn('repository_id', 'open_pull_requests.repository_id')
-                    ->whereColumn('pull_request_id', 'open_pull_requests.pull_request_id')
-                    ->latest('started_at')
-                    ->limit(1),
+                'latest_review' => self::runsOf()->select('uuid')->latest('started_at')->limit(1),
+                'reviews_count' => self::runsOf()->whereNotIn('status', self::NOT_A_REVIEW)->selectRaw('count(*)'),
+                'reviews_cost' => self::runsOf()->selectRaw('sum(cost)'),
             ]))
             ->defaultSort('updated_at', 'desc')
             ->columns([
@@ -99,6 +115,8 @@ class PullRequestResource extends Resource
                 TextColumn::make('state')
                     ->label('AI review')
                     ->state(fn (OpenPullRequest $record): HtmlString => ReviewRunResource::chip(...self::standing($record))),
+                TextColumn::make('reviews_count')->label('Reviews')->numeric(),
+                TextColumn::make('reviews_cost')->label('Cost')->formatStateUsing(fn (mixed $state): string => Currency::show($state))->placeholder('—'),
                 TextColumn::make('updated_at')->label('Last change')->since()->sortable(),
             ])
             ->filters([
@@ -188,7 +206,7 @@ class PullRequestResource extends Resource
         $runs = ReviewRun::query()
             ->where('repository_id', $record->repository_id)
             ->where('pull_request_id', $record->pull_request_id)
-            ->whereNotIn('status', [ReviewRun::STATUS_SKIPPED, ReviewRun::STATUS_RESTARTED, ReviewRun::STATUS_PENDING])
+            ->whereNotIn('status', self::NOT_A_REVIEW)
             ->oldest('started_at')
             ->get();
 

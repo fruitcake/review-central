@@ -8,7 +8,9 @@ use App\Jobs\RunContainerReview;
 use App\Models\Connection;
 use App\Models\OpenPullRequest;
 use App\Models\Repository;
+use App\Models\ReviewRun;
 use App\Models\User;
+use App\Services\Currency;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Illuminate\Http\Client\Factory as HttpFactory;
@@ -129,6 +131,32 @@ it('lists only the open tenant\'s pull requests', function () {
     livewire(ListPullRequests::class)
         ->assertCanSeeTableRecords(OpenPullRequest::query()->where('repository_id', $this->repository->id)->get())
         ->assertCanNotSeeTableRecords(OpenPullRequest::query()->where('repository_id', $other->id)->get());
+});
+
+it('counts a pull request\'s reviews and adds up what they cost', function () {
+    deliverPullRequest()->assertOk();
+    $run = fn (string $status, ?string $cost, int $pullRequest = 7): ReviewRun => ReviewRun::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'feature/export', 'pull_request_id' => $pullRequest, 'commit' => str_repeat('b', 40),
+        'runner' => 'docker', 'status' => $status, 'started_at' => now(), 'cost' => $cost,
+    ]);
+    $run(ReviewRun::STATUS_FINISHED, '0.40');
+    $run(ReviewRun::STATUS_FAILED, '0.35');
+    $run(ReviewRun::STATUS_SKIPPED, null);
+    $run(ReviewRun::STATUS_FINISHED, '9.00', pullRequest: 8);
+
+    $user = User::factory()->create();
+    $user->tenants()->attach($this->repository->tenant);
+    $this->actingAs($user);
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+    Filament::setTenant($this->repository->tenant);
+    Filament::bootCurrentPanel();
+
+    $record = OpenPullRequest::query()->sole();
+
+    livewire(ListPullRequests::class)
+        ->assertTableColumnStateSet('reviews_count', 2, $record)
+        ->assertTableColumnFormattedStateSet('reviews_cost', Currency::show(0.75), $record);
 });
 
 it('never lets a Bitbucket fork\'s pull request wait, which cannot be reviewed from its branch', function () {
