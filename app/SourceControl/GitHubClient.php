@@ -259,7 +259,7 @@ class GitHubClient implements FiltersSecrets, SourceControl
             // no threads, so the reply says which comment it answers.
             // GitHub shows it on its own, so it links to what it answers.
             return (array) $this->request(15)->post($this->url("issues/{$id}/comments"), [
-                'body' => '↪ [In reply to this comment]('.$this->pullRequestUrl((int) $id)."#issuecomment-{$parentId})\n\n".rtrim($content)."\n\n[//]: # (ai-reply-to {$parentId})",
+                'body' => '↪ [In reply to this comment]('.$this->commentLink((int) $id, $parentId).")\n\n".rtrim($content)."\n\n[//]: # (ai-reply-to {$parentId})",
             ])->throw()->json();
         }
 
@@ -695,6 +695,23 @@ class GitHubClient implements FiltersSecrets, SourceControl
             'username' => $this->token === null ? null : 'x-access-token',
             'password' => $this->token,
         ];
+    }
+
+    /**
+     * The address of a comment on the pull request: one on a line, as a reply in a
+     * thread that takes no reply of its own, or one on the pull request itself.
+     */
+    protected function commentLink(int $pullRequestId, int $commentId): string
+    {
+        foreach (["pulls/comments/{$commentId}", "issues/comments/{$commentId}"] as $path) {
+            $url = rescue(fn (): mixed => $this->request(10)->get($this->url($path))->json('html_url'), null, false);
+
+            if (is_string($url) && str_starts_with($url, 'https://')) {
+                return $url;
+            }
+        }
+
+        return $this->pullRequestUrl($pullRequestId)."#issuecomment-{$commentId}";
     }
 
     public function repositoryUrl(): string
