@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[IsReadOnly]
 #[Description(<<<'TXT'
-    Lists the open pull requests of your repositories, as JSON, newest activity first: each with whose turn it is (the author, the reviewers, the team, the AI review or nobody), what they have to do and why, and its newest AI review.
+    Lists the open pull requests of your repositories, as JSON, newest activity first: each with whose turn it is (the author, the reviewers, the team, the AI review or nobody), what they have to do and why, its newest AI review, and `conflicts` when it was last found not to merge into its destination.
 
     Use it for "what should I look at", "which of my pull requests are waiting" or "what is open on this repository". `only: "my-turn"` gives those waiting for you, `only: "mine"` those you opened. Who you are on the hosts is read from your profile in Review Central.
     TXT)]

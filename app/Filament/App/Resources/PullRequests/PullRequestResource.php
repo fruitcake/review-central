@@ -84,7 +84,7 @@ class PullRequestResource extends Resource
                     ->label('Pull request')
                     ->wrap()
                     ->placeholder('Untitled')
-                    ->description(fn (OpenPullRequest $record): string => $record->repository->slug.' #'.$record->pull_request_id.($record->branch === null ? '' : ' · '.$record->branch))
+                    ->description(fn (OpenPullRequest $record): string => $record->repository->slug.' #'.$record->pull_request_id.($record->branch === null ? '' : ' · '.$record->branch).($record->merge_conflicts ? ' · Merge conflicts' : ''))
                     ->searchable(['title', 'branch']),
                 TextColumn::make('author')
                     ->label('By')

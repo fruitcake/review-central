@@ -203,6 +203,8 @@ class PullRequestFeedback
             'destination_branch' => $record?->destination_branch,
             'head_commit' => $record?->commit,
             'draft' => $record?->draft,
+            // Asked now: its destination can move without the pull request changing.
+            'merge' => $record === null ? null : MergeState::describe(tap($record, fn (OpenPullRequest $record) => app(MergeState::class)->refresh($record, rescue(fn () => $repository->sourceControl(), null, false)))),
             // Not listed: merged or declined, or never seen by the webhook.
             'open' => $record !== null,
             'reviewers' => $record === null ? null : array_map(fn (array $reviewer): array => array_filter([

@@ -35,6 +35,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property array<int, array{name: string|null, account_id: string|null, nickname: string|null, state: string|null, at: string|null}>|null $reviewers
  * @property array<int, array{at: string, kind: string, who: string|null, text: string}>|null $history
  * @property array{key: string, next_step: string, summary: string, written_at: string}|null $note The AI's words on whose turn it is, for the state its key names
+ * @property bool|null $merge_conflicts whether it conflicts with its destination, as its host said when last asked
+ * @property array<int, string>|null $conflicting_files
+ * @property CarbonInterface|null $merge_checked_at
  * @property CarbonInterface|null $created_at
  * @property CarbonInterface|null $updated_at
  * @property-read Repository $repository
@@ -64,6 +67,9 @@ class OpenPullRequest extends Model
             'opened_at' => 'datetime',
             'head_since' => 'datetime',
             'reviewers' => 'array',
+            'merge_conflicts' => 'boolean',
+            'conflicting_files' => 'array',
+            'merge_checked_at' => 'datetime',
             'history' => 'array',
             'note' => 'array',
         ];

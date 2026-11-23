@@ -38,6 +38,7 @@ use App\Services\ReviewContext;
 use App\Services\ReviewRequest;
 use App\Services\ReviewSettings;
 use App\SourceControl\GitHubClient;
+use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -264,6 +265,26 @@ it('gives the ticket the review graded the pull request against', function () {
             'ticket.markdown' => '# Export the orders',
         ])
         ->assertStructuredContentMissingPath('ticket.error');
+});
+
+it('says whether a pull request merges into its destination, with the files that conflict, and lists it so', function () {
+    // In place of the catch-all fake: Bitbucket leads from the pull request to its file conflicts.
+    Http::swap(new HttpFactory);
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570/conflicts' => Http::response(['values' => [
+            ['path' => 'app/Export.php', 'scenario' => 'content', 'message' => 'File modified in both source and destination'],
+        ]]),
+        '*' => Http::response(['values' => []]),
+    ]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(PullRequestFeedbackTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570])
+        ->assertStructuredContentPath('pull_request.merge.conflicts', true)
+        ->assertStructuredContentPath('pull_request.merge.files', ['app/Export.php']);
+
+    UserServer::actingAs($this->member)
+        ->tool(PullRequestsTool::class, [])
+        ->assertStructuredContentPath('pull_requests.0.conflicts', true);
 });
 
 it('keeps the findings of the last review that reported when a newer attempt failed, and says it did', function () {

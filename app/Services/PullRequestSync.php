@@ -17,7 +17,7 @@ use App\SourceControl\SourceControl;
  */
 class PullRequestSync
 {
-    public function __construct(protected ReviewRequest $reviews) {}
+    public function __construct(protected ReviewRequest $reviews, protected MergeState $merge) {}
 
     /**
      * Reads one listed pull request again: gone from the list when it is no longer open.
@@ -27,6 +27,19 @@ class PullRequestSync
         $host = $record->repository->sourceControl();
 
         $this->reviews->sync($record->repository, $record->pull_request_id, $this->withReviews($host, $host->getPullRequest((string) $record->pull_request_id)));
+        $this->checkMerge($record->repository->getKey(), $record->pull_request_id, $host);
+    }
+
+    /**
+     * Whether a pull request still listed merges as it stands.
+     */
+    protected function checkMerge(int $repositoryId, int $pullRequestId, SourceControl $host): void
+    {
+        $record = OpenPullRequest::query()->where(['repository_id' => $repositoryId, 'pull_request_id' => $pullRequestId])->first();
+
+        if ($record !== null) {
+            $this->merge->refresh($record, $host);
+        }
     }
 
     /**
@@ -53,6 +66,7 @@ class PullRequestSync
 
             if ($data !== null) {
                 $this->reviews->sync($repository, $id, $this->withReviews($host, $data));
+                $this->checkMerge($repository->getKey(), $id, $host);
             }
         }
 

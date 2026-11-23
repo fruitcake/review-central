@@ -82,6 +82,26 @@ class BitbucketClient implements FiltersSecrets, SourceControl
         return $pullRequests[0] ?? null;
     }
 
+    /**
+     * The files that conflict, which the pull request's address leads to: none
+     * when it merges cleanly.
+     */
+    public function mergeConflicts(string $id): ?array
+    {
+        $response = $this->request(15)->get($this->url("pullrequests/{$id}/conflicts"));
+
+        if (in_array($response->status(), [403, 404], true)) {
+            return null;
+        }
+
+        $files = array_values(array_filter(array_map(
+            fn (mixed $conflict): ?string => is_array($conflict) && is_string($conflict['path'] ?? null) ? $conflict['path'] : null,
+            (array) ($response->throw()->json('values') ?? []),
+        )));
+
+        return ['conflicts' => $files !== [], 'files' => $files];
+    }
+
     public function openPullRequests(): array
     {
         return array_values(array_filter($this->pages($this->url('pullrequests').'?state=OPEN&pagelen=50'), 'is_array'));
