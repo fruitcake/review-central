@@ -742,6 +742,13 @@ class GitHubClient implements FiltersSecrets, SourceControl
         return "https://github.com/{$this->owner}/{$this->name}";
     }
 
+    public function fileUrl(string $commit, string $path, ?int $line = null): ?string
+    {
+        $path = implode('/', array_map(rawurlencode(...), explode('/', ltrim($path, '/'))));
+
+        return "https://github.com/{$this->owner}/{$this->name}/blob/{$commit}/{$path}".($line === null ? '' : "#L{$line}");
+    }
+
     public function pullRequestUrl(int $pullRequestId): string
     {
         return "https://github.com/{$this->owner}/{$this->name}/pull/{$pullRequestId}";

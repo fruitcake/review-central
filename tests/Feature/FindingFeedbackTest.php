@@ -10,6 +10,8 @@ use App\Models\ReviewRun;
 use App\Models\User;
 use App\Services\FindingFeedback;
 use App\Services\TenantOverview;
+use App\SourceControl\BitbucketClient;
+use App\SourceControl\BitbucketDriver;
 use Filament\Facades\Filament;
 use Illuminate\Support\Str;
 
@@ -25,10 +27,23 @@ beforeEach(function () {
         'tenant_id' => $this->tenant->id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop', 'branch' => 'feature/export',
         'commit' => str_repeat('a', 40), 'status' => ReviewRun::STATUS_FINISHED, 'result' => 'FAILED', 'started_at' => now()->subHour(),
         'findings' => [
-            ['id' => 'F1', 'severity' => 'HIGH', 'status' => 'new', 'category' => 'security', 'title' => 'Unescaped output'],
+            ['id' => 'F1', 'severity' => 'HIGH', 'status' => 'new', 'category' => 'security', 'title' => 'Unescaped output', 'path' => 'app/Views/Order View.php', 'line' => 7],
             ['id' => 'F2', 'severity' => 'LOW', 'status' => 'new', 'category' => 'tests', 'title' => 'No test'],
         ],
     ]);
+});
+
+it('asks of a finding that was fixed whether it was valid, not whether it will be fixed', function () {
+    $this->actingAs($this->user);
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+    Filament::setTenant($this->tenant);
+    Filament::bootCurrentPanel();
+
+    $this->run->update(['findings' => [['id' => 'F1', 'severity' => 'HIGH', 'status' => 'fixed', 'title' => 'Unescaped output']]]);
+
+    livewire(ViewReviewRun::class, ['record' => $this->run->uuid])
+        ->assertSee('Was valid')
+        ->assertDontSee('Valid, will fix');
 });
 
 it('keeps one verdict of a user on a finding, replaces it, and takes it back when given twice', function () {
@@ -70,6 +85,8 @@ it('takes a verdict and a rating from the review\'s own page', function () {
 
     livewire(ViewReviewRun::class, ['record' => $this->run->uuid])
         ->assertSee('Unescaped output')
+        // Its file on the host, as it was at the commit reviewed.
+        ->assertSeeHtml('href="https://bitbucket.org/'.$this->repository->workspace.'/'.$this->repository->slug.'/src/'.str_repeat('a', 40).'/app/Views/Order%20View.php#lines-7"')
         ->assertSee('Valid, will fix')
         ->call('judge', 'F1', 'valid')
         ->call('judge', 'F2', 'not-a-verdict')
@@ -133,4 +150,36 @@ it('shows how the period\'s findings ended as the reviews last reported them, an
     expect(collect($outcomes['outcomes'])->pluck('count', 'key')->all())->toBe(['fixed' => 2, 'acknowledged' => 1, 'false_positive' => 1, 'open' => 1, 'outdated' => 1, 'unreported' => 1])
         ->and($outcomes['total'])->toBe(7)
         ->and(collect($outcomes['reasons'])->pluck('count', 'label')->all())->toBe(['Intended' => 1, 'Misread the code' => 1]);
+});
+
+it('makes the host\'s client once for all the findings\' file links, also when it cannot be made', function () {
+    $this->actingAs($this->user);
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+    Filament::setTenant($this->tenant);
+    Filament::bootCurrentPanel();
+
+    // A host whose client cannot be made, as when a token cannot be had: counted.
+    $driver = new class extends BitbucketDriver
+    {
+        public int $made = 0;
+
+        public function client(Repository $repository): BitbucketClient
+        {
+            $this->made++;
+
+            throw new RuntimeException('No token.');
+        }
+    };
+    app()->instance(BitbucketDriver::class, $driver);
+
+    $finding = fn (int $n): array => ['id' => "F{$n}", 'severity' => 'LOW', 'status' => 'new', 'title' => "Finding {$n}", 'path' => "app/File{$n}.php", 'line' => $n];
+    $render = function (int $findings) use ($finding, $driver): int {
+        $this->run->update(['findings' => array_map($finding, range(1, $findings))]);
+        $driver->made = 0;
+        livewire(ViewReviewRun::class, ['record' => $this->run->uuid])->assertSee('app/File1.php');
+
+        return $driver->made;
+    };
+
+    expect($render(4))->toBe($render(1));
 });

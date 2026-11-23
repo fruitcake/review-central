@@ -175,6 +175,7 @@ it('reads a pull request by its branch: findings that hold the merge first, with
             'review.id' => $this->run->uuid,
             'review.current' => true,
             'findings.0.id' => 'F2',
+            'findings.0.url' => 'https://bitbucket.org/acme/shop/src/'.str_repeat('a', 40).'/app/Export.php#lines-12',
             'findings.0.blocks' => true,
             'findings.0.verdicts' => ['wrong' => 1],
             'findings.0.thread.replies.0.text' => 'The cell is escaped by the writer, see CsvWriter::cell().',
