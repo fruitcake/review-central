@@ -12,6 +12,7 @@ use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Models\User;
+use App\Services\MergeState;
 use App\Services\PullRequestTurn;
 use App\Services\ReviewRequest;
 use BackedEnum;
@@ -84,7 +85,7 @@ class PullRequestResource extends Resource
                     ->label('Pull request')
                     ->wrap()
                     ->placeholder('Untitled')
-                    ->description(fn (OpenPullRequest $record): string => $record->repository->slug.' #'.$record->pull_request_id.($record->branch === null ? '' : ' · '.$record->branch))
+                    ->description(fn (OpenPullRequest $record): string => $record->repository->slug.' #'.$record->pull_request_id.($record->branch === null ? '' : ' · '.$record->branch).(MergeState::current($record) === true ? ' · Merge conflicts' : ''))
                     ->searchable(['title', 'branch']),
                 TextColumn::make('author')
                     ->label('By')

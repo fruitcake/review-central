@@ -259,7 +259,9 @@ it('fetches a repository\'s open pull requests from its host without reviewing t
 
     Queue::assertNothingPushed();
     expect(OpenPullRequest::query()->orderBy('pull_request_id')->pluck('title', 'pull_request_id')->all())->toBe([4 => null, 7 => 'Change 7', 8 => 'Change 8'])
-        ->and(collect(OpenPullRequest::query()->where('pull_request_id', 7)->sole()->reviewers)->pluck('state')->all())->toBe(['approved']);
+        ->and(collect(OpenPullRequest::query()->where('pull_request_id', 7)->sole()->reviewers)->pluck('state')->all())->toBe(['approved'])
+        // Each is asked whether it merges, too.
+        ->and(OpenPullRequest::query()->where('pull_request_id', 7)->sole()->merge_conflicts)->toBeFalse();
 
     // The list narrows to one repository.
     $other = OpenPullRequest::query()->create(['repository_id' => Repository::factory()->create(['tenant_id' => $this->repository->tenant_id])->id, 'pull_request_id' => 1]);

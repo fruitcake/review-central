@@ -8,6 +8,7 @@ use App\Models\Repository;
 use App\Runners\Container\Checkout;
 use App\Services\Connections;
 use App\SourceControl\GitHubClient;
+use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\File;
@@ -562,4 +563,27 @@ describe('a pull request from a fork', function () {
 
         File::deleteDirectory(storage_path('framework/testing/review-work'));
     });
+});
+
+it('says whether a pull request merges, once GitHub has worked it out', function () {
+    $answers = [null, false, true];
+
+    // In place of the fake every test here starts with.
+    Http::swap(new HttpFactory);
+    Http::fake(['api.github.com/repos/acme/shop/pulls/12' => function () use (&$answers) {
+        return Http::response(['number' => 12, 'mergeable' => array_shift($answers)]);
+    }]);
+
+    expect($this->client->mergeConflicts('12'))->toBeNull()
+        ->and($this->client->mergeConflicts('12'))->toBe(['conflicts' => true, 'files' => []])
+        ->and($this->client->mergeConflicts('12'))->toBe(['conflicts' => false, 'files' => []]);
+});
+
+it('reads a Bitbucket conflict on any file, also one named 0', function () {
+    Http::swap(new HttpFactory);
+    Http::fake(['api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/5/conflicts' => Http::response(['values' => [['path' => '0', 'scenario' => 'content']]])]);
+
+    $client = Repository::factory()->create(['workspace' => 'acme', 'slug' => 'shop'])->sourceControl();
+
+    expect($client->mergeConflicts('5'))->toBe(['conflicts' => true, 'files' => ['0']]);
 });

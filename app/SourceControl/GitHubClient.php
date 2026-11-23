@@ -191,6 +191,23 @@ class GitHubClient implements FiltersSecrets, SourceControl
         return is_array($found) ? self::pullRequest($found) : null;
     }
 
+    /**
+     * GitHub works out whether it merges after it is asked, and says null until
+     * then; it does not name the files.
+     */
+    public function mergeConflicts(string $id): ?array
+    {
+        $response = $this->request(10)->get($this->url("pulls/{$id}"));
+
+        if (in_array($response->status(), [403, 404], true)) {
+            return null;
+        }
+
+        $mergeable = $response->throw()->json('mergeable');
+
+        return is_bool($mergeable) ? ['conflicts' => ! $mergeable, 'files' => []] : null;
+    }
+
     public function openPullRequests(): array
     {
         // Open is what GitHub lists by default.

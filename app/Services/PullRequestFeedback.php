@@ -192,6 +192,14 @@ class PullRequestFeedback
      */
     protected function pullRequest(Repository $repository, int $id, ?string $branch, ?OpenPullRequest $record, ?ReviewRun $run): array
     {
+        // Asked now, before whose turn it is: its destination can move without the
+        // pull request changing, and a conflict is the author's to resolve first.
+        $host = rescue(fn () => $repository->sourceControl(), null, false);
+
+        if ($record !== null) {
+            app(MergeState::class)->refresh($record, $host);
+        }
+
         $turn = $record === null ? null : PullRequestTurn::of($record, $run);
 
         return array_filter([
@@ -203,6 +211,8 @@ class PullRequestFeedback
             'destination_branch' => $record?->destination_branch,
             'head_commit' => $record?->commit,
             'draft' => $record?->draft,
+            // One not listed here yet is asked of the host, and nothing is kept of it.
+            'merge' => MergeState::describe($record, $record === null ? rescue(fn () => $host?->mergeConflicts((string) $id), null, false) : null),
             // Not listed: merged or declined, or never seen by the webhook.
             'open' => $record !== null,
             'reviewers' => $record === null ? null : array_map(fn (array $reviewer): array => array_filter([

@@ -73,6 +73,7 @@ final readonly class PullRequestTurn
             $record->draft => ['draft', self::AUTHOR, [$author], 'Finish the draft', "It is a draft: {$authorName} marks it ready for review when it is."],
             $record->awaiting_approval => ['approval', self::TEAM, [], 'Start the review', 'Its code is from a fork or from an account this team does not trust: someone in the team starts the review here.'],
             $run !== null && RunPresenter::live($run) => ['ai', self::AI, [], 'AI review running', 'The AI review of the newest commits is running.'],
+            MergeState::current($record) === true => ['conflicts', self::AUTHOR, [$author], 'Resolve the merge conflicts', 'It does not merge into '.($record->destination_branch ?? 'its destination')." as it stands: {$authorName} merges that in first."],
             $staleChanges->isNotEmpty() => ['re-review-changes', self::REVIEWERS, $staleChanges->all(), 'Review again', "{$names($staleChanges)} asked for changes, and there are new commits since."],
             $changes->isNotEmpty() => ['changes', self::AUTHOR, [$author], 'Address the requested changes', "{$names($changes)} asked for changes."],
             $current && $run->status === ReviewRun::STATUS_FINISHED && strtoupper((string) $run->result) === 'FAILED' => ['ai-changes', self::AUTHOR, [$author], 'Address the AI review', 'The AI review asked for changes'.($run->openFindings() > 0 ? ": {$run->openFindings()} open ".($run->openFindings() === 1 ? 'finding' : 'findings').'.' : '.')],
@@ -93,6 +94,7 @@ final readonly class PullRequestTurn
             $record->commit,
             $run?->getKey(),
             $run?->status,
+            MergeState::current($record),
             $reviewers->map(fn (array $reviewer): string => Reviewers::key($reviewer).':'.$reviewer['state'])->sort()->values()->all(),
         ]));
 

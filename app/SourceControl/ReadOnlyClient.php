@@ -56,6 +56,11 @@ final class ReadOnlyClient implements SourceControl
         return $this->client->openPullRequests();
     }
 
+    public function mergeConflicts(string $id): ?array
+    {
+        return $this->client->mergeConflicts($id);
+    }
+
     public function getPullRequestComments(string $id): array
     {
         return $this->client->getPullRequestComments($id);

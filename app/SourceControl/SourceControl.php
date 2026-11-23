@@ -65,6 +65,15 @@ interface SourceControl
     public function openPullRequests(): array;
 
     /**
+     * Whether the pull request conflicts with its destination, with the files
+     * where the host names them; null while the host is still working it out,
+     * or for a host that cannot say.
+     *
+     * @return array{conflicts: bool, files: array<int, string>}|null
+     */
+    public function mergeConflicts(string $id): ?array;
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     public function getPullRequestComments(string $id): array;
