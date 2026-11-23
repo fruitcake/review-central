@@ -108,7 +108,7 @@ class EditProfile extends BaseEditProfile
         $user = fn (): User => Filament::auth()->user() instanceof User ? Filament::auth()->user() : throw new LogicException('Not signed in.');
 
         return Section::make('Your Bitbucket account')
-            ->description('Connected, your replies to findings on Bitbucket pull requests are written as you, and no longer by the team\'s connection with your name above them. Review Central uses it for nothing else, though Bitbucket lets it write on every pull request you can.')
+            ->description('Connected, your replies to findings on Bitbucket pull requests are written as you, and no longer by the team\'s connection with your name above them. Review Central uses it for nothing else, though Bitbucket lets it comment on every pull request you can.')
             ->visible(fn (): bool => PersonalConnections::available())
             ->schema([
                 TextEntry::make('bitbucket_account')

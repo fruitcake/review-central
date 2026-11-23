@@ -26,12 +26,21 @@ class PersonalConnections
     public const BITBUCKET = 'bitbucket';
 
     /**
-     * Who the account is, and writing on pull requests. Bitbucket adds the
-     * repository scope that this implies.
+     * Who the account is, and commenting on pull requests, which `pullrequest`
+     * allows without merging or writing to the repository. Bitbucket gives a
+     * token the permissions of its consumer whatever is asked, so the consumer
+     * itself should have no more.
      *
      * @var array<int, string>
      */
-    public const BITBUCKET_SCOPES = ['account', 'pullrequest:write'];
+    public const BITBUCKET_SCOPES = ['account', 'pullrequest'];
+
+    /**
+     * Scopes that include one of BITBUCKET_SCOPES, as Bitbucket names a token's.
+     *
+     * @var array<string, string>
+     */
+    protected const IMPLIED = ['pullrequest:write' => 'pullrequest', 'account:write' => 'account'];
 
     /**
      * Whether this installation is registered at Bitbucket, so users can connect.
@@ -105,10 +114,22 @@ class PersonalConnections
 
         return match (true) {
             $connection === null => 'Your Bitbucket account is not connected.',
-            array_diff(self::BITBUCKET_SCOPES, $connection->scopes ?? []) !== [] => 'Your Bitbucket account was connected without the right to write on pull requests: connect it again on your profile.',
+            ! $this->canComment($connection->scopes ?? []) => 'Your Bitbucket account was connected without the right to comment on pull requests: connect it again on your profile.',
             $this->accessToken($connection) === null => 'Bitbucket no longer accepts your connection: connect your account again on your profile.',
             default => null,
         };
+    }
+
+    /**
+     * Whether a token with these scopes says who it is and may comment.
+     *
+     * @param  array<int, string>  $scopes
+     */
+    protected function canComment(array $scopes): bool
+    {
+        $held = [...$scopes, ...array_values(array_intersect_key(self::IMPLIED, array_flip($scopes)))];
+
+        return array_diff(self::BITBUCKET_SCOPES, $held) === [];
     }
 
     /**

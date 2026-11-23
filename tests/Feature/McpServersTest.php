@@ -481,7 +481,7 @@ it('replies as the user on their own Bitbucket account where they connected it, 
     config(['services.bitbucket.client_id' => 'consumer-key', 'services.bitbucket.client_secret' => 'consumer-secret']);
     $personal = PersonalConnection::query()->create([
         'user_id' => $this->member->id, 'host' => 'bitbucket', 'account_id' => 'id-sam', 'nickname' => 'sam',
-        'access_token' => 'sam-token', 'refresh_token' => 'sam-refresh', 'expires_at' => now()->addHour(), 'scopes' => ['account', 'pullrequest:write'],
+        'access_token' => 'sam-token', 'refresh_token' => 'sam-refresh', 'expires_at' => now()->addHour(), 'scopes' => ['account', 'pullrequest'],
     ]);
     $this->refused = false;
 
@@ -536,7 +536,7 @@ it('posts a reply as the user no more than once, mentions nobody in it, and says
     config(['services.bitbucket.client_id' => 'consumer-key', 'services.bitbucket.client_secret' => 'consumer-secret']);
     PersonalConnection::query()->create([
         'user_id' => $this->member->id, 'host' => 'bitbucket', 'account_id' => 'id-sam', 'nickname' => 'sam',
-        'access_token' => 'sam-token', 'expires_at' => now()->addHour(), 'scopes' => ['account', 'pullrequest:write'],
+        'access_token' => 'sam-token', 'expires_at' => now()->addHour(), 'scopes' => ['account', 'pullrequest'],
     ]);
 
     $this->exportPosts = 0;

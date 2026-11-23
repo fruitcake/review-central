@@ -133,12 +133,12 @@ class SetupGuides
             steps: [
                 'Open the link, pick a workspace you administer, and go to **Settings → OAuth consumers → Add consumer**. Any workspace will do: people of other workspaces can connect through it too.',
                 'Name it after this installation, and set the **Callback URL** to `'.url('/connections/bitbucket/callback').'`.',
-                'Tick the permissions below, and save.',
+                'Tick the permissions below and no others, and save. Bitbucket gives every token the consumer\'s permissions, whatever Review Central asks for: leave **Pull requests: Write** off, which would let the token merge and write to repositories.',
                 'Open the consumer, and fill in its **Key** and **Secret** under **Apps** in the admin panel, or set `BITBUCKET_CLIENT_ID` and `BITBUCKET_CLIENT_SECRET` in `.env`, which goes first.',
             ],
             permissions: [
                 'Account: Read' => 'who the account is, which also fills in their account under "Your accounts on the hosts".',
-                'Pull requests: Write' => 'posts their replies to findings as them. Bitbucket ticks Repositories: Read with it.',
+                'Pull requests: Read' => 'posts their replies to findings as them: reading includes commenting. Bitbucket ticks Repositories: Read with it.',
             ],
             notes: [
                 'Each person connects their own account on their profile; without it, their replies are posted by the team\'s connection with their name above them.',

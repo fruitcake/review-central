@@ -26,7 +26,7 @@ beforeEach(function () {
      */
     Http::fake(['api.bitbucket.org/2.0/user*' => fn () => Http::response(['uuid' => '{sam-uuid}'], 200, ['X-OAuth-Scopes' => $this->scopes])]);
 
-    $this->connect = function (string $scopes = 'pullrequest:write, account') {
+    $this->connect = function (string $scopes = 'pullrequest, account') {
         $this->scopes = $scopes;
         $account = (new BitbucketUser)->setRaw(['account_id' => '557058:sam', 'uuid' => '{sam-uuid}'])
             ->map(['id' => '{sam-uuid}', 'nickname' => 'sam-b', 'name' => 'Sam Sample'])
@@ -49,7 +49,7 @@ it('keeps the Bitbucket account a user connects, for them alone, and names it am
 
     expect(PersonalConnection::query()->sole()->only(['user_id', 'host', 'account_id', 'nickname', 'access_token', 'refresh_token', 'scopes']))->toBe([
         'user_id' => $this->user->id, 'host' => 'bitbucket', 'account_id' => '557058:sam', 'nickname' => 'sam-b',
-        'access_token' => 'sam-token', 'refresh_token' => 'sam-refresh', 'scopes' => ['pullrequest:write', 'account'],
+        'access_token' => 'sam-token', 'refresh_token' => 'sam-refresh', 'scopes' => ['pullrequest', 'account'],
     ])
         ->and($this->user->refresh()->source_accounts)->toBe(['sam-gh', '557058:sam', 'sam-b'])
         ->and(PersonalConnection::query()->sole()->getRawOriginal('access_token'))->not->toContain('sam-token');
@@ -97,7 +97,12 @@ it('shows the account on the profile, says when it cannot write, and lets the us
 
     ($this->connect)('account');
 
-    livewire(EditProfile::class)->assertSee('connected without the right to write on pull requests');
+    livewire(EditProfile::class)->assertSee('connected without the right to comment on pull requests');
+
+    // A consumer that also lets it write: commenting is part of that.
+    ($this->connect)('pullrequest:write, account');
+
+    livewire(EditProfile::class)->assertSee('Connected as sam-b.');
 
     ($this->connect)();
 
