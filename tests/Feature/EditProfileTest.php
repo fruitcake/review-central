@@ -8,6 +8,12 @@ use Illuminate\Support\Facades\Notification;
 
 use function Pest\Livewire\livewire;
 
+it('opens the profile, which belongs to no tenant', function () {
+    $this->actingAs(User::factory()->create())
+        ->get(Filament::getPanel('app')->getProfileUrl())
+        ->assertOk();
+});
+
 it('changes the email only once the new address has opened the link mailed to it', function () {
     Notification::fake();
     $user = User::factory()->create(['email' => 'attacker@example.com', 'password' => 'secret-password']);
