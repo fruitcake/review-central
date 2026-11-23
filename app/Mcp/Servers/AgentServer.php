@@ -6,13 +6,13 @@ namespace App\Mcp\Servers;
 
 use App\Mcp\Tools\AddReviewRuleTool;
 use App\Mcp\Tools\AskReviewerTool;
-use App\Mcp\Tools\JudgeFindingTool;
 use App\Mcp\Tools\OpenFindingsTool;
 use App\Mcp\Tools\PullRequestFeedbackTool;
 use App\Mcp\Tools\RequestReviewTool;
 use App\Mcp\Tools\ReviewerAnswerTool;
 use App\Mcp\Tools\ReviewInstructionsTool;
 use App\Mcp\Tools\ReviewRulesTool;
+use App\Mcp\Tools\SettleFindingsTool;
 use App\Mcp\Tools\TicketTool;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
@@ -31,7 +31,7 @@ use Laravel\Mcp\Server\Attributes\Version;
 
     Before writing or committing: read the `ticket` the change is for, which the review reads for its intent and, when the team's settings ask for it (`graded`), grades the change against, and `review-instructions`, which is what the review is told to look for and how it judges it, with the team's rules last, and review your change against it. `open-findings` with a `path` says whether the code you touch has known findings.
 
-    After a review: `pull-request-feedback` gives the newest review with its findings, those that hold the merge first, with the replies in each finding's thread. Fix what holds. When a finding is unclear, `ask-reviewer` asks the reviewer about it and `reviewer-answer` reads the answer. Record the user's own judgement of a finding with `judge-finding`.
+    After a review: `pull-request-feedback` gives the newest review with its findings, those that hold the merge first, with the replies in each finding's thread. Fix what holds. When a finding is unclear, `ask-reviewer` asks the reviewer about it and `reviewer-answer` reads the answer. Once the user decided, record it for all findings in one `settle-findings` call: `valid` for what is or will be fixed, `not_a_problem` or `wrong` with the reason for the rest, and a reply with the evidence on those, so the next review reads it. A fixed finding needs no reply.
 
     Starting a review costs money and posts on the pull request: a push starts one by itself, and `request-review` starts one without a push, only after the user agreed. A rule changes every later review: `add-review-rule` only with wording the user agreed to, and only for an admin of the tenant (`review-rules` says whether they are).
 
@@ -47,7 +47,7 @@ class AgentServer extends Server
         OpenFindingsTool::class,
         AskReviewerTool::class,
         ReviewerAnswerTool::class,
-        JudgeFindingTool::class,
+        SettleFindingsTool::class,
         RequestReviewTool::class,
         AddReviewRuleTool::class,
     ];

@@ -41,6 +41,7 @@ class RepositoryOverview extends TenantOverview
             'figures' => $this->repositoryFigures($repository, $runs, $previous, $verdicts, $days, (clone $openFindings)->count()),
             'days' => $this->perDay($runs, $days, $repository->tenant),
             'categories' => $this->categories($runs, $verdicts),
+            'outcomes' => $this->outcomes->for($runs),
             'reviewers' => $this->reviewers($runs, $verdicts),
             'pullRequests' => $this->pullRequests($repository),
             'openFindings' => $openFindings
