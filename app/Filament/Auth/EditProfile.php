@@ -4,9 +4,13 @@ declare(strict_types=1);
 
 namespace App\Filament\Auth;
 
+use App\Models\Tenant;
+use App\Models\User;
 use Filament\Auth\Pages\EditProfile as BaseEditProfile;
+use Filament\Facades\Filament;
 use Filament\Forms\Components\TagsInput;
 use Filament\Infolists\Components\TextEntry;
+use Filament\Panel;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 
@@ -16,6 +20,39 @@ use Filament\Schemas\Schema;
  */
 class EditProfile extends BaseEditProfile
 {
+    protected static bool $shouldRegisterNavigation = false;
+
+    /**
+     * A page of a tenant, so it keeps the sidebar and the way back to the tenant.
+     */
+    public static function isSimple(): bool
+    {
+        return false;
+    }
+
+    /**
+     * Registered as a page, so not under the panel's auth routes.
+     */
+    public static function getRouteName(?Panel $panel = null): string
+    {
+        $panel ??= Filament::getCurrentOrDefaultPanel();
+
+        return $panel->generateRouteName(static::getRelativeRouteName($panel));
+    }
+
+    /**
+     * The profile in the tenant open now, or else in the user's first one; null for
+     * a user in no tenant.
+     */
+    public static function urlForCurrentUser(): ?string
+    {
+        $user = Filament::auth()->user();
+        $tenant = Filament::getTenant()
+            ?? ($user instanceof User ? $user->getTenants(Filament::getPanel('app'))->first() : null);
+
+        return $tenant instanceof Tenant ? static::getUrl(panel: 'app', tenant: $tenant) : null;
+    }
+
     public function form(Schema $schema): Schema
     {
         return $schema
