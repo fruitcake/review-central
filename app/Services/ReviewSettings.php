@@ -385,7 +385,7 @@ class ReviewSettings
      * @param  array<int, string>|null  $available  the reviewer names the run can run, null when it did not say
      * @param  string|null  $pullRequest  the pull request id, so each one keeps its reviewer
      * @param  string|null  $branch  the branch, for when the run knows no pull request
-     * @param  array{effort: ReviewEffort, tier: string}|null  $pick  what the pull request's classification picked, which replaces every reviewer's effort and Claude Code's and Codex's model
+     * @param  array{effort: ReviewEffort, tier: string|null}|null  $pick  what the pull request's classification picked, which replaces every reviewer's effort and Claude Code's and Codex's model
      * @return array<string, string>
      */
     public static function variables(Repository $repository, ?array $available = null, ?string $pullRequest = null, ?string $branch = null, ?array $pick = null): array
@@ -412,7 +412,7 @@ class ReviewSettings
         foreach (self::VARIABLES as $field => $variable) {
             $value = match (true) {
                 $pick !== null && str_ends_with($field, '_effort') => $pick['effort'],
-                $pick !== null && in_array($field, self::PICKED_MODELS, true) => $pick['tier'],
+                $pick !== null && $pick['tier'] !== null && in_array($field, self::PICKED_MODELS, true) => $pick['tier'],
                 default => filled($own?->{$field}) ? $own->{$field} : $default->{$field},
             };
 
@@ -456,11 +456,14 @@ class ReviewSettings
 
     public const STRATEGY_TIER = 'default';
 
+    /** In place of a tier: the classification steps the effort up, and leaves each reviewer's model as set. */
+    public const OWN_MODEL = 'own';
+
     /**
      * Whether a repository's pull requests are classified, and from which effort and
      * model tier up: its own setting where it has one, the team's otherwise.
      *
-     * @return array{mode: ReviewStrategy, effort: ReviewEffort, tier: string}
+     * @return array{mode: ReviewStrategy, effort: ReviewEffort, tier: string} tier is a tier or OWN_MODEL
      */
     public static function strategy(Repository $repository): array
     {
@@ -474,7 +477,7 @@ class ReviewSettings
         return [
             'mode' => ReviewStrategy::tryFrom((string) $value('strategy')) ?? ReviewStrategy::Off,
             'effort' => in_array($effort, self::STRATEGY_EFFORTS, true) ? $effort : self::STRATEGY_EFFORT,
-            'tier' => in_array($tier, self::STRATEGY_TIERS, true) ? $tier : self::STRATEGY_TIER,
+            'tier' => in_array($tier, [...self::STRATEGY_TIERS, self::OWN_MODEL], true) ? $tier : self::STRATEGY_TIER,
         ];
     }
 
@@ -483,7 +486,7 @@ class ReviewSettings
      * request, a step up for a normal one, two for a complex one, and no higher
      * than the top.
      *
-     * @return array{effort: ReviewEffort, tier: string}
+     * @return array{effort: ReviewEffort, tier: string|null} no tier for OWN_MODEL: each reviewer keeps its own
      */
     public static function pick(ReviewEffort $effort, string $tier, ReviewComplexity $complexity): array
     {
@@ -493,7 +496,7 @@ class ReviewSettings
 
         return [
             'effort' => $efforts[min(count($efforts) - 1, $from + $complexity->steps())],
-            'tier' => self::STRATEGY_TIERS[min(count(self::STRATEGY_TIERS) - 1, $tierFrom + $complexity->steps())],
+            'tier' => $tier === self::OWN_MODEL ? null : self::STRATEGY_TIERS[min(count(self::STRATEGY_TIERS) - 1, $tierFrom + $complexity->steps())],
         ];
     }
 
