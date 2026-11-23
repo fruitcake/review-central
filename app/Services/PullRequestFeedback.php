@@ -280,9 +280,9 @@ class PullRequestFeedback
      * own and people's, oldest first, and whether the thread is resolved.
      *
      * @param  array<int, array<string, mixed>>  $comments
-     * @return array<string, array{resolved: bool, replies: array<int, array<string, mixed>>}>
+     * @return array<string, array{comment_id: mixed, resolved: bool, replies: array<int, array<string, mixed>>}>
      */
-    protected function threads(array $comments): array
+    public function threads(array $comments): array
     {
         $threads = [];
         $byParent = collect($comments)->groupBy('parent_id');
@@ -298,6 +298,8 @@ class PullRequestFeedback
                 }
 
                 $threads[$id[1]] = [
+                    // The comment a reply to the finding goes under.
+                    'comment_id' => $comment['id'],
                     'resolved' => (bool) $comment['resolved'],
                     'replies' => $this->descendants($byParent, $comment['id'])
                         ->sortBy('created_on')

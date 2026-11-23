@@ -19,7 +19,7 @@ use Illuminate\Database\Eloquent\Collection;
  */
 class TenantOverview
 {
-    public function __construct(protected FindingFeedback $feedback, protected Currency $currency) {}
+    public function __construct(protected FindingFeedback $feedback, protected Currency $currency, protected FindingOutcomes $outcomes) {}
 
     /**
      * The runs that were a review, or tried to be. A run that was turned away,
@@ -48,6 +48,7 @@ class TenantOverview
             'figures' => $this->figures($tenant, $runs, $previous, $verdicts, $days),
             'days' => $this->perDay($runs, $days, $tenant),
             'categories' => $this->categories($runs, $verdicts),
+            'outcomes' => $this->outcomes->for($runs),
             'repositories' => $this->repositories($repositories, $runs, $verdicts),
             'activity' => $tenant->reviewRuns()->whereIn('status', self::REVIEWS)->latest('started_at')->limit(5)->get(),
             'running' => $runs->where('status', ReviewRun::STATUS_RUNNING)->count(),

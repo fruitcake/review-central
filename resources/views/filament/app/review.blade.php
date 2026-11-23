@@ -146,6 +146,15 @@
                                     @php($given = ($verdicts[(string) ($finding['id'] ?? '')] ?? null) === $kind)
                                     <button type="button" wire:click="judge(@js((string) ($finding['id'] ?? '')), '{{ $kind->value }}')" aria-pressed="{{ $given ? 'true' : 'false' }}" @class(['rc-verdict', "rc-verdict-{$kind->value}", 'rc-on' => $given])>{{ $kind->text() }}</button>
                                 @endforeach
+                                @php($mine = $verdicts[(string) ($finding['id'] ?? '')] ?? null)
+                                @if ($mine !== null && ! $mine->accepts())
+                                    <select aria-label="Why" class="rc-reason" wire:change="explain(@js((string) ($finding['id'] ?? '')), $event.target.value)">
+                                        <option value="">Why?</option>
+                                        @foreach (\App\Enums\FindingVerdictReason::cases() as $reason)
+                                            <option value="{{ $reason->value }}" title="{{ $reason->description() }}" @selected(($reasons[(string) ($finding['id'] ?? '')] ?? null) === $reason)>{{ $reason->text() }}</option>
+                                        @endforeach
+                                    </select>
+                                @endif
                                 @if (in_array((string) ($finding['id'] ?? ''), $dismissed, true) && $this->makeRuleAction->isVisible())
                                     {{ ($this->makeRuleAction)(['finding' => (string) ($finding['id'] ?? '')]) }}
                                 @endif

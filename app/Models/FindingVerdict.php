@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\FindingVerdictKind;
+use App\Enums\FindingVerdictReason;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -16,6 +17,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $user_id
  * @property string $finding_id
  * @property FindingVerdictKind $verdict
+ * @property FindingVerdictReason|null $reason why it was dismissed; null for one judged valid
+ * @property string|null $note
  */
 class FindingVerdict extends Model
 {
@@ -28,6 +31,7 @@ class FindingVerdict extends Model
     {
         return [
             'verdict' => FindingVerdictKind::class,
+            'reason' => FindingVerdictReason::class,
         ];
     }
 

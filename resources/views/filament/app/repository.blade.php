@@ -75,6 +75,7 @@
                     <span><i class="rc-fill-grey"></i>Dismissed</span>
                     <span class="rc-muted">of the findings people rated</span>
                 </div>
+                @include('filament.app.partials.finding-outcomes', ['outcomes' => $overview['outcomes']])
             </section>
         </div>
 

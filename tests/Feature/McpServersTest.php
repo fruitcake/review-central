@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\FindingVerdictKind;
+use App\Enums\FindingVerdictReason;
 use App\Enums\ReviewRuleKind;
 use App\Filament\TenantRole;
 use App\Jobs\AnswerReviewQuestion;
@@ -9,7 +10,6 @@ use App\Mcp\Servers\AgentServer;
 use App\Mcp\Servers\UserServer;
 use App\Mcp\Tools\AddReviewRuleTool;
 use App\Mcp\Tools\AskReviewerTool;
-use App\Mcp\Tools\JudgeFindingTool;
 use App\Mcp\Tools\OpenFindingsTool;
 use App\Mcp\Tools\PullRequestFeedbackTool;
 use App\Mcp\Tools\PullRequestsTool;
@@ -18,6 +18,7 @@ use App\Mcp\Tools\RequestReviewTool;
 use App\Mcp\Tools\ReviewerAnswerTool;
 use App\Mcp\Tools\ReviewInstructionsTool;
 use App\Mcp\Tools\ReviewRulesTool;
+use App\Mcp\Tools\SettleFindingsTool;
 use App\Models\Connection;
 use App\Models\FindingVerdict;
 use App\Models\OpenFinding;
@@ -29,6 +30,7 @@ use App\Models\ReviewRule;
 use App\Models\ReviewRun;
 use App\Models\User;
 use App\Services\PlatformSettings;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Passport\Passport;
@@ -196,8 +198,8 @@ it('finds no repository or review of a team the user is not in', function () {
     ]);
 
     AgentServer::actingAs($this->member)
-        ->tool(JudgeFindingTool::class, ['review_id' => $theirs->uuid, 'finding_id' => 'F1', 'verdict' => 'wrong'])
-        ->assertHasErrors(["There is no review {$theirs->uuid} among yours."]);
+        ->tool(SettleFindingsTool::class, ['repository' => 'other/shop', 'pull_request_id' => 3, 'findings' => [['finding_id' => 'F1', 'verdict' => 'wrong']]])
+        ->assertHasErrors(['other/shop is not among the repositories you can reach']);
 
     expect(FindingVerdict::query()->count())->toBe(0);
 });
@@ -244,23 +246,49 @@ it('tells a GitHub repository from a Bitbucket one of the same name by the remot
         ->assertStructuredContentCount(0, 'rules');
 });
 
-it('records the user\'s verdict on a finding, the same again changing nothing, and none taking it back', function () {
-    $judge = fn (string $verdict) => AgentServer::actingAs($this->member)
-        ->tool(JudgeFindingTool::class, ['review_id' => $this->run->uuid, 'finding_id' => 'F2', 'verdict' => $verdict]);
+it('settles several findings at once: verdicts with why, and replies in their threads under the user\'s name', function () {
+    $settle = fn (array $findings) => AgentServer::actingAs($this->member)
+        ->tool(SettleFindingsTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570, 'findings' => $findings]);
 
-    $judge('valid')->assertOk();
-    $judge('valid')->assertOk();
+    $settle([
+        ['finding_id' => 'F2', 'verdict' => 'wrong', 'reason' => 'handled_elsewhere', 'note' => 'CsvWriter escapes it.', 'reply' => 'CsvWriter::cell() escapes the cell, see app/CsvWriter.php:40.'],
+        ['finding_id' => 'F1', 'verdict' => 'not_a_problem', 'reason' => 'nitpick', 'reply' => 'The export is covered by the feature test.'],
+        ['finding_id' => 'F3', 'verdict' => 'valid'],
+    ])
+        ->assertOk()
+        ->assertStructuredContentPaths([
+            'review' => $this->run->uuid,
+            'findings.0.replied' => true,
+            'findings.1.replied' => true,
+        ])
+        ->assertStructuredContentMissingPath('findings.2.replied');
 
-    expect(FindingVerdict::query()->sole()->only(['user_id', 'finding_id', 'verdict']))
-        ->toBe(['user_id' => $this->member->id, 'finding_id' => 'F2', 'verdict' => FindingVerdictKind::Valid]);
+    expect(FindingVerdict::query()->orderBy('finding_id')->get()->map->only(['finding_id', 'verdict', 'reason', 'note'])->all())->toBe([
+        ['finding_id' => 'F1', 'verdict' => FindingVerdictKind::NotAProblem, 'reason' => FindingVerdictReason::Nitpick, 'note' => null],
+        ['finding_id' => 'F2', 'verdict' => FindingVerdictKind::Wrong, 'reason' => FindingVerdictReason::HandledElsewhere, 'note' => 'CsvWriter escapes it.'],
+        ['finding_id' => 'F3', 'verdict' => FindingVerdictKind::Valid, 'reason' => null, 'note' => null],
+    ]);
 
-    $judge('none')->assertOk();
+    // F2's under its own comment; F1 has none on the pull request, so its reply names it.
+    $posted = Http::recorded(fn (Request $request): bool => $request->method() === 'POST')->map(fn (array $pair): array => $pair[0]->data())->values()->all();
 
-    expect(FindingVerdict::query()->count())->toBe(0);
+    expect($posted)->toHaveCount(2)
+        ->and($posted[0]['parent'])->toBe(['id' => 11])
+        ->and($posted[0]['content']['raw'])->toContain('CsvWriter::cell() escapes the cell')->toContain('— Sam Sample, via Review Central')
+        ->and($posted[1])->not->toHaveKey('parent')
+        ->and($posted[1]['content']['raw'])->toStartWith('**F1** · No test for the export');
 
-    AgentServer::actingAs($this->member)
-        ->tool(JudgeFindingTool::class, ['review_id' => $this->run->uuid, 'finding_id' => 'F9', 'verdict' => 'valid'])
-        ->assertHasErrors(['This review has no finding F9.']);
+    // One finding that is not there, or a reason for a valid one, records nothing of the batch.
+    $settle([['finding_id' => 'F3', 'verdict' => 'none'], ['finding_id' => 'F9', 'verdict' => 'valid']])
+        ->assertHasErrors(['The newest review has no finding F9. Nothing was recorded.']);
+    $settle([['finding_id' => 'F3', 'verdict' => 'none'], ['finding_id' => 'F2', 'verdict' => 'valid', 'reason' => 'nitpick']])
+        ->assertHasErrors(['Finding F2: a reason or note is for a finding that is not a problem or wrong.']);
+
+    expect(FindingVerdict::query()->count())->toBe(3);
+
+    $settle([['finding_id' => 'F3', 'verdict' => 'none']])->assertOk();
+
+    expect(FindingVerdict::query()->pluck('finding_id')->sort()->values()->all())->toBe(['F1', 'F2']);
 });
 
 it('lets an admin add a rule made from a finding, and refuses a member', function () {

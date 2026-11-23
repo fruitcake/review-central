@@ -3,6 +3,7 @@
 namespace App\Filament\App\Resources\ReviewRuns\Pages;
 
 use App\Enums\FindingVerdictKind;
+use App\Enums\FindingVerdictReason;
 use App\Enums\ReviewEffort;
 use App\Enums\ReviewRuleKind;
 use App\Events\ReviewLogGrew;
@@ -196,6 +197,18 @@ class ViewReviewRun extends ViewRecord
     }
 
     /**
+     * Why the signed-in user dismissed a finding; empty takes the reason back.
+     */
+    public function explain(string $finding, string $reason, FindingFeedback $feedback): void
+    {
+        $user = auth()->user();
+
+        if ($user instanceof User) {
+            $feedback->explain($this->record, $user, $finding, FindingVerdictReason::tryFrom($reason));
+        }
+    }
+
+    /**
      * Makes a rule of a finding the team judged not to be one, so the reviewer
      * stops raising it: "not a defect here", for this repository and the
      * finding's file, for an admin to widen before saving.
@@ -318,6 +331,7 @@ class ViewReviewRun extends ViewRecord
                 ->limit(20)
                 ->get(),
             'verdicts' => auth()->user() instanceof User ? app(FindingFeedback::class)->of($run, auth()->user()) : [],
+            'reasons' => auth()->user() instanceof User ? app(FindingFeedback::class)->reasons($run, auth()->user()) : [],
             // Anyone in the team judging a finding not to be one is enough to make a rule of it.
             'dismissed' => FindingVerdict::query()
                 ->where('review_run_id', $run->getKey())
