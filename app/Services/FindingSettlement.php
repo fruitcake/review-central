@@ -106,6 +106,11 @@ class FindingSettlement
      */
     protected function reply(User $user, Repository $repository, int $pullRequestId, ReviewRun $run, array $items): array
     {
+        // A trial posts nothing on the pull request: its F1 is not the F1 there.
+        if ($run->custom) {
+            return array_fill_keys(array_column($items, 'finding_id'), 'This review is a trial, which is not on the pull request: the reply was not posted.');
+        }
+
         $errors = [];
 
         try {
@@ -141,8 +146,19 @@ class FindingSettlement
      */
     public static function body(User $user, string $reply): string
     {
-        $inert = (string) preg_replace('/^(\s*)\[\/\/\]:/m', '$1\\[//]:', trim($reply));
+        // The name too is the user's own text: on one line, and inert like the reply.
+        $name = self::inert(trim((string) preg_replace('/\s+/', ' ', $user->name)));
 
-        return "**{$user->name}**, via Review Central:\n\n{$inert}";
+        return "**{$name}**, via Review Central:\n\n".self::inert(trim($reply));
+    }
+
+    /**
+     * Text in which no metadata marker reads as one, wherever it stands: the review
+     * reads them at a line's start, GitHub's reply parent anywhere.
+     */
+    protected static function inert(string $text): string
+    {
+        // An escaped colon shows the same in Markdown, and parts the marker's "]:".
+        return str_replace('[//]:', '[//]\\:', $text);
     }
 }
