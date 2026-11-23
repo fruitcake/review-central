@@ -158,6 +158,8 @@ class RepositoryResource extends Resource
 
     public static function table(Table $table): Table
     {
+        $isAdmin = TenantRole::isAdmin();
+
         return $table
             ->modifyQueryUsing(fn (Builder $query) => $query
                 ->with('integration')
@@ -174,7 +176,9 @@ class RepositoryResource extends Resource
                 ToggleColumn::make('reviews_enabled')
                     ->label('Reviewed')
                     // Members see it; only an admin may change it, as in the edit form.
-                    ->disabled(fn (): bool => ! TenantRole::isAdmin())
+                    // Asked once when the table is built for a request, not per row; an
+                    // update builds it again and asks again.
+                    ->disabled(! $isAdmin)
                     ->tooltip('Review its pull requests by themselves. Off, a person starts each review from Pull requests.'),
                 TextColumn::make('reviews_last_30_days')->label('Reviews (30 days)')->numeric(),
                 TextColumn::make('review_runs_max_started_at')->label('Last review')->since()->placeholder('Never'),

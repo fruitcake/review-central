@@ -253,6 +253,11 @@ it('checks against the host whether a repository can be reviewed', function () {
         ->and($notes['Runner'])->toBe('Docker on this server, as the platform. Nothing is needed in the repository.')
         ->and(app(RepositoryReadiness::class)->ready($repository))->toBeTrue();
 
+    // The last review found no reviewer it could run.
+    $repository->forceFill(['review_available_providers' => []])->save();
+
+    expect(collect(app(RepositoryReadiness::class)->checks($repository))->firstWhere('label', 'Reviewers available')['state'])->toBe('problem');
+
     livewire(ManageRepositories::class)->assertActionVisible(TestAction::make('readiness')->table($repository));
 });
 
@@ -435,6 +440,16 @@ it('adds a repository that is not reviewed by itself when the toggle is off', fu
         ->assertHasNoFormErrors();
 
     expect(Repository::query()->where('slug', 'manual')->sole()->reviews_enabled)->toBeFalse();
+
+    // One added again after it was removed is reviewed by itself as the form says now.
+    $removed = Repository::factory()->create(['tenant_id' => $this->tenant->id, 'connection_id' => $connection->id, 'workspace' => 'acme', 'slug' => 'back', 'reviews_enabled' => true]);
+    $removed->delete();
+
+    livewire(ManageRepositories::class)
+        ->callAction('create', ['connection_id' => $connection->id, 'workspace' => 'acme', 'slug' => 'back', 'reviews_enabled' => false])
+        ->assertHasNoFormErrors();
+
+    expect($removed->refresh())->trashed()->toBeFalse()->reviews_enabled->toBeFalse();
 });
 
 it('lets a repository choose its runner among the ones that are set up, or follow the platform\'s', function () {

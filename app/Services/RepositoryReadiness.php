@@ -32,12 +32,14 @@ class RepositoryReadiness
         $checks = [$this->enabled($repository), $this->readable($repository), $this->provider($repository), $this->reviewers($repository)];
 
         $runner = $repository->runner();
+        // Where it was chosen: on the repository, or by the platform for all.
+        $whose = $repository->review_runner === null ? ', as the platform' : '';
 
         $checks[] = match (true) {
-            ! $runner->available() => ['label' => 'Runner', 'note' => "{$runner->label()} is not set up on this installation. {$runner->setupHint()} Or pick another runner under \"Runs on\".", 'state' => self::PROBLEM],
+            ! $runner->available() => ['label' => 'Runner', 'note' => "{$runner->label()}{$whose} is not set up on this installation. {$runner->setupHint()} Or pick another runner under \"Runs on\".", 'state' => self::PROBLEM],
             // A git server has no pull requests, so no diff to review.
             $runner instanceof DiffRunner && ! $repository->sourceControl()->publishes() && $repository->integration?->driver === 'git' => ['label' => 'Runner', 'note' => 'The diff alone needs a host with pull requests (Bitbucket or GitHub). A git server\'s repositories need Docker or a Cloudflare sandbox, for the security review.', 'state' => self::PROBLEM],
-            default => ['label' => 'Runner', 'note' => $runner->label().($repository->review_runner === null ? ', as the platform' : '').'. Nothing is needed in the repository.', 'state' => self::OK],
+            default => ['label' => 'Runner', 'note' => "{$runner->label()}{$whose}. Nothing is needed in the repository.", 'state' => self::OK],
         };
         $checks[] = $this->webhook($repository);
         $checks[] = $this->tickets($repository);
@@ -76,7 +78,7 @@ class RepositoryReadiness
         return match (true) {
             ! $repository->reviews_enabled => ['label' => 'Reviews', 'note' => 'Off: nothing starts a review by itself; a person starts each one from Pull requests.', 'state' => self::UNKNOWN],
             $repository->reviews_from === ReviewsFrom::Trusted => ['label' => 'Reviews', 'note' => 'On, for the trusted accounts\' pull requests; the others wait under Pull requests.', 'state' => self::OK],
-            default => ['label' => 'Reviews', 'note' => 'On, for every pull request.', 'state' => self::OK],
+            default => ['label' => 'Reviews', 'note' => 'On, for the pull requests that may be reviewed, whoever opened them.', 'state' => self::OK],
         };
     }
 
@@ -87,11 +89,14 @@ class RepositoryReadiness
      */
     protected function reviewers(Repository $repository): array
     {
-        $available = (array) ($repository->review_available_providers ?? []);
+        $available = $repository->review_available_providers;
 
-        return $available === []
-            ? ['label' => 'Reviewers available', 'note' => 'Known after the first review.', 'state' => self::UNKNOWN]
-            : ['label' => 'Reviewers available', 'note' => implode(', ', array_map(fn (string $name): string => ReviewProvider::tryFrom($name)?->text() ?? $name, $available)), 'state' => self::OK];
+        return match (true) {
+            $available === null => ['label' => 'Reviewers available', 'note' => 'Known after the first review.', 'state' => self::UNKNOWN],
+            // Asked, and none could run: no AI key the runner can use.
+            $available === [] => ['label' => 'Reviewers available', 'note' => 'None, at the last review: no AI provider the runner can use.', 'state' => self::PROBLEM],
+            default => ['label' => 'Reviewers available', 'note' => implode(', ', array_map(fn (string $name): string => ReviewProvider::tryFrom($name)?->text() ?? $name, $available)), 'state' => self::OK],
+        };
     }
 
     /**
