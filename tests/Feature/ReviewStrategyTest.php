@@ -181,3 +181,14 @@ it('gives Pi the picked effort too, which has no effort setting of its own', fun
     expect(ReviewSettings::variables($repository, null, '570', null, ['effort' => ReviewEffort::Xhigh, 'tier' => 'smartest']))->toMatchArray(['PI_REVIEW_EFFORT' => 'xhigh', 'CLAUDE_REVIEW_EFFORT' => 'xhigh', 'OCR_REVIEW_EFFORT' => 'xhigh'])
         ->and(ReviewSettings::variables($repository, null, '570'))->not->toHaveKey('PI_REVIEW_EFFORT');
 });
+
+it('steps only the effort up when the model is each reviewer\'s own, and leaves the models as set', function () {
+    $repository = Repository::factory()->create();
+    ReviewSettings::saveDefaults($repository->tenant, ['claude_model' => 'claude-sonnet-test', 'strategy' => 'apply', 'strategy_effort' => 'low', 'strategy_model' => ReviewSettings::OWN_MODEL]);
+
+    $strategy = ReviewSettings::strategy($repository);
+    $pick = ReviewSettings::pick($strategy['effort'], $strategy['tier'], ReviewComplexity::Complex);
+
+    expect($pick)->toBe(['effort' => ReviewEffort::High, 'tier' => null])
+        ->and(ReviewSettings::variables($repository, null, '570', null, $pick))->toMatchArray(['CLAUDE_REVIEW_EFFORT' => 'high', 'CLAUDE_REVIEW_MODEL' => 'claude-sonnet-test']);
+});

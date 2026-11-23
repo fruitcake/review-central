@@ -334,4 +334,10 @@ it('shows the effort and model the classification picks per pull request as not 
     expect($defaults->strategy)->toBe('apply')
         ->and($defaults->claude_model)->toBe('smartest')
         ->and($defaults->claude_effort?->value)->toBe('high');
+
+    // With each reviewer's own model, only the effort is picked.
+    livewire(ReviewDefaults::class)
+        ->fillForm(['strategy_model' => ReviewSettings::OWN_MODEL])
+        ->assertFormFieldDisabled('claude_effort')
+        ->assertFormFieldEnabled('claude_model');
 });

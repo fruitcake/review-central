@@ -130,7 +130,7 @@ class PullRequestClassifier
         }
 
         $pick = ReviewSettings::pick($strategy['effort'], $strategy['tier'], $classification->complexity);
-        $words = "effort {$pick['effort']->value} and the {$pick['tier']} model";
+        $words = "effort {$pick['effort']->value} and ".($pick['tier'] === null ? "each reviewer's own model" : "the {$pick['tier']} model");
 
         $say("Classified as {$classification->text()}".($classification->reason === null ? '' : ": {$classification->reason}").' '
             .($strategy['mode'] === ReviewStrategy::Apply ? "Runs at {$words}." : "Would run at {$words}; recorded only, so the review runs at what is set."));

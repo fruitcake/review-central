@@ -178,7 +178,8 @@ class ReviewSettingsForm
         $team = fn (string $text, ?string $value, array $options): string => $defaults === null ? $text : 'As the team: '.lcfirst(filled($value) ? ($options[$value] ?? $value) : $text);
         $efforts = collect(ReviewSettings::STRATEGY_EFFORTS)->mapWithKeys(fn (ReviewEffort $effort): array => [$effort->value => $effort->text()])->all();
         $tierModels = rescue(fn (): array => ReviewSettings::tierModels('anthropic'), [], false);
-        $tiers = collect(ReviewSettings::STRATEGY_TIERS)->mapWithKeys(fn (string $tier): array => [$tier => $tier.' (Laravel AI)'.(isset($tierModels[$tier]) ? ": now {$tierModels[$tier]} for Claude" : '')])->all();
+        $tiers = collect(ReviewSettings::STRATEGY_TIERS)->mapWithKeys(fn (string $tier): array => [$tier => $tier.' (Laravel AI)'.(isset($tierModels[$tier]) ? ": now {$tierModels[$tier]} for Claude" : '')])->all()
+            + [ReviewSettings::OWN_MODEL => 'Each reviewer\'s own, as set below'];
 
         return [
             Select::make('strategy')
@@ -187,17 +188,17 @@ class ReviewSettingsForm
                 ->placeholder($team('Off', $defaults?->strategy, ReviewStrategy::options()))
                 ->live(),
             Select::make('strategy_effort')
-                ->label('From effort')
+                ->label('Effort for a simple one')
                 ->options($efforts)
                 ->placeholder($team(ReviewSettings::STRATEGY_EFFORT->text(), $defaults?->strategy_effort, $efforts))
                 ->live(),
             Select::make('strategy_model')
-                ->label('From model')
+                ->label('Model for a simple one')
                 ->options($tiers)
                 ->placeholder($team(ReviewSettings::STRATEGY_TIER, $defaults?->strategy_model, $tiers))
                 ->live(),
             Text::make('Before its review, a small model reads a pull request\'s title, description, changed files and migrations, and calls it simple, normal or complex. A simple one runs at the effort and model set here, a normal one a step higher, a complex one two, up to Extra high and smartest. '
-                .'Running at what it picks replaces the effort of every reviewer below, and the model of Claude Code and Codex. Once per commit, with the AI provider that writes the notes on whose turn.')
+                .'Running at what it picks replaces the effort of every reviewer below, and the model of Claude Code and Codex unless the model is each reviewer\'s own. Once per commit, with the AI provider that writes the notes on whose turn.')
                 ->columnSpanFull(),
         ];
     }
@@ -210,7 +211,7 @@ class ReviewSettingsForm
     public static function claudeFields(?ReviewSetting $defaults = null): array
     {
         return [
-            self::pickedPerPullRequest(self::model($defaults, 'claude_model', self::claudeModels()), $defaults),
+            self::pickedPerPullRequest(self::model($defaults, 'claude_model', self::claudeModels()), $defaults, model: true),
             self::pickedPerPullRequest(self::effort($defaults, 'claude_effort'), $defaults),
             self::model($defaults, 'claude_advisor', ['none' => 'none: no advisor', ...self::claudeModels()])
                 ->label('Advisor')
@@ -233,7 +234,7 @@ class ReviewSettingsForm
     public static function codexFields(?ReviewSetting $defaults = null): array
     {
         return [
-            self::pickedPerPullRequest(self::model($defaults, 'codex_model', self::openAiModels()), $defaults),
+            self::pickedPerPullRequest(self::model($defaults, 'codex_model', self::openAiModels()), $defaults, model: true),
             self::pickedPerPullRequest(self::effort($defaults, 'codex_effort'), $defaults),
         ];
     }
@@ -262,17 +263,17 @@ class ReviewSettingsForm
 
         $effort = ReviewEffort::tryFrom((string) $value('strategy_effort'));
         $effort = in_array($effort, ReviewSettings::STRATEGY_EFFORTS, true) ? $effort : ReviewSettings::STRATEGY_EFFORT;
-        $tier = in_array($value('strategy_model'), ReviewSettings::STRATEGY_TIERS, true) ? (string) $value('strategy_model') : ReviewSettings::STRATEGY_TIER;
+        $tier = in_array($value('strategy_model'), [...ReviewSettings::STRATEGY_TIERS, ReviewSettings::OWN_MODEL], true) ? (string) $value('strategy_model') : ReviewSettings::STRATEGY_TIER;
 
         $steps = collect(ReviewComplexity::cases())->map(function (ReviewComplexity $complexity) use ($effort, $tier): string {
             $pick = ReviewSettings::pick($effort, $tier, $complexity);
 
-            return strtolower($complexity->text()).': '.$pick['effort']->text().', '.$pick['tier'];
+            return strtolower($complexity->text()).': '.$pick['effort']->text().', '.($pick['tier'] ?? 'own model');
         })->implode('; ');
 
         return '<p><strong>'.($mode === ReviewStrategy::Apply ? 'By pull request:' : 'By pull request, recorded only:').'</strong> '.e($steps).'.'
             .($mode === ReviewStrategy::Apply
-                ? ' <span class="rc-muted">That replaces the effort below, and Claude Code\'s and Codex\'s model.</span>'
+                ? ' <span class="rc-muted">That replaces the effort below'.($tier === ReviewSettings::OWN_MODEL ? '.' : ', and Claude Code\'s and Codex\'s model.').'</span>'
                 : ' <span class="rc-muted">Each review says what it would have picked, and runs at what is set below.</span>').'</p>';
     }
 
@@ -529,10 +530,13 @@ class ReviewSettingsForm
      * what it picks, here or as the team: shown, but not to be set, and what was
      * set before is kept for when it is turned off.
      */
-    protected static function pickedPerPullRequest(Select $field, ?ReviewSetting $defaults): Select
+    protected static function pickedPerPullRequest(Select $field, ?ReviewSetting $defaults, bool $model = false): Select
     {
-        // Its own choice, or the team's where it has none.
-        $picks = fn (Get $get): bool => (ReviewStrategy::tryFrom((string) $get('strategy')) ?? ReviewStrategy::tryFrom((string) $defaults?->strategy)) === ReviewStrategy::Apply;
+        // Its own choice, or the team's where it has none; a model only when the
+        // classification picks one rather than leaving each reviewer its own.
+        $setting = fn (Get $get, string $name): ?string => filled($get($name)) ? (string) $get($name) : $defaults?->{$name};
+        $picks = fn (Get $get): bool => ReviewStrategy::tryFrom((string) $setting($get, 'strategy')) === ReviewStrategy::Apply
+            && ! ($model && $setting($get, 'strategy_model') === ReviewSettings::OWN_MODEL);
 
         return $field
             ->disabled($picks)
