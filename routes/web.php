@@ -3,6 +3,7 @@
 use App\Http\Controllers\AcceptInvitationController;
 use App\Http\Controllers\ConnectionOAuthController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\PersonalConnectionController;
 use App\Http\Controllers\RateReviewController;
 use App\Http\Controllers\SingleSignOnController;
 use App\Http\Controllers\TicketAttachmentController;
@@ -20,6 +21,13 @@ Route::get('/sign-in/{provider}/callback', [SingleSignOnController::class, 'call
 // names no connection: the session that asked knows which one it was for.
 Route::get('/connections/oauth/callback', [ConnectionOAuthController::class, 'callback'])->middleware('throttle:20,1')->name('connections.oauth.callback');
 Route::get('/connections/{connection}/oauth', [ConnectionOAuthController::class, 'redirect'])->whereNumber('connection')->middleware('throttle:20,1')->name('connections.oauth.redirect');
+
+// A user's own Bitbucket account, connected on their profile to write as them.
+// A session from before a password change no longer counts, as in the panels.
+Route::middleware(['auth', 'auth.session', 'throttle:20,1'])->group(function (): void {
+    Route::get('/connections/bitbucket', [PersonalConnectionController::class, 'redirect'])->name('connections.bitbucket.redirect');
+    Route::get('/connections/bitbucket/callback', [PersonalConnectionController::class, 'callback'])->name('connections.bitbucket.callback');
+});
 
 // A ticket's file, by an address ticket-attachment signed for one user and a short while.
 Route::get('/tickets/attachment', TicketAttachmentController::class)->middleware(['signed', 'throttle:30,1'])->name('tickets.attachment');

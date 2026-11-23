@@ -40,7 +40,7 @@ class TenantOverview
         $since = now()->subDays($days);
         $runs = $this->runs($tenant, $since, now());
         $previous = $this->runs($tenant, $since->subDays($days), $since, ['id'])->count();
-        $repositories = $tenant->repositories()->with('integration')->orderBy('slug')->get();
+        $repositories = $tenant->repositories()->with('integration')->withCount('openPullRequests')->orderBy('slug')->get();
         $verdicts = $this->feedback->forRuns($runs);
 
         return [
@@ -271,7 +271,7 @@ class TenantOverview
      * @param  Collection<int, Repository>  $repositories
      * @param  Collection<int, ReviewRun>  $runs
      * @param  array<int, array<int, array{category: string, fair: bool}>>  $verdicts
-     * @return array<int, array{repository: Repository, ready: bool, reviews: int, changes: string, accepted: string, cost: float}>
+     * @return array<int, array{repository: Repository, ready: bool, open: int, reviews: int, per_pull_request: string|null, rejected_per_pull_request: string|null, changes: string, accepted: string, cost: float}>
      */
     protected function repositories(Collection $repositories, Collection $runs, array $verdicts): array
     {
@@ -282,11 +282,18 @@ class TenantOverview
             $finished = $own->where('status', ReviewRun::STATUS_FINISHED);
             $blocked = $finished->filter(fn (ReviewRun $run): bool => strtoupper((string) $run->result) === 'FAILED')->count();
             $acceptance = $this->acceptance(array_intersect_key($verdicts, $own->keyBy('id')->all()));
+            // How many rounds a pull request took, and in how many of them the review asked for changes: trials are no round.
+            $rounds = $own->filter(fn (ReviewRun $run): bool => $run->pull_request_id !== null && ! $run->custom);
+            $pullRequests = $rounds->pluck('pull_request_id')->unique()->count();
+            $rejected = $rounds->filter(fn (ReviewRun $run): bool => $run->status === ReviewRun::STATUS_FINISHED && strtoupper((string) $run->result) === 'FAILED')->count();
 
             return [
                 'repository' => $repository,
                 'ready' => $repository->runner()->available(),
+                'open' => (int) $repository->getAttribute('open_pull_requests_count'),
                 'reviews' => $own->count(),
+                'per_pull_request' => $pullRequests === 0 ? null : number_format($rounds->count() / $pullRequests, 1),
+                'rejected_per_pull_request' => $pullRequests === 0 ? null : number_format($rejected / $pullRequests, 1),
                 'changes' => $finished->isEmpty() ? '—' : round($blocked / $finished->count() * 100).'%',
                 'accepted' => $acceptance['percent'] === null ? '—' : "{$acceptance['percent']}%",
                 'cost' => (float) $own->sum(fn (ReviewRun $run): float => (float) $run->cost),

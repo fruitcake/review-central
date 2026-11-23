@@ -175,6 +175,7 @@
     .rc-table th:first-child, .rc-table td:first-child { padding-left: 24px; }
     .rc-table th:last-child, .rc-table td:last-child { padding-right: 24px; }
     .rc-table .rc-num { text-align: right; font-variant-numeric: tabular-nums; }
+    .rc-table .rc-num .rc-muted { display: block; font-size: 12px; white-space: nowrap; }
     .rc-repository { display: flex; align-items: center; gap: 8px; }
     .rc-repository > span:last-child { display: flex; flex-direction: column; }
     .rc-repository .rc-muted { font-size: 12px; }
