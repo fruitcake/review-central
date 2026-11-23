@@ -560,3 +560,12 @@ it('says whether a pull request merges, once GitHub has worked it out', function
         ->and($this->client->mergeConflicts('12'))->toBe(['conflicts' => true, 'files' => []])
         ->and($this->client->mergeConflicts('12'))->toBe(['conflicts' => false, 'files' => []]);
 });
+
+it('reads a Bitbucket conflict on any file, also one named 0', function () {
+    Http::swap(new HttpFactory);
+    Http::fake(['api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/5/conflicts' => Http::response(['values' => [['path' => '0', 'scenario' => 'content']]])]);
+
+    $client = Repository::factory()->create(['workspace' => 'acme', 'slug' => 'shop'])->sourceControl();
+
+    expect($client->mergeConflicts('5'))->toBe(['conflicts' => true, 'files' => ['0']]);
+});

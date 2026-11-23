@@ -284,7 +284,30 @@ it('says whether a pull request merges into its destination, with the files that
 
     UserServer::actingAs($this->member)
         ->tool(PullRequestsTool::class, [])
-        ->assertStructuredContentPath('pull_requests.0.conflicts', true);
+        ->assertStructuredContentPath('pull_requests.0.conflicts', true)
+        // The author resolves it first, whoever approved it.
+        ->assertStructuredContentPath('pull_requests.0.turn.action', 'Resolve the merge conflicts');
+
+    $record = OpenPullRequest::query()->sole();
+
+    // Asking leaves when it last changed as it was.
+    expect($record->updated_at->equalTo($record->created_at))->toBeTrue();
+
+    // A push since: the answer was of another head, until it is asked again.
+    $record->forceFill(['commit' => str_repeat('c', 40)])->save();
+
+    UserServer::actingAs($this->member)
+        ->tool(PullRequestsTool::class, [])
+        ->assertStructuredContentMissingPath('pull_requests.0.conflicts');
+
+    // One the host has open but that is not listed here yet is still told of.
+    OpenPullRequest::query()->delete();
+
+    AgentServer::actingAs($this->member)
+        ->tool(PullRequestFeedbackTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570])
+        ->assertStructuredContentPath('pull_request.merge.files', ['app/Export.php']);
+
+    expect(OpenPullRequest::query()->count())->toBe(0);
 });
 
 it('keeps the findings of the last review that reported when a newer attempt failed, and says it did', function () {

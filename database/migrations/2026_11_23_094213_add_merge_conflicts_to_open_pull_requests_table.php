@@ -14,13 +14,15 @@ return new class extends Migration
             $table->boolean('merge_conflicts')->nullable();
             $table->json('conflicting_files')->nullable();
             $table->timestamp('merge_checked_at')->nullable();
+            // The head it was asked for: after a push the answer is of another commit.
+            $table->string('merge_checked_commit', 40)->nullable();
         });
     }
 
     public function down(): void
     {
         Schema::table('open_pull_requests', function (Blueprint $table) {
-            $table->dropColumn(['merge_conflicts', 'conflicting_files', 'merge_checked_at']);
+            $table->dropColumn(['merge_conflicts', 'conflicting_files', 'merge_checked_at', 'merge_checked_commit']);
         });
     }
 };

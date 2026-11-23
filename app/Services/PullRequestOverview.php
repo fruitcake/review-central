@@ -76,7 +76,7 @@ class PullRequestOverview
                 'branch' => $row['record']->branch,
                 'draft' => $row['record']->draft ?: null,
                 // As last asked, by the nightly sync or a read of its feedback.
-                'conflicts' => $row['record']->merge_conflicts,
+                'conflicts' => MergeState::current($row['record']),
                 'updated_at' => $row['record']->updated_at?->toIso8601String(),
                 'mine' => $row['mine'],
                 'turn' => [

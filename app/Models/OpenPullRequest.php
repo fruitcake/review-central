@@ -38,6 +38,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property bool|null $merge_conflicts whether it conflicts with its destination, as its host said when last asked
  * @property array<int, string>|null $conflicting_files
  * @property CarbonInterface|null $merge_checked_at
+ * @property string|null $merge_checked_commit the head it was asked for
  * @property CarbonInterface|null $created_at
  * @property CarbonInterface|null $updated_at
  * @property-read Repository $repository

@@ -94,12 +94,10 @@ class BitbucketClient implements FiltersSecrets, SourceControl
             return null;
         }
 
-        $files = array_values(array_filter(array_map(
-            fn (mixed $conflict): ?string => is_array($conflict) && is_string($conflict['path'] ?? null) ? $conflict['path'] : null,
-            (array) ($response->throw()->json('values') ?? []),
-        )));
+        $conflicts = array_values(array_filter((array) ($response->throw()->json('values') ?? []), 'is_array'));
+        $files = array_values(array_filter(array_map(fn (array $conflict): ?string => is_string($conflict['path'] ?? null) ? $conflict['path'] : null, $conflicts), fn (?string $path): bool => $path !== null));
 
-        return ['conflicts' => $files !== [], 'files' => $files];
+        return ['conflicts' => $conflicts !== [], 'files' => $files];
     }
 
     public function openPullRequests(): array
