@@ -19,6 +19,7 @@ use App\Mcp\Tools\ReviewerAnswerTool;
 use App\Mcp\Tools\ReviewInstructionsTool;
 use App\Mcp\Tools\ReviewRulesTool;
 use App\Mcp\Tools\SettleFindingsTool;
+use App\Mcp\Tools\TicketAttachmentTool;
 use App\Mcp\Tools\TicketTool;
 use App\Models\Connection;
 use App\Models\FindingVerdict;
@@ -194,6 +195,55 @@ it('reads a pull request by its branch: findings that hold the merge first, with
         // People's comments, replies to findings among them, and none of the review's own.
         ->assertStructuredContentCount(2, 'comments')
         ->assertStructuredContentPath('comments.1.text', 'Looks good otherwise.');
+});
+
+it('lists a ticket\'s files, and gives an agent an image to look at and a log to read, through the ticket\'s own source', function () {
+    TicketSource::factory()->create([
+        'connection_id' => Connection::factory()->jira()->create(['tenant_id' => $this->tenant->id]),
+        'prefixes' => ['PROJ'],
+    ]);
+    $small = imagecreatetruecolor(20, 10);
+    ob_start();
+    imagepng($small);
+    $png = (string) ob_get_clean();
+
+    Http::swap(new HttpFactory);
+    Http::fake([
+        'acme.atlassian.net/rest/api/2/issue/PROJ-9/comment*' => Http::response(['comments' => [], 'total' => 0]),
+        'acme.atlassian.net/rest/api/2/issue/PROJ-9*' => Http::response(['key' => 'PROJ-9', 'fields' => ['summary' => 'The export button is cut off', 'attachment' => [
+            ['id' => '10001', 'filename' => 'button.png', 'mimeType' => 'image/png', 'size' => strlen($png)],
+            ['id' => '10002', 'filename' => 'console.log', 'mimeType' => 'text/plain', 'size' => 18],
+            ['id' => '10003', 'filename' => 'export.zip', 'mimeType' => 'application/zip', 'size' => 4],
+            ['id' => '10004', 'filename' => 'recording.mov', 'mimeType' => 'video/quicktime', 'size' => 50 * 1024 * 1024],
+        ]]]),
+        'acme.atlassian.net/rest/api/2/attachment/content/10001' => Http::response($png, 200, ['Content-Type' => 'image/png']),
+        'acme.atlassian.net/rest/api/2/attachment/content/10002' => Http::response("TypeError: width\n", 200, ['Content-Type' => 'text/plain']),
+        'acme.atlassian.net/rest/api/2/attachment/content/10003' => Http::response('PK..', 200, ['Content-Type' => 'application/zip']),
+    ]);
+    $attachment = fn (int $number, ?User $user = null) => AgentServer::actingAs($user ?? $this->member)
+        ->tool(TicketAttachmentTool::class, ['repository' => 'acme/shop', 'reference' => 'PROJ-9', 'number' => $number]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'reference' => 'PROJ-9'])
+        ->assertOk()
+        ->assertStructuredContentPaths([
+            'attachments.0' => ['number' => 1, 'name' => 'button.png', 'type' => 'image/png', 'size' => strlen($png), 'readable' => true],
+            'attachments.3.name' => 'recording.mov',
+        ])
+        ->assertSee('1. button.png (image/png, ');
+
+    $attachment(1)->assertOk()->assertSee(['button.png', base64_encode($png)]);
+    $attachment(2)->assertOk()->assertSee("# console.log\n\nTypeError: width");
+    $attachment(3)->assertHasErrors(['export.zip is a application/zip file; only images and text files are read.']);
+    $attachment(4)->assertHasErrors(['recording.mov is larger than 10 MB, which is not read.']);
+    $attachment(5)->assertHasErrors(['PROJ-9 has no attachment 5: it has 4.']);
+
+    // With the source's own sign-in, the same as the ticket.
+    Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'attachment/content/10001') && $request->hasHeader('Authorization') && $request->header('Accept') === ['*/*']);
+    Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'attachment/content/10004'));
+
+    // Someone outside the tenant reads none of it.
+    $attachment(1, User::factory()->create())->assertHasErrors();
 });
 
 it('reads a ticket from the tenant\'s ticket sources by its reference or by the pull request whose title names it', function () {

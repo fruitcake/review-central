@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace App\Connections;
 
+use App\Exceptions\AttachmentRefused;
 use App\Exceptions\TicketNotFound;
 use App\Models\Connection;
 use App\Models\Repository;
+use App\Tickets\AttachmentFile;
 use App\Tickets\Ticket;
+use App\Tickets\TicketAttachment;
 use Illuminate\Http\Client\RequestException;
 
 /**
@@ -24,4 +27,13 @@ interface TicketDriver extends ConnectionDriver
      * @throws RequestException
      */
     public function fetch(Connection $connection, string $reference, Repository $repository): Ticket;
+
+    /**
+     * Reads an attachment of a ticket this just fetched, at most
+     * AttachmentFile::MAX_BYTES of it.
+     *
+     * @throws RequestException
+     * @throws AttachmentRefused when it cannot be read here, or is too large
+     */
+    public function download(Connection $connection, TicketAttachment $attachment): AttachmentFile;
 }

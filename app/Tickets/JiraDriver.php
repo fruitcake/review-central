@@ -112,18 +112,34 @@ class JiraDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
 
         $comments = array_reverse($result['comments'] ?? []);
 
+        $attachments = array_values(array_map(fn (array $file): TicketAttachment => new TicketAttachment(
+            name: (string) ($file['filename'] ?? 'Unnamed file'),
+            mimeType: is_string($file['mimeType'] ?? null) ? $file['mimeType'] : null,
+            size: is_int($file['size'] ?? null) ? $file['size'] : null,
+            // Through the same address as the issue, signed in at Atlassian or not.
+            downloadUrl: isset($file['id']) ? $this->url($connection, "attachment/content/{$file['id']}") : null,
+        ), array_filter((array) ($issue['fields']['attachment'] ?? []), 'is_array')));
+
         return new Ticket(
             $key,
-            $this->markdown($this->host($connection), $issue, $comments, (int) ($result['total'] ?? count($comments))),
+            $this->markdown($this->host($connection), $issue, $comments, (int) ($result['total'] ?? count($comments)), $attachments),
             "https://{$this->host($connection)}/browse/{$key}",
+            $attachments,
         );
+    }
+
+    public function download(Connection $connection, TicketAttachment $attachment): AttachmentFile
+    {
+        // Jira sends it on to its media store, which the signed address it redirects to lets in.
+        return AttachmentFile::fromResponse($attachment, $this->request($connection, '*/*')->timeout(30)->get(AttachmentFile::check($attachment)));
     }
 
     /**
      * @param  array<string, mixed>  $issue
      * @param  array<int, array<string, mixed>>  $comments  the newest, oldest first
+     * @param  array<int, TicketAttachment>  $attachments
      */
-    protected function markdown(string $host, array $issue, array $comments, int $total): string
+    protected function markdown(string $host, array $issue, array $comments, int $total, array $attachments = []): string
     {
         $fields = $issue['fields'] ?? [];
         $link = fn (string $key): string => "https://{$host}/browse/{$key}";
@@ -181,13 +197,7 @@ class JiraDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
             array_pop($lines);
         }
 
-        if (($fields['attachment'] ?? []) !== []) {
-            $lines = array_merge($lines, ['', '## Attachments', '', 'Listed only: the files themselves are not read.', '']);
-
-            foreach ($fields['attachment'] as $attachment) {
-                $lines[] = '- '.($attachment['filename'] ?? 'Unnamed file').(isset($attachment['mimeType']) ? " ({$attachment['mimeType']})" : '');
-            }
-        }
+        $lines = array_merge($lines, TicketAttachment::section($attachments));
 
         return implode("\n", $lines)."\n";
     }
@@ -206,13 +216,13 @@ class JiraDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
             : "https://{$this->host($connection)}/rest/api/2/{$path}";
     }
 
-    protected function request(Connection $connection): PendingRequest
+    protected function request(Connection $connection, string $accept = 'application/json'): PendingRequest
     {
         $request = OAuthTokens::has($connection)
             ? Http::withToken(app(OAuthTokens::class)->token($connection))
             : Http::withBasicAuth((string) $connection->setting('email'), (string) $connection->credential('api_token'));
 
-        return $request->acceptJson()->timeout(20)->connectTimeout(4);
+        return $request->accept($accept)->timeout(20)->connectTimeout(4);
     }
 
     public function oauthIntegration(): string

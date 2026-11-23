@@ -75,7 +75,7 @@ A user whose address is already known signs in as that user, when Google holds t
 
 A ticket connection can sign in at Asana or Jira instead of taking a pasted token, when the installation is registered as an OAuth app there, with `<APP_URL>/connections/oauth/callback` as its redirect address. Add the app under **Admin → Apps**, or set it in `.env`. Each person who connects says yes with their own account, and the tokens are kept per connection, with the app they came through:
 
-- **Asana**: a new app in the [developer console](https://app.asana.com/0/my-apps) (`ASANA_CLIENT_ID`, `ASANA_CLIENT_SECRET`). The app needs the read scopes in `ASANA_OAUTH_SCOPE`; leave that empty for an app with full permissions. Under **Manage distribution**, let it be used in any workspace, for tenants outside your own organisation.
+- **Asana**: a new app in the [developer console](https://app.asana.com/0/my-apps) (`ASANA_CLIENT_ID`, `ASANA_CLIENT_SECRET`). The app needs the read scopes in `ASANA_OAUTH_SCOPE`, `attachments:read` included for the files on a task (an app connected before it was asked for reads tasks without their files until it is connected again); leave that empty for an app with full permissions. Under **Manage distribution**, let it be used in any workspace, for tenants outside your own organisation.
 - **Jira**: an OAuth 2.0 (3LO) app in the [Atlassian developer console](https://developer.atlassian.com/console/myapps/), with read access to Jira issues (`ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLIENT_SECRET`). Under **Distribution**, set it to sharing, so people of other organisations can authorize it.
 
 Without an app, a connection takes a token only, and its form says why.

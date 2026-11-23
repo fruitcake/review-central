@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[IsReadOnly]
 #[Description(<<<'TXT'
-    Reads a ticket as the AI review reads it, from the repository's ticket sources (Jira, Asana, GitHub Issues): its title, description, acceptance criteria and latest comments as markdown, with its address.
+    Reads a ticket as the AI review reads it, from the repository's ticket sources (Jira, Asana, GitHub Issues): its title, description, acceptance criteria, subtasks and latest comments as markdown, with its address, and the files attached to it under `attachments`: read a screenshot or log with `ticket-attachment`, by its number. A subtask or parent that is listed with an id or key can be read with this tool too.
 
     The review reads the ticket a pull request's title names for what the change is meant to do, so read it before building or pushing a change. `graded` says whether the team's settings ask the review to also grade the change against the ticket's acceptance criteria, which not every reviewer does: when it is on, list each criterion and where the change meets it.
 

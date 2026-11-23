@@ -25,6 +25,9 @@ class GitHubIssuesDriver implements ExplainsSetup, TicketDriver
 {
     public const MAX_COMMENTS = 100;
 
+    /** The issue as markdown and as HTML. */
+    protected const WITH_HTML = 'application/vnd.github.full+json';
+
     public function label(): string
     {
         return 'GitHub issues';
@@ -90,7 +93,8 @@ class GitHubIssuesDriver implements ExplainsSetup, TicketDriver
         $name = $connection->setting('repository') ?? $repository->fullName();
         $url = $this->api($connection)."/repos/{$name}/issues/{$number}";
 
-        $response = $this->request($connection)->get($url);
+        // With the HTML too, whose images carry addresses signed to be read without a token.
+        $response = $this->request($connection, self::WITH_HTML)->get($url);
 
         if (! ctype_digit($number) || in_array($response->status(), [403, 404, 410], true)) {
             throw TicketNotFound::forReference("#{$number}");
@@ -111,17 +115,71 @@ class GitHubIssuesDriver implements ExplainsSetup, TicketDriver
         }
 
         $comments = ($issue['comments'] ?? 0) > 0
-            ? $this->request($connection)->get("{$url}/comments", ['per_page' => self::MAX_COMMENTS])->throw()->json()
+            ? $this->request($connection, self::WITH_HTML)->get("{$url}/comments", ['per_page' => self::MAX_COMMENTS])->throw()->json()
             : [];
 
-        return new Ticket("#{$number}", $this->markdown($issue, $comments), $issue['html_url'] ?? null);
+        $attachments = $connection->setting('api_url') === null ? $this->images([$issue, ...$comments]) : [];
+
+        return new Ticket("#{$number}", $this->markdown($issue, $comments, $attachments), $issue['html_url'] ?? null, $attachments);
+    }
+
+    public function download(Connection $connection, TicketAttachment $attachment): AttachmentFile
+    {
+        // Signed by GitHub for a few minutes: no token goes with it.
+        return AttachmentFile::fromResponse($attachment, Http::timeout(30)->connectTimeout(4)->get(AttachmentFile::check($attachment)));
+    }
+
+    /**
+     * The images in the issue and its comments, in the order they are written.
+     * Only those GitHub keeps itself: an image elsewhere is shown through its
+     * proxy, which is GitHub's too.
+     *
+     * @param  array<int, array<string, mixed>>  $posts
+     * @return array<int, TicketAttachment>
+     */
+    protected function images(array $posts): array
+    {
+        $images = [];
+
+        foreach ($posts as $post) {
+            preg_match_all('/<img\b[^>]*>/i', (string) ($post['body_html'] ?? ''), $tags);
+
+            foreach ($tags[0] as $tag) {
+                $src = preg_match('/\bsrc="([^"]+)"/i', $tag, $match) === 1 ? html_entity_decode($match[1]) : null;
+                $alt = preg_match('/\balt="([^"]*)"/i', $tag, $match) === 1 ? trim(html_entity_decode($match[1])) : '';
+
+                if ($src === null || ! self::githubs($src)) {
+                    continue;
+                }
+
+                $images[] = new TicketAttachment(
+                    name: $alt !== '' ? $alt : (basename((string) parse_url($src, PHP_URL_PATH)) ?: 'image'),
+                    downloadUrl: $src,
+                    viewUrl: $post['html_url'] ?? null,
+                );
+            }
+        }
+
+        return $images;
+    }
+
+    /**
+     * Whether GitHub serves the address itself, so reading it reaches nowhere else.
+     */
+    protected static function githubs(string $url): bool
+    {
+        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+
+        return parse_url($url, PHP_URL_SCHEME) === 'https'
+            && (str_ends_with($host, '.githubusercontent.com') || ($host === 'github.com' && str_starts_with((string) parse_url($url, PHP_URL_PATH), '/user-attachments/')));
     }
 
     /**
      * @param  array<string, mixed>  $issue
      * @param  array<int, array<string, mixed>>  $comments
+     * @param  array<int, TicketAttachment>  $attachments
      */
-    protected function markdown(array $issue, array $comments): string
+    protected function markdown(array $issue, array $comments, array $attachments = []): string
     {
         $lines = ["# #{$issue['number']} ".($issue['title'] ?? 'Untitled issue'), ''];
 
@@ -156,6 +214,8 @@ class GitHubIssuesDriver implements ExplainsSetup, TicketDriver
             array_pop($lines);
         }
 
+        $lines = array_merge($lines, TicketAttachment::section($attachments));
+
         return implode("\n", $lines)."\n";
     }
 
@@ -164,10 +224,10 @@ class GitHubIssuesDriver implements ExplainsSetup, TicketDriver
         return rtrim($connection->setting('api_url') ?? 'https://api.github.com', '/');
     }
 
-    protected function request(Connection $connection): PendingRequest
+    protected function request(Connection $connection, string $accept = 'application/vnd.github+json'): PendingRequest
     {
         $request = Http::withToken((string) $connection->credential('token'))
-            ->withHeaders(['Accept' => 'application/vnd.github+json', 'X-GitHub-Api-Version' => '2022-11-28'])
+            ->withHeaders(['Accept' => $accept, 'X-GitHub-Api-Version' => '2022-11-28'])
             ->timeout(20)
             ->connectTimeout(4);
 

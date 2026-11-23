@@ -40,3 +40,32 @@ it('reads no pull request as an issue', function () {
     // Its conversation was not read either.
     Http::assertSentCount(1);
 });
+
+it('lists the images GitHub keeps for an issue and its comments, and reads them without the token', function () {
+    $signed = 'https://private-user-images.githubusercontent.com/1/shot.png?jwt=signed';
+    Http::fake([
+        'api.github.com/repos/acme/shop/issues/12/comments*' => Http::response([
+            ['user' => ['login' => 'sam'], 'body' => 'Here too.', 'html_url' => 'https://github.com/acme/shop/issues/12#c1', 'body_html' => '<p><img src="https://github.com/user-attachments/assets/abc" alt="Second shot"></p>'],
+        ]),
+        'api.github.com/repos/acme/shop/issues/12' => Http::response([
+            'number' => 12, 'title' => 'Fix the cart', 'body' => 'See ![shot](x)', 'html_url' => 'https://github.com/acme/shop/issues/12', 'comments' => 1,
+            // Signed addresses in the HTML; an image elsewhere and a tracker pixel are not GitHub's.
+            'body_html' => '<p><img src="'.htmlspecialchars($signed).'" alt="shot"> <img src="http://169.254.169.254/latest/meta-data"> <img src="https://evil.example/pixel.png" alt="pixel"></p>',
+        ]),
+        'private-user-images.githubusercontent.com/*' => Http::response('PNG', 200, ['Content-Type' => 'image/png']),
+    ]);
+
+    $driver = new GitHubIssuesDriver;
+    $connection = ($this->connection)();
+    $ticket = $driver->fetch($connection, '#12', $this->repository);
+
+    expect(array_map(fn ($attachment): array => [$attachment->name, $attachment->downloadUrl], $ticket->attachments))->toBe([
+        ['shot', $signed],
+        ['Second shot', 'https://github.com/user-attachments/assets/abc'],
+    ])
+        ->and($ticket->markdown)->toContain("## Attachments\n\n1. shot\n2. Second shot")
+        ->and($driver->download($connection, $ticket->attachments[0])->contents)->toBe('PNG');
+
+    Http::assertSent(fn ($request): bool => str_contains($request->url(), '/issues/12') && $request->header('Accept') === ['application/vnd.github.full+json']);
+    Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'githubusercontent.com') && $request->hasHeader('Authorization'));
+});
