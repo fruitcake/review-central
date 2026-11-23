@@ -117,6 +117,7 @@ class EditProfile extends BaseEditProfile
                         $connection = $connections->of($user());
 
                         return match (true) {
+                            $connection === null && $connections->signsIn($user()) => 'It signs you in, but is not connected to reply as you.',
                             $connection === null => 'Not connected.',
                             ($problem = $connections->problem($user())) !== null => $problem,
                             default => 'Connected as '.($connection->nickname ?? $connection->account_id).'.',
@@ -131,9 +132,9 @@ class EditProfile extends BaseEditProfile
                     Action::make('disconnectBitbucket')
                         ->label('Disconnect')
                         ->color('gray')
-                        ->visible(fn (): bool => $connections->of($user()) !== null)
+                        ->visible(fn (): bool => $connections->of($user()) !== null || $connections->signsIn($user()))
                         ->requiresConfirmation()
-                        ->modalDescription('Your replies are written by the team\'s connection again, with your name above them.')
+                        ->modalDescription('Your replies are written by the team\'s connection again, with your name above them, and the account no longer signs you in.')
                         ->action(function () use ($connections, $user): void {
                             $connections->disconnect($user());
                             Notification::make()->title('Bitbucket is disconnected')->success()->send();

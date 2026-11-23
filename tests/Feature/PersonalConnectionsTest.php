@@ -4,6 +4,7 @@ use App\Filament\Auth\EditProfile;
 use App\Models\PersonalConnection;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Models\UserIdentity;
 use App\Services\PersonalConnections;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
@@ -112,7 +113,17 @@ it('shows the account on the profile, says when it cannot write, and lets the us
         ->callAction(TestAction::make('disconnectBitbucket')->schemaComponent('bitbucket_actions'))
         ->assertNotified('Bitbucket is disconnected');
 
-    expect(PersonalConnection::query()->count())->toBe(0);
+    expect(PersonalConnection::query()->count())->toBe(0)
+        ->and(UserIdentity::query()->count())->toBe(0);
+
+    // Linked by signing in only: it says so, and can be undone too.
+    UserIdentity::query()->create(['user_id' => $this->user->id, 'provider' => 'bitbucket', 'provider_id' => '{sam-uuid}']);
+
+    livewire(EditProfile::class)
+        ->assertSee('It signs you in, but is not connected to reply as you.')
+        ->callAction(TestAction::make('disconnectBitbucket')->schemaComponent('bitbucket_actions'));
+
+    expect(UserIdentity::query()->count())->toBe(0);
 
     config(['services.bitbucket.client_id' => null]);
 
@@ -142,4 +153,32 @@ it('keeps the account the user connected while an older one was being renewed', 
 
     expect(app(PersonalConnections::class)->problem($this->user))->toBeNull()
         ->and($connection->refresh()->only(['account_id', 'access_token', 'refresh_token']))->toBe(['account_id' => 'id-b', 'access_token' => 'b-token', 'refresh_token' => 'b-refresh']);
+});
+
+it('signs the user in with the account they connect from then on, and connects none that is someone else\'s', function () {
+    $other = User::factory()->create();
+    UserIdentity::query()->create(['user_id' => $other->id, 'provider' => 'bitbucket', 'provider_id' => '{sam-uuid}']);
+    $this->actingAs($this->user);
+
+    ($this->connect)()->assertRedirect(url('app/acme/profile'));
+
+    expect(PersonalConnection::query()->count())->toBe(0)
+        ->and(UserIdentity::query()->sole()->user_id)->toBe($other->id);
+
+    $other->delete();
+    ($this->connect)();
+
+    expect(UserIdentity::query()->sole()->only(['user_id', 'provider', 'provider_id']))->toBe(['user_id' => $this->user->id, 'provider' => 'bitbucket', 'provider_id' => '{sam-uuid}'])
+        ->and(PersonalConnection::query()->sole()->user_id)->toBe($this->user->id);
+});
+
+it('links no account for a session the password changed under while at Bitbucket', function () {
+    $this->actingAs($this->user)->withSession(['password_hash_web' => $this->user->getAuthPassword()]);
+    $this->user->forceFill(['password' => 'reset-meanwhile'])->save();
+
+    ($this->connect)()->assertRedirect(route('filament.app.auth.login'));
+
+    $this->assertGuest();
+    expect(PersonalConnection::query()->count())->toBe(0)
+        ->and(UserIdentity::query()->count())->toBe(0);
 });

@@ -22,11 +22,15 @@ Route::get('/connections/oauth/callback', [ConnectionOAuthController::class, 'ca
 Route::get('/connections/{connection}/oauth', [ConnectionOAuthController::class, 'redirect'])->whereNumber('connection')->middleware('throttle:20,1')->name('connections.oauth.redirect');
 
 // A user's own Bitbucket account, connected on their profile to write as them.
-// A session from before a password change no longer counts, as in the panels.
-Route::middleware(['auth', 'auth.session', 'throttle:20,1'])->group(function (): void {
-    Route::get('/connections/bitbucket', [PersonalConnectionController::class, 'redirect'])->name('connections.bitbucket.redirect');
-    Route::get('/connections/bitbucket/callback', [PersonalConnectionController::class, 'callback'])->name('connections.bitbucket.callback');
-});
+// Its callback is the consumer's only one, which signing in with Bitbucket comes
+// back through as well, as a guest. A session from before a password change no
+// longer counts, as in the panels.
+Route::get('/connections/bitbucket', [PersonalConnectionController::class, 'redirect'])->middleware(['auth', 'auth.session', 'throttle:20,1'])->name('connections.bitbucket.redirect');
+Route::get('/connections/bitbucket/callback', [PersonalConnectionController::class, 'callback'])->middleware(['auth.session', 'throttle:20,1'])->name('connections.bitbucket.callback');
+
+// The code mailed to the address of a Bitbucket account that is not linked yet.
+Route::get('/sign-in/bitbucket/code', [SingleSignOnController::class, 'code'])->name('sign-in.code');
+Route::post('/sign-in/bitbucket/code', [SingleSignOnController::class, 'checkCode'])->middleware('throttle:10,1')->name('sign-in.code.check');
 
 Route::get('/rate/{token}', [RateReviewController::class, 'show'])->name('reviews.rate');
 Route::post('/rate/{token}', [RateReviewController::class, 'store'])->middleware('throttle:20,1')->name('reviews.rate.store');
