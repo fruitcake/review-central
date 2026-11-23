@@ -57,7 +57,10 @@ class RepositorySetup
 
         if ($removed !== null) {
             // Back and moved in one save, so a move that fails brings nothing back.
-            $removed->forceFill(['connection_id' => $connection->getKey(), 'deleted_at' => null])->save();
+            // Its own settings stay as they were, but whether it is reviewed by
+            // itself is what the form just said.
+            $removed->forceFill(['connection_id' => $connection->getKey(), 'deleted_at' => null]
+                + (array_key_exists('reviews_enabled', $data) ? ['reviews_enabled' => (bool) $data['reviews_enabled']] : []))->save();
 
             return $removed;
         }

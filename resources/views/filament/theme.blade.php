@@ -121,6 +121,9 @@
     .rc-fill-accent { background: var(--rc-accent); }
     /* Striped, so a cache write is told from plain input without a colour of its own. */
     .rc-fill-sky { background: repeating-linear-gradient(45deg, var(--rc-grey), var(--rc-grey) 3px, var(--rc-soft) 3px, var(--rc-soft) 6px); }
+    .rc-fill-ink { background: var(--rc-ink-soft); }
+    /* Striped the other way, for a second shade of grey in one bar. */
+    .rc-fill-hatch { background: repeating-linear-gradient(-45deg, var(--rc-ink-soft), var(--rc-ink-soft) 2px, var(--rc-soft) 2px, var(--rc-soft) 6px); }
     .rc-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
     .rc-chip { align-self: flex-start; display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 100px; white-space: nowrap; }
@@ -303,6 +306,9 @@
     .rc-verdict-valid.rc-on { background: var(--rc-ink); color: #fff; }
     .rc-verdict-not_a_problem.rc-on { background: var(--rc-ink-soft); border-color: var(--rc-ink-soft); color: #fff; }
     .rc-verdict-wrong.rc-on { background: var(--rc-danger); border-color: var(--rc-danger); color: var(--rc-on-danger); }
+    .rc-outcomes { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--rc-soft); padding-top: 16px; margin-top: 8px; }
+    .rc-outcomes h3 { margin: 0; font-size: 15px; }
+    .rc-reason { border: 1px solid var(--rc-border); border-radius: 0; background: #fff; color: var(--rc-text); padding: 6px 28px 6px 10px; font-size: 13px; min-height: 32px; }
     .rc-stars { display: flex; gap: 6px; }
     .rc-stars button { width: 40px; height: 40px; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 0; background: transparent; color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
     .rc-stars button.rc-on { background: var(--rc-accent); border-color: var(--rc-accent); color: var(--rc-on-accent); }

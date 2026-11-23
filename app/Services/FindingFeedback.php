@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\FindingVerdictKind;
+use App\Enums\FindingVerdictReason;
 use App\Models\FindingVerdict;
 use App\Models\ReviewRating;
 use App\Models\ReviewRun;
@@ -37,7 +38,8 @@ class FindingFeedback
             return null;
         }
 
-        FindingVerdict::query()->updateOrCreate($key, ['verdict' => $verdict]);
+        // A changed verdict leaves the reason for the old one behind.
+        FindingVerdict::query()->updateOrCreate($key, ['verdict' => $verdict, 'reason' => null, 'note' => null]);
 
         return $verdict;
     }
@@ -47,17 +49,35 @@ class FindingFeedback
      * null takes it back. Unlike give(), the same verdict twice stays given, for a
      * caller that says what it should be rather than clicking.
      *
-     * @throws InvalidArgumentException when the run has no such finding
+     * A reason and a note say why a finding was dismissed; a valid one has neither.
+     *
+     * @throws InvalidArgumentException when the run has no such finding, or a valid one is given a reason
      */
-    public function set(ReviewRun $run, User $user, string $findingId, ?FindingVerdictKind $verdict): void
+    public function set(ReviewRun $run, User $user, string $findingId, ?FindingVerdictKind $verdict, ?FindingVerdictReason $reason = null, ?string $note = null): void
     {
         $this->mustHave($run, $findingId);
+
+        if (($reason !== null || filled($note)) && ($verdict === null || $verdict->accepts())) {
+            throw new InvalidArgumentException("Finding {$findingId}: a reason is for a finding that is not a problem or wrong, not for one judged valid.");
+        }
 
         $key = ['review_run_id' => $run->getKey(), 'user_id' => $user->getKey(), 'finding_id' => $findingId];
 
         $verdict === null
             ? FindingVerdict::query()->where($key)->delete()
-            : FindingVerdict::query()->updateOrCreate($key, ['verdict' => $verdict]);
+            : FindingVerdict::query()->updateOrCreate($key, ['verdict' => $verdict, 'reason' => $reason, 'note' => filled($note) ? $note : null]);
+    }
+
+    /**
+     * Why the user dismissed a finding, given after the verdict, as on the review's
+     * page; null takes the reason back. Nothing for a finding they did not dismiss.
+     */
+    public function explain(ReviewRun $run, User $user, string $findingId, ?FindingVerdictReason $reason): void
+    {
+        FindingVerdict::query()
+            ->where(['review_run_id' => $run->getKey(), 'user_id' => $user->getKey(), 'finding_id' => $findingId])
+            ->whereIn('verdict', [FindingVerdictKind::NotAProblem, FindingVerdictKind::Wrong])
+            ->update(['reason' => $reason]);
     }
 
     /**
@@ -80,6 +100,22 @@ class FindingFeedback
             ->where('user_id', $user->getKey())
             ->get()
             ->mapWithKeys(fn (FindingVerdict $verdict): array => [$verdict->finding_id => $verdict->verdict])
+            ->all();
+    }
+
+    /**
+     * Why the user dismissed each finding they gave a reason for.
+     *
+     * @return array<string, FindingVerdictReason> by finding id
+     */
+    public function reasons(ReviewRun $run, User $user): array
+    {
+        return FindingVerdict::query()
+            ->where('review_run_id', $run->getKey())
+            ->where('user_id', $user->getKey())
+            ->whereNotNull('reason')
+            ->get()
+            ->mapWithKeys(fn (FindingVerdict $verdict): array => [$verdict->finding_id => $verdict->reason])
             ->all();
     }
 

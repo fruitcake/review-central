@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\FindingVerdictKind;
+use App\Enums\FindingVerdictReason;
 use App\Filament\App\Resources\ReviewRuns\Pages\ViewReviewRun;
 use App\Models\FindingVerdict;
 use App\Models\Repository;
@@ -10,6 +11,7 @@ use App\Models\User;
 use App\Services\FindingFeedback;
 use App\Services\TenantOverview;
 use Filament\Facades\Filament;
+use Illuminate\Support\Str;
 
 use function Pest\Livewire\livewire;
 
@@ -83,4 +85,52 @@ it('takes a verdict and a rating from the review\'s own page', function () {
     $rating = ReviewRating::query()->sole();
 
     expect($rating->only(['score', 'name', 'user_id']))->toBe(['score' => 5, 'name' => 'Sam Sample', 'user_id' => $this->user->id]);
+});
+
+it('takes why a finding was dismissed on the review\'s own page, and drops it when the verdict changes', function () {
+    $this->actingAs($this->user);
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+    Filament::setTenant($this->tenant);
+    Filament::bootCurrentPanel();
+
+    $page = livewire(ViewReviewRun::class, ['record' => $this->run->uuid])
+        ->call('judge', 'F1', 'valid')
+        ->call('explain', 'F1', 'nitpick')
+        ->call('judge', 'F2', 'not_a_problem')
+        ->assertSee('Why?')
+        ->call('explain', 'F2', 'out_of_scope')
+        // The team reads why, on the finding.
+        ->assertSee('Sam Sample: Not a problem · Out of scope');
+
+    // A finding judged valid takes no reason.
+    expect(FindingVerdict::query()->pluck('reason', 'finding_id')->all())->toBe(['F1' => null, 'F2' => FindingVerdictReason::OutOfScope]);
+
+    $page->call('judge', 'F2', 'wrong');
+
+    expect(FindingVerdict::query()->where('finding_id', 'F2')->sole()->reason)->toBeNull();
+});
+
+it('shows how the period\'s findings ended as the reviews last reported them, and why people dismissed theirs', function () {
+    $this->run->update(['pull_request_id' => 7, 'started_at' => now()->subHours(3), 'findings' => [
+        ['id' => 'F1', 'status' => 'new'], ['id' => 'F6', 'status' => 'fixed'],
+    ]]);
+    $next = fn (array $attributes) => tap($this->run->replicate()->fill(['uuid' => (string) Str::uuid()] + $attributes))->save();
+
+    // F6 was settled before and is left out of the newest review: it stays fixed.
+    $newest = $next(['started_at' => now()->subHours(2), 'findings' => [
+        ['id' => 'F1', 'status' => 'fixed'], ['id' => 'F2', 'status' => 'false_positive'], ['id' => 'F3', 'status' => 'acknowledged'],
+        ['id' => 'F4', 'status' => 'new'], ['id' => 'F5', 'status' => 'outdated'], ['id' => 'F7', 'status' => 'unreported'],
+    ]]);
+    // Neither a trial nor a review that failed to publish stands on the pull request.
+    $next(['started_at' => now()->subHour(), 'custom' => true, 'findings' => [['id' => 'F1', 'status' => 'new']]]);
+    $next(['started_at' => now(), 'status' => ReviewRun::STATUS_FAILED, 'findings' => [['id' => 'F1', 'status' => 'new']]]);
+
+    app(FindingFeedback::class)->set($newest, $this->user, 'F2', FindingVerdictKind::Wrong, FindingVerdictReason::Misread);
+    app(FindingFeedback::class)->set($newest, $this->user, 'F3', FindingVerdictKind::NotAProblem, FindingVerdictReason::Intended, 'Kept for old clients.');
+
+    $outcomes = app(TenantOverview::class)->for($this->tenant, 30)['outcomes'];
+
+    expect(collect($outcomes['outcomes'])->pluck('count', 'key')->all())->toBe(['fixed' => 2, 'acknowledged' => 1, 'false_positive' => 1, 'open' => 1, 'outdated' => 1, 'unreported' => 1])
+        ->and($outcomes['total'])->toBe(7)
+        ->and(collect($outcomes['reasons'])->pluck('count', 'label')->all())->toBe(['Intended' => 1, 'Misread the code' => 1]);
 });

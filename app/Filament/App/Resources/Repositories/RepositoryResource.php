@@ -4,7 +4,6 @@ namespace App\Filament\App\Resources\Repositories;
 
 use App\Connections\SourceControlDriver;
 use App\Enums\ConnectionKind;
-use App\Enums\ReviewProvider;
 use App\Enums\ReviewsFrom;
 use App\Filament\App\Resources\PullRequests\PullRequestResource;
 use App\Filament\App\Resources\Repositories\Pages\ManageRepositories;
@@ -22,6 +21,7 @@ use App\Services\RepositoryReadiness;
 use App\Services\RepositorySetup;
 use App\Services\ReviewSettings;
 use App\Services\ReviewStack;
+use App\Services\TenantOverview;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -38,6 +38,7 @@ use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Table;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Database\Eloquent\Builder;
@@ -132,7 +133,6 @@ class RepositoryResource extends Resource
                     ->label('Review its pull requests')
                     ->default(true)
                     ->live()
-                    ->visibleOn('edit')
                     ->helperText('Off, nothing starts a review of this repository but a person, from Pull requests: a repository added by trying a pull request starts that way.'),
                 Select::make('reviews_from')
                     ->label('Whose pull requests are reviewed by themselves')
@@ -161,10 +161,13 @@ class RepositoryResource extends Resource
 
     public static function table(Table $table): Table
     {
+        $isAdmin = TenantRole::isAdmin();
+
         return $table
             ->modifyQueryUsing(fn (Builder $query) => $query
                 ->with('integration')
                 ->withMax('reviewRuns', 'started_at')
+                ->withCount(['reviewRuns as reviews_last_30_days' => fn (Builder $runs) => $runs->whereIn('status', TenantOverview::REVIEWS)->where('started_at', '>=', now()->subDays(30))])
                 ->withCount('openPullRequests')
                 ->withSum(['reviewRuns as cost_this_month' => fn (Builder $runs) => $runs->where('started_at', '>=', now()->startOfMonth())], 'cost'))
             ->columns([
@@ -174,12 +177,14 @@ class RepositoryResource extends Resource
                     ->description(fn (Repository $record): ?string => $record->reviews_enabled ? ($record->reviews_from === ReviewsFrom::Trusted ? trim($record->name.' · trusted accounts only', ' ·') : $record->name) : 'Not reviewed by itself: started from Pull requests')
                     ->searchable(['slug', 'workspace', 'name']),
                 TextColumn::make('integration.name')->label('Connection'),
-                // Also for a repository that follows the platform, which stores nothing.
-                TextColumn::make('review_runner')->label('Runs on')
-                    ->state(fn (Repository $record): string => $record->runner()->label().($record->review_runner === null ? ' (platform)' : '')),
-                TextColumn::make('review_available_providers')->label('Reviewers available')->badge()
-                    ->formatStateUsing(fn (string $state): string => ReviewProvider::tryFrom($state)?->text() ?? $state)
-                    ->placeholder('Known after the first review'),
+                ToggleColumn::make('reviews_enabled')
+                    ->label('Reviewed')
+                    // Members see it; only an admin may change it, as in the edit form.
+                    // Asked once when the table is built for a request, not per row; an
+                    // update builds it again and asks again.
+                    ->disabled(! $isAdmin)
+                    ->tooltip('Review its pull requests by themselves. Off, a person starts each review from Pull requests.'),
+                TextColumn::make('reviews_last_30_days')->label('Reviews (30 days)')->numeric(),
                 TextColumn::make('open_pull_requests_count')->label('Open PRs')
                     ->formatStateUsing(fn (int $state): string => (string) $state)
                     ->url(fn (Repository $record): string => self::pullRequestsUrl($record)),
