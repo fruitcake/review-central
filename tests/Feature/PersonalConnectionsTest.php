@@ -112,7 +112,17 @@ it('shows the account on the profile, says when it cannot write, and lets the us
         ->callAction(TestAction::make('disconnectBitbucket')->schemaComponent('bitbucket_actions'))
         ->assertNotified('Bitbucket is disconnected');
 
-    expect(PersonalConnection::query()->count())->toBe(0);
+    expect(PersonalConnection::query()->count())->toBe(0)
+        ->and(UserIdentity::query()->count())->toBe(0);
+
+    // Linked by signing in only: it says so, and can be undone too.
+    UserIdentity::query()->create(['user_id' => $this->user->id, 'provider' => 'bitbucket', 'provider_id' => '{sam-uuid}']);
+
+    livewire(EditProfile::class)
+        ->assertSee('It signs you in, but is not connected to reply as you.')
+        ->callAction(TestAction::make('disconnectBitbucket')->schemaComponent('bitbucket_actions'));
+
+    expect(UserIdentity::query()->count())->toBe(0);
 
     config(['services.bitbucket.client_id' => null]);
 

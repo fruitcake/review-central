@@ -129,7 +129,7 @@ class SignInCodes
                 $user->forceFill(['email_verified_at' => now()])->save();
             }
 
-            $this->signOn->link($user, $pending['provider'], $pending['id']);
+            $this->signOn->link($user, $pending['provider'], $pending['id'], replace: false);
             $user->tenants()->syncWithoutDetaching($tenants->modelKeys());
 
             return $user;

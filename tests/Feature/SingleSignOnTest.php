@@ -4,7 +4,9 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Models\UserIdentity;
 use App\Notifications\SignInCode;
+use App\Services\PersonalConnections;
 use App\Services\SignInCodes;
+use App\Services\SingleSignOn;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Testing\TestResponse;
@@ -277,4 +279,31 @@ it('refuses a Bitbucket account for an address whose account has another one lin
     signInWithBitbucket('nora@example.com')->assertRedirect('/app/login')->assertSessionHas('sign_in_refused', 'The account for nora@example.com is already linked to another account there. Sign in with that one, or with your password.');
 
     Notification::assertNothingSent();
+});
+
+it('signs a Bitbucket account in no more once it is disconnected', function () {
+    Notification::fake();
+    $user = User::factory()->create(['email' => 'nora@example.com']);
+    UserIdentity::query()->create(['user_id' => $user->id, 'provider' => 'bitbucket', 'provider_id' => '{nora-uuid}']);
+
+    app(PersonalConnections::class)->disconnect($user);
+
+    signInWithBitbucket('nora@example.com')->assertRedirect(route('sign-in.code'));
+    $this->assertGuest();
+});
+
+it('links no account by a code when the user linked another one meanwhile', function () {
+    Notification::fake();
+    $user = User::factory()->create(['email' => 'nora@example.com']);
+
+    signInWithBitbucket('nora@example.com', '{account-a}')->assertRedirect(route('sign-in.code'));
+    $code = mailedCode('nora@example.com');
+
+    // From the profile, in another browser.
+    app(SingleSignOn::class)->link($user, 'bitbucket', '{account-b}');
+
+    $this->post(route('sign-in.code.check'), ['code' => $code])->assertRedirect('/app/login')->assertSessionHas('sign_in_refused');
+
+    $this->assertGuest();
+    expect(UserIdentity::query()->sole()->provider_id)->toBe('{account-b}');
 });

@@ -9,6 +9,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Models\UserIdentity;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Laravel\Socialite\Contracts\User as ProviderUser;
@@ -54,12 +55,13 @@ class SingleSignOn
     }
 
     /**
-     * Links an account at the provider to a user who is signed in here, in place
-     * of one they linked before, so it signs them in from now on.
+     * Links an account at the provider to a user, so it signs them in from now on.
+     * Only a user who is signed in replaces one they linked before; signing in
+     * with another account never does.
      *
-     * @throws SignInRefused when the account is another user's
+     * @throws SignInRefused when the account is another user's, or the user has another one linked and it is not to be replaced
      */
-    public function link(User $user, string $provider, string $id): void
+    public function link(User $user, string $provider, string $id, bool $replace = true): void
     {
         $other = $this->known($provider, $id);
 
@@ -67,7 +69,18 @@ class SingleSignOn
             throw new SignInRefused('That account is already linked to another account here.');
         }
 
-        UserIdentity::query()->updateOrCreate(['user_id' => $user->getKey(), 'provider' => $provider], ['provider_id' => $id]);
+        if ($replace) {
+            UserIdentity::query()->updateOrCreate(['user_id' => $user->getKey(), 'provider' => $provider], ['provider_id' => $id]);
+
+            return;
+        }
+
+        try {
+            // One per user and provider: an account linked meanwhile makes this fail rather than be replaced.
+            UserIdentity::query()->firstOrCreate(['user_id' => $user->getKey(), 'provider' => $provider, 'provider_id' => $id]);
+        } catch (UniqueConstraintViolationException) {
+            throw new SignInRefused("The account for {$user->email} is already linked to another account there. Sign in with that one, or with your password.");
+        }
     }
 
     /**

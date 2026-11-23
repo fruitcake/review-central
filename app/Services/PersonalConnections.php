@@ -98,9 +98,21 @@ class PersonalConnections
         return array_values(array_filter(array_map('trim', explode(',', $header))));
     }
 
+    /**
+     * Whether the user's Bitbucket account signs them in, connected or not.
+     */
+    public function signsIn(User $user): bool
+    {
+        return $user->identities()->where('provider', SingleSignOn::BITBUCKET)->exists();
+    }
+
+    /**
+     * Forgets the user's Bitbucket account: its tokens, and that it signs them in.
+     */
     public function disconnect(User $user): void
     {
         PersonalConnection::query()->where('user_id', $user->getKey())->where('host', self::BITBUCKET)->delete();
+        $user->identities()->where('provider', SingleSignOn::BITBUCKET)->delete();
     }
 
     /**
