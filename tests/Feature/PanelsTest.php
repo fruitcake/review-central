@@ -72,7 +72,7 @@ it('creates a connection the way the form is filled in: the service first, its f
         // The browser can only write into fields that have state: a section left
         // at null swallows what is typed into it.
         ->assertSet('mountedActions.0.data.credentials', ['access_token' => null])
-        ->assertSet('mountedActions.0.data.settings', ['workspace' => null, 'username' => null, 'posting' => null, 'add_repositories' => false])
+        ->assertSet('mountedActions.0.data.settings', ['workspace' => null, 'username' => null, 'posting' => null, 'add_repositories' => false, 'review_added_repositories' => false])
         ->set('mountedActions.0.data.credentials.access_token', 'secret-token')
         ->set('mountedActions.0.data.settings.workspace', 'acme')
         ->callMountedAction()

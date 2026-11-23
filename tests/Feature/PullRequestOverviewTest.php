@@ -252,6 +252,16 @@ it('adds a repository its webhook tells of for the first time when the connectio
         ->and(OpenPullRequest::query()->count())->toBe(0);
 });
 
+it('reviews a repository its webhook adds when the connection is set to', function () {
+    $this->repository->update(['slug' => 'elsewhere']);
+    $this->repository->integration->update(['settings' => ['workspace' => 'acme', 'add_repositories' => true, 'review_added_repositories' => true]]);
+
+    deliverPullRequest([], 'trusted-dev')->assertOk();
+
+    expect(Repository::query()->where('slug', 'shop')->sole()->reviews_enabled)->toBeTrue();
+    Queue::assertPushed(RunContainerReview::class, fn (RunContainerReview $job): bool => $job->branch === 'feature/export');
+});
+
 it('fetches a repository\'s open pull requests from its host without reviewing them, and lists them under that repository', function () {
     OpenPullRequest::query()->create(['repository_id' => $this->repository->id, 'pull_request_id' => 3]);
     // Listed here, but the host refuses to say what became of it: it stays.

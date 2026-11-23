@@ -91,11 +91,19 @@ class Connection extends Model
      */
     /**
      * Whether a repository its webhook tells of for the first time is added, to be
-     * listed and have its pull requests kept, without reviewing them by itself.
+     * listed and have its pull requests kept.
      */
     public function addsRepositories(): bool
     {
         return ($this->settings['add_repositories'] ?? false) === true;
+    }
+
+    /**
+     * Whether a repository it adds has its pull requests reviewed by themselves.
+     */
+    public function reviewsAddedRepositories(): bool
+    {
+        return ($this->settings['review_added_repositories'] ?? false) === true;
     }
 
     public function reachesOwner(string $workspace): bool

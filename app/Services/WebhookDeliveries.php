@@ -61,7 +61,7 @@ class WebhookDeliveries
             return Repository::query()->create([
                 'tenant_id' => $connection->tenant_id,
                 'connection_id' => $connection->getKey(),
-                'reviews_enabled' => false,
+                'reviews_enabled' => $connection->reviewsAddedRepositories(),
             ] + $this->setup->complete(['workspace' => $event->workspace, 'slug' => $event->slug], $connection));
         } catch (UniqueConstraintViolationException) {
             // Another delivery for it, at the same moment, added it first.
