@@ -51,6 +51,9 @@ class GitHubClient implements FiltersSecrets, SourceControl
     /** What an issue comment written as a reply says its parent is. */
     public const PARENT_MARKER = '/\[\/\/\]:\s*#\s*\(ai-reply-to (\d+)\)/';
 
+    /** The line such a reply opens with, for people: the comment it answers, as a link. */
+    protected const PARENT_LINK = '/\A↪ \[In reply to this comment\]\([^)\s]*\)\n\n/u';
+
     protected const API = 'https://api.github.com';
 
     /** The account the token acts as, once asked. */
@@ -207,6 +210,11 @@ class GitHubClient implements FiltersSecrets, SourceControl
                 $id = (int) $comment['id'];
                 $body = (string) ($comment['body'] ?? '');
                 $parent = $comment['in_reply_to_id'] ?? (preg_match(self::PARENT_MARKER, $body, $match) === 1 ? (int) $match[1] : null);
+
+                // Read back as what was written: the link is for people on GitHub.
+                if ($parent !== null && ! isset($comment['in_reply_to_id'])) {
+                    $body = (string) preg_replace(self::PARENT_LINK, '', $body);
+                }
                 $resolved = $comment['kind'] === 'review'
                     ? ($threads['threads'][$id]['resolved'] ?? false)
                     : ($threads['minimized'][$id] ?? false);
@@ -249,8 +257,9 @@ class GitHubClient implements FiltersSecrets, SourceControl
 
             // Not a comment in a review thread: one on the pull request, which has
             // no threads, so the reply says which comment it answers.
+            // GitHub shows it on its own, so it links to what it answers.
             return (array) $this->request(15)->post($this->url("issues/{$id}/comments"), [
-                'body' => rtrim($content)."\n\n[//]: # (ai-reply-to {$parentId})",
+                'body' => '↪ [In reply to this comment]('.$this->pullRequestUrl((int) $id)."#issuecomment-{$parentId})\n\n".rtrim($content)."\n\n[//]: # (ai-reply-to {$parentId})",
             ])->throw()->json();
         }
 

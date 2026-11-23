@@ -229,10 +229,14 @@ it('answers a comment on the pull request itself, which has no thread, with one 
     $question = $this->client->addPullRequestComment('12', 'Why is this slow?');
     $this->client->addPullRequestComment('12', 'Because it reads every row.', parentId: $question['id']);
 
+    // On GitHub it links to the comment it answers, which has no thread to sit in.
+    Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/issues/12/comments')
+        && str_starts_with((string) $request['body'], "↪ [In reply to this comment](https://github.com/{$this->repository->workspace}/{$this->repository->slug}/pull/12#issuecomment-{$question['id']})\n\nBecause it reads every row."));
+
     $comments = $this->client->getPullRequestComments('12');
 
     expect($comments[1]['parent'])->toBe(['id' => $question['id']])
-        ->and($comments[1]['content']['raw'])->toEndWith("[//]: # (ai-reply-to {$question['id']})")
+        ->and($comments[1]['content']['raw'])->toBe("Because it reads every row.\n\n[//]: # (ai-reply-to {$question['id']})")
         ->and($comments[1])->not->toHaveKey('inline');
 });
 
