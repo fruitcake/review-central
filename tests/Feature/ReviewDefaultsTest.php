@@ -314,3 +314,24 @@ it('lets a team turn the notes on whose turn off, and pick the model they are wr
         ->and($defaults->turn_model)->toBe('smartest')
         ->and(DescribePullRequest::wanted($record->refresh()))->toBeFalse();
 });
+
+it('shows the effort and model the classification picks per pull request as not to be set, and keeps what was set', function () {
+    ReviewSettings::saveDefaults($this->tenant, ['claude_model' => 'smartest', 'claude_effort' => 'high', 'ocr_model' => 'gpt-test']);
+
+    livewire(ReviewDefaults::class)
+        ->assertFormFieldEnabled('claude_effort')
+        ->fillForm(['strategy' => 'apply'])
+        ->assertFormFieldDisabled('claude_effort')
+        ->assertFormFieldDisabled('claude_model')
+        ->assertFormFieldDisabled('codex_effort')
+        // OpenCodeReview takes the model as it is named, which no classification picks.
+        ->assertFormFieldEnabled('ocr_model')
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $defaults = ReviewSettings::defaults($this->tenant)->refresh();
+
+    expect($defaults->strategy)->toBe('apply')
+        ->and($defaults->claude_model)->toBe('smartest')
+        ->and($defaults->claude_effort?->value)->toBe('high');
+});

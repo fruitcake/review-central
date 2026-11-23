@@ -88,7 +88,7 @@ class ReviewSettingsForm
                     // No tier and no alias: OpenCodeReview picks its own provider and passes the name on as it is,
                     // so a tier could be read for the wrong one and an alias names no model at all.
                     self::model($defaults, 'ocr_model', array_diff_key(self::claudeModels() + self::openAiModels(), array_flip([...ReviewSettings::TIERS, ...self::CLAUDE_ALIASES]))),
-                    self::effort($defaults, 'ocr_effort'),
+                    self::pickedPerPullRequest(self::effort($defaults, 'ocr_effort'), $defaults),
                 ]),
             // The team's, for the pull request overview: not a repository's.
             ...($defaults === null ? [Fieldset::make('Notes on whose turn')
@@ -210,8 +210,8 @@ class ReviewSettingsForm
     public static function claudeFields(?ReviewSetting $defaults = null): array
     {
         return [
-            self::model($defaults, 'claude_model', self::claudeModels()),
-            self::effort($defaults, 'claude_effort'),
+            self::pickedPerPullRequest(self::model($defaults, 'claude_model', self::claudeModels()), $defaults),
+            self::pickedPerPullRequest(self::effort($defaults, 'claude_effort'), $defaults),
             self::model($defaults, 'claude_advisor', ['none' => 'none: no advisor', ...self::claudeModels()])
                 ->label('Advisor')
                 ->helperText('A stronger model Claude consults at the moments that decide a review; none for no advisor.'),
@@ -233,8 +233,8 @@ class ReviewSettingsForm
     public static function codexFields(?ReviewSetting $defaults = null): array
     {
         return [
-            self::model($defaults, 'codex_model', self::openAiModels()),
-            self::effort($defaults, 'codex_effort'),
+            self::pickedPerPullRequest(self::model($defaults, 'codex_model', self::openAiModels()), $defaults),
+            self::pickedPerPullRequest(self::effort($defaults, 'codex_effort'), $defaults),
         ];
     }
 
@@ -522,6 +522,24 @@ class ReviewSettingsForm
             ->values();
 
         return $matching->mapWithKeys(fn (string $model): array => [$model => $model])->all();
+    }
+
+    /**
+     * A field the classification fills in for each pull request when it runs at
+     * what it picks, here or as the team: shown, but not to be set, and what was
+     * set before is kept for when it is turned off.
+     */
+    protected static function pickedPerPullRequest(Select $field, ?ReviewSetting $defaults): Select
+    {
+        // Its own choice, or the team's where it has none.
+        $picks = fn (Get $get): bool => (ReviewStrategy::tryFrom((string) $get('strategy')) ?? ReviewStrategy::tryFrom((string) $defaults?->strategy)) === ReviewStrategy::Apply;
+
+        return $field
+            ->disabled($picks)
+            ->dehydrated()
+            ->hint(fn (Get $get): ?string => $picks($get) ? 'Picked per pull request' : null)
+            ->hintIcon(fn (Get $get): ?string => $picks($get) ? 'heroicon-o-sparkles' : null)
+            ->hintIconTooltip('The classification under By pull request runs each review at the effort and model it picks, in place of this.');
     }
 
     protected static function effort(?ReviewSetting $defaults, string $field): Select
