@@ -22,7 +22,8 @@ Route::get('/connections/oauth/callback', [ConnectionOAuthController::class, 'ca
 Route::get('/connections/{connection}/oauth', [ConnectionOAuthController::class, 'redirect'])->whereNumber('connection')->middleware('throttle:20,1')->name('connections.oauth.redirect');
 
 // A user's own Bitbucket account, connected on their profile to write as them.
-Route::middleware(['auth', 'throttle:20,1'])->group(function (): void {
+// A session from before a password change no longer counts, as in the panels.
+Route::middleware(['auth', 'auth.session', 'throttle:20,1'])->group(function (): void {
     Route::get('/connections/bitbucket', [PersonalConnectionController::class, 'redirect'])->name('connections.bitbucket.redirect');
     Route::get('/connections/bitbucket/callback', [PersonalConnectionController::class, 'callback'])->name('connections.bitbucket.callback');
 });

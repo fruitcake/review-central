@@ -11,6 +11,7 @@ use App\SourceControl\BitbucketClient;
 use App\SourceControl\ReadOnlyClient;
 use App\SourceControl\SourceControl;
 use App\Support\SecretFilter;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Laravel\Socialite\Contracts\User as ProviderUser;
 use Throwable;
@@ -187,12 +188,26 @@ class PersonalConnections
             return null;
         }
 
-        $connection->forceFill([
-            'access_token' => $result['access_token'],
-            'refresh_token' => is_string($result['refresh_token'] ?? null) ? $result['refresh_token'] : $connection->refresh_token,
-            'expires_at' => now()->addSeconds((int) ($result['expires_in'] ?? 7200)),
-        ])->save();
+        // Kept only while the row is still the account that was renewed: one the
+        // user connected meanwhile stays, and is what is used.
+        return DB::transaction(function () use ($connection, $result): ?string {
+            $current = PersonalConnection::query()->whereKey($connection->getKey())->lockForUpdate()->first();
 
-        return $connection->access_token;
+            if ($current === null) {
+                return null;
+            }
+
+            if ($current->refresh_token !== $connection->refresh_token || $current->account_id !== $connection->account_id) {
+                return $current->isExpired() ? null : $current->access_token;
+            }
+
+            $current->forceFill([
+                'access_token' => $result['access_token'],
+                'refresh_token' => is_string($result['refresh_token'] ?? null) ? $result['refresh_token'] : $current->refresh_token,
+                'expires_at' => now()->addSeconds((int) ($result['expires_in'] ?? 7200)),
+            ])->save();
+
+            return $current->access_token;
+        });
     }
 }

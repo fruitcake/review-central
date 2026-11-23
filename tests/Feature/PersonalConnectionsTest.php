@@ -4,6 +4,7 @@ use App\Filament\Auth\EditProfile;
 use App\Models\PersonalConnection;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\PersonalConnections;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Http\RedirectResponse;
@@ -116,4 +117,29 @@ it('shows the account on the profile, says when it cannot write, and lets the us
     config(['services.bitbucket.client_id' => null]);
 
     livewire(EditProfile::class)->assertDontSee('Your Bitbucket account');
+});
+
+it('connects nothing for a session from before the password changed', function () {
+    $this->actingAs($this->user)->withSession(['password_hash_web' => $this->user->getAuthPassword()]);
+    $this->user->forceFill(['password' => 'changed-since'])->save();
+
+    $this->get('/connections/bitbucket')->assertRedirect(route('filament.app.auth.login'));
+    $this->assertGuest();
+});
+
+it('keeps the account the user connected while an older one was being renewed', function () {
+    $connection = PersonalConnection::query()->create([
+        'user_id' => $this->user->id, 'host' => 'bitbucket', 'account_id' => 'id-a', 'access_token' => 'a-token', 'refresh_token' => 'a-refresh',
+        'expires_at' => now()->subMinute(), 'scopes' => ['account', 'pullrequest'],
+    ]);
+
+    // Bitbucket answers for account A after the user connected account B.
+    Http::fake(['bitbucket.org/site/oauth2/access_token' => function () use ($connection) {
+        PersonalConnection::query()->whereKey($connection->id)->first()->update(['account_id' => 'id-b', 'access_token' => 'b-token', 'refresh_token' => 'b-refresh', 'expires_at' => now()->addHour()]);
+
+        return Http::response(['access_token' => 'a-token-2', 'refresh_token' => 'a-refresh-2', 'expires_in' => 7200]);
+    }]);
+
+    expect(app(PersonalConnections::class)->problem($this->user))->toBeNull()
+        ->and($connection->refresh()->only(['account_id', 'access_token', 'refresh_token']))->toBe(['account_id' => 'id-b', 'access_token' => 'b-token', 'refresh_token' => 'b-refresh']);
 });
