@@ -11,6 +11,7 @@ use App\Exceptions\RepositoryNotFound;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Models\User;
+use App\SourceControl\SourceControl;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -21,7 +22,7 @@ use Throwable;
  */
 class FindingSettlement
 {
-    public function __construct(protected PullRequestFeedback $feedback, protected FindingFeedback $verdicts) {}
+    public function __construct(protected PullRequestFeedback $feedback, protected FindingFeedback $verdicts, protected PersonalConnections $personal) {}
 
     /**
      * Every verdict is checked before any is stored, and all are stored or none.
@@ -55,10 +56,12 @@ class FindingSettlement
         });
 
         $replies = array_filter($settled, fn (array $item): bool => filled($item['reply']));
-        $posted = $replies === [] ? [] : $this->reply($user, $repository, $pullRequest['id'], $run, $replies);
+        ['errors' => $posted, 'as_user' => $asUser] = $replies === [] ? ['errors' => [], 'as_user' => false] : $this->reply($user, $repository, $pullRequest['id'], $run, $replies);
 
         return [
             'review' => $run->uuid,
+            // Whose account the replies are on, so the assistant can say it.
+            ...($replies === [] ? [] : ['replied_as' => $asUser ? 'you' : 'the team\'s connection, with your name above each reply']),
             'findings' => array_map(fn (array $item): array => array_filter([
                 'finding_id' => $item['finding_id'],
                 'verdict' => $item['verdict']->value ?? 'none',
@@ -99,16 +102,19 @@ class FindingSettlement
 
     /**
      * Posts each reply under its finding's comment, or on the pull request naming
-     * the finding when it has none there.
+     * the finding when it has none there: as the user where their own account is
+     * connected, else by the tenant's connection, with their name above it. A
+     * reply their account may not post, as on a repository it cannot reach, goes
+     * the second way.
      *
      * @param  array<int, array{finding_id: string, reply: string|null}>  $items
-     * @return array<string, string> what went wrong, by finding id
+     * @return array{errors: array<string, string>, as_user: bool} what went wrong, by finding id, and whether every reply is the user's own
      */
     protected function reply(User $user, Repository $repository, int $pullRequestId, ReviewRun $run, array $items): array
     {
         // A trial posts nothing on the pull request: its F1 is not the F1 there.
         if ($run->custom) {
-            return array_fill_keys(array_column($items, 'finding_id'), 'This review is a trial, which is not on the pull request: the reply was not posted.');
+            return ['errors' => array_fill_keys(array_column($items, 'finding_id'), 'This review is a trial, which is not on the pull request: the reply was not posted.'), 'as_user' => false];
         }
 
         $errors = [];
@@ -117,26 +123,39 @@ class FindingSettlement
             $host = $repository->sourceControl();
             $threads = $this->feedback->threads(ReviewContext::compactComments($host->getPullRequestComments((string) $pullRequestId), null));
         } catch (Throwable $exception) {
-            return array_fill_keys(array_column($items, 'finding_id'), 'The pull request\'s comments could not be read: '.$exception->getMessage());
+            return ['errors' => array_fill_keys(array_column($items, 'finding_id'), 'The pull request\'s comments could not be read: '.$exception->getMessage()), 'as_user' => false];
         }
 
+        $own = $this->personal->writerFor($user, $repository);
+        $asUser = $own !== null;
         $titles = collect($run->findings ?? [])->pluck('title', 'id');
 
         foreach ($items as $item) {
             $id = $item['finding_id'];
-            $body = self::body($user, (string) $item['reply']);
             $parent = $threads[$id]['comment_id'] ?? null;
+            $post = fn (SourceControl $writer, string $body): array => is_numeric($parent)
+                ? $writer->addPullRequestComment((string) $pullRequestId, $body, parentId: (int) $parent)
+                : $writer->addPullRequestComment((string) $pullRequestId, "**{$id}** · {$titles->get($id)}\n\n{$body}");
 
             try {
-                is_numeric($parent)
-                    ? $host->addPullRequestComment((string) $pullRequestId, $body, parentId: (int) $parent)
-                    : $host->addPullRequestComment((string) $pullRequestId, "**{$id}** · {$titles->get($id)}\n\n{$body}");
+                if ($own !== null) {
+                    try {
+                        $post($own, self::ownBody((string) $item['reply']));
+
+                        continue;
+                    } catch (Throwable $exception) {
+                        report($exception);
+                        $asUser = false;
+                    }
+                }
+
+                $post($host, self::body($user, (string) $item['reply']));
             } catch (Throwable $exception) {
                 $errors[$id] = 'The reply could not be posted: '.$exception->getMessage();
             }
         }
 
-        return $errors;
+        return ['errors' => $errors, 'as_user' => $asUser];
     }
 
     /**
@@ -150,6 +169,18 @@ class FindingSettlement
         $name = self::inert(trim((string) preg_replace('/\s+/', ' ', $user->name)));
 
         return "**{$name}**, via Review Central:\n\n".self::inert(trim($reply));
+    }
+
+    /**
+     * A reply posted on the user's own account: theirs without a name above it,
+     * yet no more a command or a marker than one with it. A backslash before an
+     * opening / or @ is how Markdown shows the character itself.
+     */
+    public static function ownBody(string $reply): string
+    {
+        $text = self::inert(trim($reply));
+
+        return str_starts_with($text, '/') || str_starts_with($text, '@') ? '\\'.$text : $text;
     }
 
     /**

@@ -6,16 +6,21 @@ namespace App\Filament\Auth;
 
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\PersonalConnections;
 use Filament\Actions\Action;
 use Filament\Auth\Pages\EditProfile as BaseEditProfile;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\TagsInput;
 use Filament\Infolists\Components\TextEntry;
+use Filament\Notifications\Notification;
 use Filament\Panel;
+use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Facades\FilamentView;
+use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Js;
+use LogicException;
 
 /**
  * The profile, with who the user is on the hosts: which pull requests are theirs
@@ -87,7 +92,52 @@ class EditProfile extends BaseEditProfile
                 $this->getPasswordFormComponent(),
                 $this->getPasswordConfirmationFormComponent(),
                 $this->getCurrentPasswordFormComponent(),
+                self::bitbucketSection(),
                 self::assistantsSection(),
+            ]);
+    }
+
+    /**
+     * The user's own Bitbucket account, which what they write on a pull request
+     * through Review Central is written as. Only where the installation is
+     * registered at Bitbucket.
+     */
+    private static function bitbucketSection(): Section
+    {
+        $connections = app(PersonalConnections::class);
+        $user = fn (): User => Filament::auth()->user() instanceof User ? Filament::auth()->user() : throw new LogicException('Not signed in.');
+
+        return Section::make('Your Bitbucket account')
+            ->description('Connected, your replies to findings on Bitbucket pull requests are written as you, and no longer by the team\'s connection with your name above them. Review Central uses it for nothing else, though Bitbucket lets it write on every pull request you can.')
+            ->visible(fn (): bool => PersonalConnections::available())
+            ->schema([
+                TextEntry::make('bitbucket_account')
+                    ->hiddenLabel()
+                    ->state(function () use ($connections, $user): string {
+                        $connection = $connections->of($user());
+
+                        return match (true) {
+                            $connection === null => 'Not connected.',
+                            ($problem = $connections->problem($user())) !== null => $problem,
+                            default => 'Connected as '.($connection->nickname ?? $connection->account_id).'.',
+                        };
+                    }),
+                Actions::make([
+                    Action::make('connectBitbucket')
+                        ->label(fn (): string => $connections->of($user()) === null ? 'Connect' : 'Connect again')
+                        ->icon(Heroicon::OutlinedLink)
+                        ->url(route('connections.bitbucket.redirect')),
+                    Action::make('disconnectBitbucket')
+                        ->label('Disconnect')
+                        ->color('gray')
+                        ->visible(fn (): bool => $connections->of($user()) !== null)
+                        ->requiresConfirmation()
+                        ->modalDescription('Your replies are written by the team\'s connection again, with your name above them.')
+                        ->action(function () use ($connections, $user): void {
+                            $connections->disconnect($user());
+                            Notification::make()->title('Bitbucket is disconnected')->success()->send();
+                        }),
+                ])->key('bitbucket_actions'),
             ]);
     }
 

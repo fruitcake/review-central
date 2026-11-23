@@ -71,6 +71,14 @@ With a Google OAuth client added under **Admin → Apps**, or `GOOGLE_CLIENT_ID`
 
 A user whose address is already known signs in as that user, when Google holds that address: a Gmail address, or one of a Google Workspace organisation at its own domain. Someone new joins a tenant only when the tenant lists their organisation's domain under **Sign-in domains** in the admin panel, and Google says the account is that organisation's; a personal account under the same domain does not count, and a Gmail address never joins one.
 
+## Replying on Bitbucket as yourself
+
+Replies to findings that an AI assistant posts for you are written by the tenant's connection, with your name above them. With a Bitbucket OAuth consumer added under **Admin → Apps**, or `BITBUCKET_CLIENT_ID` and `BITBUCKET_CLIENT_SECRET` in `.env`, each person can connect their own Bitbucket account under **Your Bitbucket account** on their profile, and their replies are then written as them.
+
+Make the consumer in any Bitbucket workspace you administer, under **Settings → OAuth consumers**, with `<APP_URL>/connections/bitbucket/callback` as its callback URL and the permissions **Account: Read** and **Pull requests: Write**. People of other workspaces connect through it too. The account is kept for that person only and used for nothing but their replies, though Bitbucket lets its token write on every pull request they can. Connecting it also fills in their account under **Your accounts on the hosts**. When Bitbucket refuses a reply as them, as on a repository their account cannot reach, the connection posts it as before.
+
+The tenant's connection itself stays a token of its own: the review comments, approves and adds webhooks as it, whoever connects their account.
+
 ## Signing in to Asana and Jira
 
 A ticket connection can sign in at Asana or Jira instead of taking a pasted token, when the installation is registered as an OAuth app there, with `<APP_URL>/connections/oauth/callback` as its redirect address. Add the app under **Admin → Apps**, or set it in `.env`. Each person who connects says yes with their own account, and the tokens are kept per connection, with the app they came through:

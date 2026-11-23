@@ -24,6 +24,7 @@ use App\Models\Connection;
 use App\Models\FindingVerdict;
 use App\Models\OpenFinding;
 use App\Models\OpenPullRequest;
+use App\Models\PersonalConnection;
 use App\Models\PlatformSetting;
 use App\Models\Repository;
 use App\Models\ReviewQuestion;
@@ -472,6 +473,61 @@ it('posts no part of a reply, the user\'s name included, that reads as metadata,
         ->assertSee('This review is a trial');
 
     Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST');
+});
+
+it('replies as the user on their own Bitbucket account where they connected it, and by the connection where that account cannot', function () {
+    config(['services.bitbucket.client_id' => 'consumer-key', 'services.bitbucket.client_secret' => 'consumer-secret']);
+    $personal = PersonalConnection::query()->create([
+        'user_id' => $this->member->id, 'host' => 'bitbucket', 'account_id' => 'id-sam', 'nickname' => 'sam',
+        'access_token' => 'sam-token', 'refresh_token' => 'sam-refresh', 'expires_at' => now()->addHour(), 'scopes' => ['account', 'pullrequest:write'],
+    ]);
+    $this->refused = false;
+
+    // In place of the catch-all fake every test here starts with.
+    Http::swap(new HttpFactory);
+    Http::fake([
+        'bitbucket.org/site/oauth2/access_token' => fn () => $this->refused
+            ? Http::response(['error' => 'invalid_grant'], 400)
+            : Http::response(['access_token' => 'sam-token-2', 'refresh_token' => 'sam-refresh-2', 'expires_in' => 7200]),
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570/comments*' => fn (Request $request) => match (true) {
+            $request->method() === 'GET' => Http::response(['values' => [['id' => 11, 'content' => ['raw' => "**HIGH** Unescaped CSV cell\n\n[//]: # (ai-finding id=F2 status=new severity=HIGH)"], 'user' => ['display_name' => 'Review'], 'created_on' => now()->toIso8601String()]]]),
+            // Sam's account may not write on this repository.
+            $request->hasHeader('Authorization', 'Bearer sam-token-2') && $this->refused => Http::response(['error' => ['message' => 'Forbidden']], 403),
+            default => Http::response(['id' => 99]),
+        },
+    ]);
+    $settle = fn (string $reply) => AgentServer::actingAs($this->member)
+        ->tool(SettleFindingsTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570, 'review_id' => $this->run->uuid, 'findings' => [['finding_id' => 'F2', 'verdict' => 'wrong', 'reply' => $reply]]]);
+    $lastPost = fn (): Request => Http::recorded(fn (Request $request): bool => $request->method() === 'POST' && str_contains($request->url(), '/comments'))->last()[0];
+
+    // Under Sam's own name: no name above it, and still no command.
+    $settle('/review Not so, see CsvWriter::cell().')->assertOk()->assertStructuredContentPath('replied_as', 'you');
+
+    expect($lastPost()->header('Authorization'))->toBe(['Bearer sam-token'])
+        ->and($lastPost()['content']['raw'])->toBe('\\/review Not so, see CsvWriter::cell().')
+        ->and(ReviewRequest::isRequest($lastPost()['content']['raw']))->toBeFalse();
+
+    // Its access ran out: renewed first, and kept.
+    $personal->update(['expires_at' => now()->subMinute()]);
+    $settle('Still not so.')->assertOk()->assertStructuredContentPath('replied_as', 'you');
+
+    expect($lastPost()->header('Authorization'))->toBe(['Bearer sam-token-2'])
+        ->and($personal->refresh()->only(['access_token', 'refresh_token']))->toBe(['access_token' => 'sam-token-2', 'refresh_token' => 'sam-refresh-2']);
+
+    // Bitbucket refuses it here: the connection posts it, with Sam's name above.
+    $this->refused = true;
+    $settle('Not so.')->assertOk()->assertStructuredContentPaths(['replied_as' => 'the team\'s connection, with your name above each reply', 'findings.0.replied' => true]);
+
+    expect($lastPost()->header('Authorization'))->not->toBe(['Bearer sam-token-2'])
+        ->and($lastPost()['content']['raw'])->toBe("**Sam Sample**, via Review Central:\n\nNot so.");
+
+    // Bitbucket renews it no more, or it may not write: the connection again.
+    $personal->update(['expires_at' => now()->subMinute()]);
+    $settle('Not so.')->assertOk()->assertStructuredContentPath('replied_as', 'the team\'s connection, with your name above each reply');
+    $personal->update(['expires_at' => now()->addHour(), 'access_token' => 'sam-token', 'scopes' => ['account']]);
+    $settle('Not so.')->assertOk()->assertStructuredContentPath('replied_as', 'the team\'s connection, with your name above each reply');
+
+    expect($lastPost()['content']['raw'])->toStartWith('**Sam Sample**, via Review Central:');
 });
 
 it('takes a finding\'s thread from its own comment, never from a review summary that lists it', function () {
