@@ -25,7 +25,7 @@
 <body>
 <main>
     <h1>Connect {{ $client->name }}</h1>
-    <p>{{ $client->name }} asks to use {{ config('app.name') }} as you, {{ $user->email }}: to read the reviews, findings and rules of your teams' repositories, and to do what you may do there, such as asking the reviewer, judging a finding or starting a review.</p>
+    <p>{{ $client->name }} asks to use {{ config('app.name') }} as you, {{ $user->email }}: to read the reviews, findings and rules of your teams' repositories and the tickets their pull requests are for, as your team's tracker connections can read them, and to do what you may do there, such as asking the reviewer, judging a finding or starting a review.</p>
 
     @if (count($scopes) > 0)
         <ul>
