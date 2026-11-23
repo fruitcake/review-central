@@ -19,6 +19,7 @@ use App\Mcp\Tools\ReviewerAnswerTool;
 use App\Mcp\Tools\ReviewInstructionsTool;
 use App\Mcp\Tools\ReviewRulesTool;
 use App\Mcp\Tools\SettleFindingsTool;
+use App\Mcp\Tools\TicketTool;
 use App\Models\Connection;
 use App\Models\FindingVerdict;
 use App\Models\OpenFinding;
@@ -28,8 +29,10 @@ use App\Models\Repository;
 use App\Models\ReviewQuestion;
 use App\Models\ReviewRule;
 use App\Models\ReviewRun;
+use App\Models\TicketSource;
 use App\Models\User;
 use App\Services\PlatformSettings;
+use App\Services\ReviewSettings;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -71,6 +74,22 @@ beforeEach(function () {
             ['id' => 14, 'parent' => ['id' => 12], 'content' => ['raw' => "It is not: cell() only quotes.\n\n[//]: # (ai-review-reply)"], 'user' => ['display_name' => 'Review'], 'created_on' => now()->addMinutes(2)->toIso8601String()],
             ['id' => 13, 'content' => ['raw' => 'Looks good otherwise.'], 'user' => ['display_name' => 'Alex'], 'created_on' => now()->addMinute()->toIso8601String()],
         ]]),
+        // The pull requests as the host has them, for a test that sets them.
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests*' => function (Request $request) {
+            if (! isset($this->onHost)) {
+                return null;
+            }
+
+            if (preg_match('#/pullrequests/(\d+)$#', (string) parse_url($request->url(), PHP_URL_PATH), $id) === 1) {
+                return isset($this->onHost[$id[1]]) ? Http::response($this->onHost[$id[1]]) : Http::response([], 404);
+            }
+
+            return Http::response(['values' => array_values(array_filter($this->onHost, fn (array $pullRequest): bool => $pullRequest['state'] === 'OPEN' && str_contains((string) $request['q'], "\"{$pullRequest['source']['branch']['name']}\""))),
+            ]);
+        },
+        'acme.atlassian.net/rest/api/2/issue/PROJ-7/comment*' => Http::response(['comments' => [], 'total' => 0]),
+        'acme.atlassian.net/rest/api/2/issue/PROJ-7*' => Http::response(['key' => 'PROJ-7', 'fields' => ['summary' => 'Export the orders to CSV', 'description' => 'Every order, one row each.']]),
+        'acme.atlassian.net/*' => Http::response([], 404),
         '*' => Http::response([]),
     ]);
 });
@@ -167,6 +186,78 @@ it('reads a pull request by its branch: findings that hold the merge first, with
         // People's comments, replies to findings among them, and none of the review's own.
         ->assertStructuredContentCount(2, 'comments')
         ->assertStructuredContentPath('comments.1.text', 'Looks good otherwise.');
+});
+
+it('reads a ticket from the tenant\'s ticket sources by its reference or by the pull request whose title names it', function () {
+    TicketSource::factory()->create([
+        'connection_id' => Connection::factory()->jira()->create(['tenant_id' => $this->tenant->id]),
+        'prefixes' => ['PROJ'],
+    ]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'reference' => 'proj-7'])
+        ->assertOk()
+        ->assertStructuredContentPaths([
+            'reference' => 'PROJ-7',
+            'source' => 'Jira',
+            'url' => 'https://acme.atlassian.net/browse/PROJ-7',
+            'graded' => true,
+        ]);
+
+    // A team that has its reviews read the ticket for intent only.
+    ReviewSettings::saveDefaults($this->tenant, ['ticket_grading' => 'false']);
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'reference' => 'PROJ-7'])
+        ->assertStructuredContentPath('graded', false);
+
+    // The title as the host has it now, not as it was last synced.
+    $this->onHost = [
+        570 => ['id' => 570, 'title' => 'PROJ-7 Export to CSV', 'state' => 'OPEN', 'source' => ['branch' => ['name' => 'feature/export']]],
+        560 => ['id' => 560, 'title' => 'PROJ-7 Old export', 'state' => 'MERGED', 'source' => ['branch' => ['name' => 'feature/old']]],
+    ];
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'branch' => 'feature/export'])
+        ->assertOk()
+        ->assertStructuredContentPaths(['reference' => 'PROJ-7', 'pull_request_id' => 570, 'title' => 'PROJ-7 Export to CSV'])
+        ->assertSee('Export the orders to CSV');
+
+    // A branch is its open pull request, never one merged before that a review once saw.
+    ReviewRun::query()->create([
+        'tenant_id' => $this->tenant->id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'feature/old', 'commit' => str_repeat('b', 40), 'pull_request_id' => 560, 'status' => ReviewRun::STATUS_FINISHED, 'started_at' => now(),
+    ]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'branch' => 'feature/old'])
+        ->assertHasErrors(['acme/shop has no open pull request from feature/old.']);
+
+    $this->onHost[570]['title'] = 'Export to CSV';
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570])
+        ->assertHasErrors(['names no ticket']);
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'reference' => 'PROJ-8'])
+        ->assertHasErrors(['PROJ-8: No ticket in Jira matches this reference.']);
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'reference' => 'SHOP-1'])
+        ->assertHasErrors(['No ticket source of acme/shop reads "SHOP-1"']);
+});
+
+it('gives the ticket the review graded the pull request against', function () {
+    $this->run->update(['context' => ['ticket' => ['reference' => 'PROJ-7', 'source' => 'Jira', 'url' => 'https://acme.atlassian.net/browse/PROJ-7', 'markdown' => '# Export the orders', 'error' => null]]]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(PullRequestFeedbackTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570])
+        ->assertStructuredContentPaths([
+            'ticket.reference' => 'PROJ-7',
+            'ticket.markdown' => '# Export the orders',
+        ])
+        ->assertStructuredContentMissingPath('ticket.error');
 });
 
 it('keeps the findings of the last review that reported when a newer attempt failed, and says it did', function () {

@@ -61,12 +61,28 @@ class TicketResolver
     {
         $match = $this->match($this->sources($repository), $title);
 
-        if ($match === null) {
-            return null;
-        }
+        return $match === null ? null : $this->read($repository, ...$match);
+    }
 
-        [$source, $reference] = $match;
+    /**
+     * The ticket a reference names, as a title would carry it: `PROJ-123`, `#1234`
+     * or `1234`. Null when no source of this repository reads it.
+     *
+     * @return array{reference: string, source: string, url: string|null, markdown: string|null, error: string|null}|null
+     */
+    public function forReference(Repository $repository, string $reference): ?array
+    {
+        $reference = trim($reference);
+        $match = $this->match($this->sources($repository), ctype_digit($reference) ? "#{$reference}" : $reference);
 
+        return $match === null ? null : $this->read($repository, ...$match);
+    }
+
+    /**
+     * @return array{reference: string, source: string, url: string|null, markdown: string|null, error: string|null}
+     */
+    protected function read(Repository $repository, TicketSource $source, string $reference): array
+    {
         $ticket = ['reference' => $reference, 'source' => $source->name, 'url' => null, 'markdown' => null, 'error' => null];
 
         try {
