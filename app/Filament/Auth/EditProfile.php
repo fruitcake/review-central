@@ -6,6 +6,8 @@ namespace App\Filament\Auth;
 
 use Filament\Auth\Pages\EditProfile as BaseEditProfile;
 use Filament\Forms\Components\TagsInput;
+use Filament\Infolists\Components\TextEntry;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 
 /**
@@ -28,6 +30,33 @@ class EditProfile extends BaseEditProfile
                 $this->getPasswordFormComponent(),
                 $this->getPasswordConfirmationFormComponent(),
                 $this->getCurrentPasswordFormComponent(),
+                self::assistantsSection(),
+            ]);
+    }
+
+    /**
+     * Where to point an AI assistant at the MCP server: the assistant signs the
+     * user in itself, so the addresses are all there is to set.
+     */
+    private static function assistantsSection(): Section
+    {
+        return Section::make('In Claude and other AI assistants')
+            ->description('An assistant reads the reviews and acts on them as you, and no more than your account may. Add the address, and it signs you in here.')
+            ->collapsible()
+            ->collapsed()
+            ->schema([
+                TextEntry::make('mcp_user')
+                    ->label('For a chat')
+                    ->state(url('mcp/user'))
+                    ->copyable()
+                    ->fontFamily('mono')
+                    ->helperText('In Claude: Settings → Connectors → Add custom connector. Your tenants, the open pull requests and whose turn each is, the reviews and their findings.'),
+                TextEntry::make('mcp_agent')
+                    ->label('For a coding agent, such as Claude Code')
+                    ->state('claude mcp add --transport http review-central '.url('mcp/agent'))
+                    ->copyable()
+                    ->fontFamily('mono')
+                    ->helperText('Run it in the checkout. The agent reads the ticket and the review\'s instructions, can review a change before it is pushed, and settle a review\'s findings.'),
             ]);
     }
 }
