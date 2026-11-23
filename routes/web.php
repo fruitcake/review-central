@@ -6,6 +6,7 @@ use App\Http\Controllers\HomeController;
 use App\Http\Controllers\PersonalConnectionController;
 use App\Http\Controllers\RateReviewController;
 use App\Http\Controllers\SingleSignOnController;
+use App\Http\Controllers\TicketAttachmentController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', HomeController::class)->name('home');
@@ -31,6 +32,9 @@ Route::get('/connections/bitbucket/callback', [PersonalConnectionController::cla
 // The code mailed to the address of a Bitbucket account that is not linked yet.
 Route::get('/sign-in/bitbucket/code', [SingleSignOnController::class, 'code'])->name('sign-in.code');
 Route::post('/sign-in/bitbucket/code', [SingleSignOnController::class, 'checkCode'])->middleware('throttle:10,1')->name('sign-in.code.check');
+
+// A ticket's file, by an address ticket-attachment signed for one user and a short while.
+Route::get('/tickets/attachment', TicketAttachmentController::class)->middleware(['signed', 'throttle:30,1'])->name('tickets.attachment');
 
 Route::get('/rate/{token}', [RateReviewController::class, 'show'])->name('reviews.rate');
 Route::post('/rate/{token}', [RateReviewController::class, 'store'])->middleware('throttle:20,1')->name('reviews.rate.store');

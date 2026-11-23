@@ -14,6 +14,7 @@ use App\Mcp\Tools\RequestReviewTool;
 use App\Mcp\Tools\ReviewerAnswerTool;
 use App\Mcp\Tools\ReviewRulesTool;
 use App\Mcp\Tools\SettleFindingsTool;
+use App\Mcp\Tools\TicketAttachmentTool;
 use App\Mcp\Tools\TicketTool;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
@@ -42,6 +43,7 @@ class UserServer extends Server
         PullRequestsTool::class,
         PullRequestFeedbackTool::class,
         TicketTool::class,
+        TicketAttachmentTool::class,
         OpenFindingsTool::class,
         ReviewRulesTool::class,
         AskReviewerTool::class,

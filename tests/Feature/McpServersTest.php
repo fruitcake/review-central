@@ -3,6 +3,7 @@
 use App\Enums\FindingVerdictKind;
 use App\Enums\FindingVerdictReason;
 use App\Enums\ReviewRuleKind;
+use App\Enums\TicketStyle;
 use App\Filament\TenantRole;
 use App\Jobs\AnswerReviewQuestion;
 use App\Jobs\RunContainerReview;
@@ -19,6 +20,7 @@ use App\Mcp\Tools\ReviewerAnswerTool;
 use App\Mcp\Tools\ReviewInstructionsTool;
 use App\Mcp\Tools\ReviewRulesTool;
 use App\Mcp\Tools\SettleFindingsTool;
+use App\Mcp\Tools\TicketAttachmentTool;
 use App\Mcp\Tools\TicketTool;
 use App\Models\Connection;
 use App\Models\FindingVerdict;
@@ -39,12 +41,14 @@ use App\Services\ReviewContext;
 use App\Services\ReviewQuestions;
 use App\Services\ReviewRequest;
 use App\Services\ReviewSettings;
+use App\Services\TicketLookup;
 use App\SourceControl\GitHubClient;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Laravel\Passport\Passport;
 
@@ -197,6 +201,122 @@ it('reads a pull request by its branch: findings that hold the merge first, with
         // People's comments, replies to findings among them, and none of the review's own.
         ->assertStructuredContentCount(2, 'comments')
         ->assertStructuredContentPath('comments.1.text', 'Looks good otherwise.');
+});
+
+it('lists a ticket\'s files, and gives an agent an image to look at and a log to read, through the ticket\'s own source', function () {
+    TicketSource::factory()->create([
+        'connection_id' => Connection::factory()->jira()->create(['tenant_id' => $this->tenant->id]),
+        'prefixes' => ['PROJ'],
+    ]);
+    $small = imagecreatetruecolor(20, 10);
+    ob_start();
+    imagepng($small);
+    $png = (string) ob_get_clean();
+
+    Http::swap(new HttpFactory);
+    Http::fake([
+        'acme.atlassian.net/rest/api/2/issue/PROJ-9/comment*' => Http::response(['comments' => [], 'total' => 0]),
+        'acme.atlassian.net/rest/api/2/issue/PROJ-9*' => Http::response(['key' => 'PROJ-9', 'fields' => ['summary' => 'The export button is cut off', 'attachment' => [
+            ['id' => '10001', 'filename' => 'button.png', 'mimeType' => 'image/png', 'size' => strlen($png)],
+            ['id' => '10002', 'filename' => 'console.log', 'mimeType' => 'text/plain', 'size' => 18],
+            ['id' => '10003', 'filename' => 'export.zip', 'mimeType' => 'application/zip', 'size' => 4],
+            ['id' => '10005', 'filename' => 'orders.csv', 'mimeType' => 'text/csv', 'size' => 60 * 1024],
+            ['id' => '10006', 'filename' => '100% complete.pdf', 'mimeType' => 'application/pdf', 'size' => 8],
+            ['id' => '10004', 'filename' => 'recording.mov', 'mimeType' => 'video/quicktime', 'size' => 50 * 1024 * 1024],
+        ]]]),
+        'acme.atlassian.net/rest/api/2/attachment/content/10001' => Http::response($png, 200, ['Content-Type' => 'image/png']),
+        'acme.atlassian.net/rest/api/2/attachment/content/10002' => Http::response("TypeError: width\n", 200, ['Content-Type' => 'text/plain']),
+        'acme.atlassian.net/rest/api/2/attachment/content/10003' => Http::response('PK..', 200, ['Content-Type' => 'application/zip']),
+        'acme.atlassian.net/rest/api/2/attachment/content/10006' => Http::response('%PDF-1.7', 200, ['Content-Type' => 'application/pdf']),
+        'acme.atlassian.net/rest/api/2/attachment/content/10005' => Http::response("id;total\n".str_repeat("1;9.95\n", 9000), 200, ['Content-Type' => 'text/csv']),
+    ]);
+    $attachment = fn (int $number, ?User $user = null) => AgentServer::actingAs($user ?? $this->member)
+        ->tool(TicketAttachmentTool::class, ['repository' => 'acme/shop', 'reference' => 'PROJ-9', 'number' => $number]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'reference' => 'PROJ-9'])
+        ->assertOk()
+        ->assertStructuredContentPaths([
+            'attachments.0' => ['number' => 1, 'name' => 'button.png', 'type' => 'image/png', 'size' => strlen($png), 'readable' => true],
+            'attachments.3.name' => 'orders.csv',
+        ])
+        ->assertSee('1. button.png (image/png, ');
+
+    $attachment(1)->assertOk()->assertSee(['button.png', base64_encode($png)]);
+    $attachment(2)->assertOk()->assertSee("# console.log\n\nTypeError: width");
+    $attachment(6)->assertHasErrors(['recording.mov is larger than 10 MB, which is not read.']);
+    $attachment(7)->assertHasErrors(['PROJ-9 has no attachment 7: it has 6.']);
+
+    // Anything else is for the checkout, not the conversation: an address to save it from.
+    $attachment(4)->assertOk()->assertSee(['text/csv', 'Download it within 15 minutes', "Its first lines:\n\n```\nid;total\n1;9.95"]);
+    $attachment(3)->assertOk()->assertSee(["curl -fsSL -o 'export.zip' '".url('tickets/attachment').'?']);
+
+    $download = fn (User $user, int $number = 3): string => URL::temporarySignedRoute('tickets.attachment', now()->addMinutes(15), ['user' => $user->id, 'repository' => $this->repository->id, 'reference' => 'PROJ-9', 'number' => $number]);
+
+    $this->get($download($this->member))->assertOk()
+        ->assertHeader('Content-Disposition', 'attachment; filename=export.zip')
+        ->assertHeader('X-Content-Type-Options', 'nosniff')
+        ->assertContent('PK..');
+    $this->get($download($this->member).'0')->assertForbidden();
+
+    // What the address signed holds, whatever a body of the request says: not another tenant's file.
+    $other = Repository::factory()->create(['workspace' => 'other', 'slug' => 'shop']);
+    $outsider = User::factory()->create();
+    $outsider->tenants()->attach($other->tenant);
+    $this->call('GET', $download($this->member), [], [], [], ['CONTENT_TYPE' => 'application/json'], json_encode(['user' => $outsider->id, 'repository' => $other->id, 'number' => 1]))
+        ->assertOk()
+        ->assertContent('PK..');
+
+    // A name the header could not take as it is.
+    $this->get($download($this->member, 5))->assertOk()
+        ->assertHeader('Content-Disposition', 'attachment; filename="100_ complete.pdf"')
+        ->assertContent('%PDF-1.7');
+    $this->get($download($this->member, 6))->assertNotFound();
+    $expired = $download($this->member);
+    $this->travel(16)->minutes();
+    $this->get($expired)->assertForbidden();
+    $this->travelBack();
+
+    // Out of the tenant since the address was given: nothing.
+    $this->member->tenants()->detach();
+    $this->get($download($this->member))->assertNotFound();
+    $this->member->tenants()->attach($this->tenant);
+
+    // With the source's own sign-in, the same as the ticket.
+    Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'attachment/content/10001') && $request->hasHeader('Authorization') && $request->header('Accept') === ['*/*']);
+    Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'attachment/content/10004'));
+
+    // Someone outside the tenant reads none of it.
+    $attachment(1, User::factory()->create())->assertHasErrors();
+});
+
+it('reads a file of a ticket by the reference the ticket came back with, and its text as UTF-8 whatever it was written in', function () {
+    TicketSource::factory()->create([
+        'connection_id' => Connection::factory()->jira()->create(['tenant_id' => $this->tenant->id]),
+        'style' => TicketStyle::Number,
+        'reference_prefix' => 'SHOP-',
+    ]);
+
+    Http::swap(new HttpFactory);
+    Http::fake([
+        'acme.atlassian.net/rest/api/2/issue/SHOP-29386/comment*' => Http::response(['comments' => [], 'total' => 0]),
+        'acme.atlassian.net/rest/api/2/issue/SHOP-29386*' => Http::response(['key' => 'SHOP-29386', 'fields' => ['summary' => 'Export fails', 'attachment' => [
+            ['id' => '10001', 'filename' => 'export.log', 'mimeType' => 'text/plain', 'size' => 24],
+        ]]]),
+        // Written on Windows: "é" is one byte, which is no UTF-8.
+        'acme.atlassian.net/rest/api/2/attachment/content/10001' => Http::response("Caf\xE9 export failed\r\n", 200, ['Content-Type' => 'text/plain']),
+    ]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'reference' => '#29386'])
+        ->assertStructuredContentPath('reference', 'SHOP-29386');
+
+    AgentServer::actingAs($this->member)
+        ->tool(TicketAttachmentTool::class, ['repository' => 'acme/shop', 'reference' => 'SHOP-29386', 'number' => 1])
+        ->assertOk()
+        ->assertSee("# export.log\n\nCafé export failed");
+
+    expect(json_encode(app(TicketLookup::class)->attachment($this->repository, 'SHOP-29386', 1)->text(), JSON_THROW_ON_ERROR))->toContain('Caf\\u00e9');
 });
 
 it('reads a ticket from the tenant\'s ticket sources by its reference or by the pull request whose title names it', function () {

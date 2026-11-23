@@ -1,9 +1,12 @@
 <?php
 
 use App\Enums\TicketStyle;
+use App\Exceptions\ActionRefused;
+use App\Mcp\Tools\TicketAttachmentTool;
 use App\Models\Connection;
 use App\Models\Repository;
 use App\Models\TicketSource;
+use App\Services\TicketLookup;
 use App\Tickets\TicketResolver;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -87,4 +90,50 @@ it('reads no task by its id from a workspace other than the connection\'s', func
 
     // Its subtasks were read for the first only.
     expect(Http::recorded(fn (Request $request): bool => str_ends_with((string) parse_url($request->url(), PHP_URL_PATH), '/subtasks')))->toHaveCount(1);
+});
+
+it('lists a task\'s files and reads one by its number, scaled down when it is a large image', function () {
+    $large = imagecreatetruecolor(3000, 1000);
+    ob_start();
+    imagepng($large);
+    $png = (string) ob_get_clean();
+
+    Http::fake(function (Request $request) use ($png) {
+        $path = (string) parse_url($request->url(), PHP_URL_PATH);
+
+        return match (true) {
+            $request->url() === 'https://asana-files.example/screenshot.png' => Http::response($png, 200, ['Content-Type' => 'image/png']),
+            $request->url() === 'https://asana-files.example/export.log' => Http::response("ERROR export failed\n", 200, ['Content-Type' => 'text/plain']),
+            str_ends_with($path, '/attachments') => Http::response(['data' => [
+                ['gid' => '1', 'name' => 'screenshot.png', 'host' => 'asana', 'size' => 2048, 'download_url' => 'https://asana-files.example/screenshot.png'],
+                ['gid' => '2', 'name' => 'export.log', 'host' => 'asana', 'size' => 20, 'download_url' => 'https://asana-files.example/export.log'],
+                ['gid' => '3', 'name' => 'Design', 'host' => 'gdrive', 'view_url' => 'https://drive.google.com/file/d/abc'],
+            ]]),
+            str_ends_with($path, '/subtasks') => Http::response(['data' => [['gid' => '1220000000000002', 'name' => 'Add the button', 'completed' => false]]]),
+            str_ends_with($path, '/stories') => Http::response(['data' => []]),
+            str_ends_with($path, "/tasks/{$this->task['gid']}") => Http::response(['data' => $this->task + ['parent' => ['gid' => '1220000000000000', 'name' => 'Orders']]]),
+            default => Http::response([], 404),
+        };
+    });
+
+    $ticket = app(TicketResolver::class)->forReference($this->repository, $this->task['gid']);
+
+    expect($ticket['markdown'])
+        ->toContain("## Attachments\n\n1. screenshot.png (2 KB)\n2. export.log (20 bytes)\n3. Design (not readable here: https://drive.google.com/file/d/abc)")
+        ->toContain('- [ ] Add the button (1220000000000002)')
+        ->toContain('- **Parent:** Orders (1220000000000000)')
+        ->and(array_column($ticket['attachments'], 'readable'))->toBe([true, true, false]);
+
+    $image = app(TicketLookup::class)->attachment($this->repository, $this->task['gid'], 1);
+    $scaled = $image->fitWithin(TicketAttachmentTool::MAX_IMAGE_SIDE);
+
+    expect($image->isImage())->toBeTrue()
+        ->and(getimagesizefromstring($scaled->contents)[0])->toBe(TicketAttachmentTool::MAX_IMAGE_SIDE)
+        ->and(app(TicketLookup::class)->attachment($this->repository, $this->task['gid'], 2)->contents)->toBe("ERROR export failed\n");
+
+    expect(fn () => app(TicketLookup::class)->attachment($this->repository, $this->task['gid'], 3))->toThrow(ActionRefused::class, 'Design is not kept in the tracker itself')
+        ->and(fn () => app(TicketLookup::class)->attachment($this->repository, $this->task['gid'], 4))->toThrow(ActionRefused::class, 'has no attachment 4: it has 3.');
+
+    // The file addresses are signed already: no token goes to them.
+    Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'asana-files.example') && $request->hasHeader('Authorization'));
 });

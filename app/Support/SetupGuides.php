@@ -170,6 +170,7 @@ class SetupGuides
                 'workspaces:read' => 'checks the workspace, which is what **Test** asks.',
                 'workspaces.typeahead:read' => 'finds a task by the number its name starts with.',
                 'users:read' => 'reads who a task is assigned to and who wrote a comment.',
+                'attachments:read' => 'lists the files on a task, and reads a screenshot or log for an agent that asks. Without it, a task is read without its files.',
             ],
         );
     }

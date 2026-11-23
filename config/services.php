@@ -55,7 +55,7 @@ return [
         'client_secret' => env('ASANA_CLIENT_SECRET'),
         // The scopes the app is registered with, space separated; empty for an
         // app with full permissions.
-        'scope' => env('ASANA_OAUTH_SCOPE', 'workspaces:read workspaces.typeahead:read tasks:read stories:read users:read'),
+        'scope' => env('ASANA_OAUTH_SCOPE', 'workspaces:read workspaces.typeahead:read tasks:read stories:read users:read attachments:read'),
     ],
 
     'atlassian' => [

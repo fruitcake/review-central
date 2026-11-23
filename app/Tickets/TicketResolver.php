@@ -6,9 +6,11 @@ namespace App\Tickets;
 
 use App\Connections\TicketDriver;
 use App\Enums\TicketStyle;
+use App\Exceptions\AttachmentRefused;
 use App\Exceptions\TicketNotFound;
 use App\Models\Repository;
 use App\Models\TicketSource;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Collection;
 use Throwable;
 
@@ -55,7 +57,7 @@ class TicketResolver
      * The ticket the title names, for the review's context, or null when it names
      * none a source of this repository reads.
      *
-     * @return array{reference: string, source: string, url: string|null, markdown: string|null, error: string|null}|null
+     * @return array{reference: string, source: string, url: string|null, markdown: string|null, attachments: array<int, array{number: int, name: string, type: string|null, size: int|null, readable: bool}>, error: string|null}|null
      */
     public function forTitle(Repository $repository, ?string $title): ?array
     {
@@ -68,22 +70,67 @@ class TicketResolver
      * The ticket a reference names, as a title would carry it: `PROJ-123`, `#1234`
      * or `1234`. Null when no source of this repository reads it.
      *
-     * @return array{reference: string, source: string, url: string|null, markdown: string|null, error: string|null}|null
+     * @return array{reference: string, source: string, url: string|null, markdown: string|null, attachments: array<int, array{number: int, name: string, type: string|null, size: int|null, readable: bool}>, error: string|null}|null
      */
     public function forReference(Repository $repository, string $reference): ?array
     {
-        $reference = trim($reference);
-        $match = $this->match($this->sources($repository), ctype_digit($reference) ? "#{$reference}" : $reference);
+        $match = $this->matchReference($this->sources($repository), $reference);
 
         return $match === null ? null : $this->read($repository, ...$match);
     }
 
     /**
-     * @return array{reference: string, source: string, url: string|null, markdown: string|null, error: string|null}
+     * The source a reference is for: as a title would carry it, or as a ticket
+     * that was read gave it back, with the prefix a numbered source adds
+     * (`SHOP-29386` for `#29386`).
+     *
+     * @param  Collection<int, TicketSource>  $sources
+     * @return array{0: TicketSource, 1: string}|null
+     */
+    public function matchReference(Collection $sources, string $reference): ?array
+    {
+        $reference = trim($reference);
+
+        foreach ($sources as $source) {
+            $prefix = (string) $source->reference_prefix;
+
+            if ($source->style === TicketStyle::Number && $prefix !== '' && stripos($reference, $prefix) === 0 && ctype_digit(substr($reference, strlen($prefix)))) {
+                return [$source, $prefix.substr($reference, strlen($prefix))];
+            }
+        }
+
+        return $this->match($sources, ctype_digit($reference) ? "#{$reference}" : $reference);
+    }
+
+    /**
+     * The contents of a ticket's attachment, by the number its list gives it. The
+     * ticket is read again, so the attachment is one the source reads now, and a
+     * signed address to it is fresh.
+     *
+     * @throws AttachmentRefused when no source reads the reference, or it has no such attachment, or the attachment is not read here
+     * @throws TicketNotFound
+     * @throws RequestException
+     */
+    public function attachment(Repository $repository, string $reference, int $number): AttachmentFile
+    {
+        [$source, $reference] = $this->matchReference($this->sources($repository), $reference)
+            ?? throw new AttachmentRefused("No ticket source of {$repository->fullName()} reads \"{$reference}\".");
+
+        /** @var TicketDriver $driver */
+        $driver = $source->integration->driver();
+        $ticket = $driver->fetch($source->integration, $reference, $repository);
+        $attachment = $ticket->attachments[$number - 1]
+            ?? throw new AttachmentRefused("{$ticket->reference} has no attachment {$number}: it has ".count($ticket->attachments).'.');
+
+        return $driver->download($source->integration, $attachment);
+    }
+
+    /**
+     * @return array{reference: string, source: string, url: string|null, markdown: string|null, attachments: array<int, array{number: int, name: string, type: string|null, size: int|null, readable: bool}>, error: string|null}
      */
     protected function read(Repository $repository, TicketSource $source, string $reference): array
     {
-        $ticket = ['reference' => $reference, 'source' => $source->name, 'url' => null, 'markdown' => null, 'error' => null];
+        $ticket = ['reference' => $reference, 'source' => $source->name, 'url' => null, 'markdown' => null, 'attachments' => [], 'error' => null];
 
         try {
             /** @var TicketDriver $driver */
@@ -93,6 +140,13 @@ class TicketResolver
             $ticket['reference'] = $found->reference;
             $ticket['url'] = $found->url;
             $ticket['markdown'] = $found->markdown;
+            $ticket['attachments'] = array_map(fn (TicketAttachment $attachment, int $index): array => [
+                'number' => $index + 1,
+                'name' => $attachment->name,
+                'type' => $attachment->mimeType,
+                'size' => $attachment->size,
+                'readable' => $attachment->downloadUrl !== null,
+            ], $found->attachments, array_keys($found->attachments));
         } catch (TicketNotFound) {
             $ticket['error'] = "No ticket in {$source->name} matches this reference.";
         } catch (Throwable $exception) {

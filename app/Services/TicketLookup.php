@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Exceptions\ActionRefused;
+use App\Exceptions\AttachmentRefused;
 use App\Exceptions\RepositoryNotFound;
+use App\Exceptions\TicketNotFound;
 use App\Models\Repository;
+use App\Tickets\AttachmentFile;
 use App\Tickets\TicketResolver;
 use Throwable;
 
@@ -19,7 +22,7 @@ class TicketLookup
     public function __construct(protected TicketResolver $tickets) {}
 
     /**
-     * @return array{reference: string, source: string, url: string|null, markdown: string|null, graded: bool}
+     * @return array{reference: string, source: string, url: string|null, markdown: string|null, attachments: array<int, array{number: int, name: string, type: string|null, size: int|null, readable: bool}>, graded: bool}
      *
      * @throws ActionRefused when no source reads the reference, or the ticket cannot be read
      */
@@ -33,11 +36,31 @@ class TicketLookup
     }
 
     /**
+     * An attachment of a ticket, by the number the ticket lists it under.
+     *
+     * @throws ActionRefused when it cannot be read
+     */
+    public function attachment(Repository $repository, string $reference, int $number): AttachmentFile
+    {
+        try {
+            return $this->tickets->attachment($repository, $reference, $number);
+        } catch (AttachmentRefused $exception) {
+            throw new ActionRefused($exception->getMessage());
+        } catch (TicketNotFound) {
+            throw new ActionRefused("No ticket matches \"{$reference}\".");
+        } catch (Throwable $exception) {
+            report($exception);
+
+            throw new ActionRefused("Attachment {$number} of {$reference} could not be read.");
+        }
+    }
+
+    /**
      * The ticket the pull request's title names, as its review would read it now:
      * the title as the host has it, by the pull request's number or as the open
      * pull request of the branch.
      *
-     * @return array{reference: string, source: string, url: string|null, markdown: string|null, graded: bool, pull_request_id: int, title: string}
+     * @return array{reference: string, source: string, url: string|null, markdown: string|null, attachments: array<int, array{number: int, name: string, type: string|null, size: int|null, readable: bool}>, graded: bool, pull_request_id: int, title: string}
      *
      * @throws RepositoryNotFound
      * @throws ActionRefused
@@ -81,8 +104,8 @@ class TicketLookup
     }
 
     /**
-     * @param  array{reference: string, source: string, url: string|null, markdown: string|null, error: string|null}|null  $ticket
-     * @return array{reference: string, source: string, url: string|null, markdown: string|null, graded: bool}
+     * @param  array{reference: string, source: string, url: string|null, markdown: string|null, attachments: array<int, array{number: int, name: string, type: string|null, size: int|null, readable: bool}>, error: string|null}|null  $ticket
+     * @return array{reference: string, source: string, url: string|null, markdown: string|null, attachments: array<int, array{number: int, name: string, type: string|null, size: int|null, readable: bool}>, graded: bool}
      *
      * @throws ActionRefused
      */
@@ -96,6 +119,6 @@ class TicketLookup
             throw new ActionRefused("{$ticket['reference']}: {$ticket['error']}");
         }
 
-        return ['reference' => $ticket['reference'], 'source' => $ticket['source'], 'url' => $ticket['url'], 'markdown' => $ticket['markdown'], 'graded' => ReviewSettings::gradesTicket($repository)];
+        return ['reference' => $ticket['reference'], 'source' => $ticket['source'], 'url' => $ticket['url'], 'markdown' => $ticket['markdown'], 'attachments' => $ticket['attachments'], 'graded' => ReviewSettings::gradesTicket($repository)];
     }
 }

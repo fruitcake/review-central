@@ -29,7 +29,7 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
 {
     protected const API = 'https://app.asana.com/api/1.0';
 
-    protected const TASK_FIELDS = 'workspace.gid,name,notes,completed,due_on,permalink_url,assignee.name,projects.name,parent.name,custom_fields.name,custom_fields.display_value';
+    protected const TASK_FIELDS = 'workspace.gid,name,notes,completed,due_on,permalink_url,assignee.name,projects.name,parent.gid,parent.name,custom_fields.name,custom_fields.display_value';
 
     public function label(): string
     {
@@ -58,7 +58,7 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
 
     /**
      * A personal access token has no scopes to pick: it can do what its account
-     * can. The review only reads: a task, its subtasks and comments, and the
+     * can. The review only reads: a task, its subtasks, comments and files, and the
      * workspace's search for a task's number.
      */
     public function setupGuide(): SetupGuide
@@ -74,7 +74,7 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
                 'Under Settings, fill in the workspace ID: the `gid` next to the workspace\'s name at `https://app.asana.com/api/1.0/workspaces`, opened while signed in.',
             ],
             permissions: [
-                'The account\'s own access' => 'the token reads what its account can see: tasks, their subtasks and comments, and the workspace\'s search for a task\'s number. Nothing is written.',
+                'The account\'s own access' => 'the token reads what its account can see: tasks, their subtasks, comments and files, and the workspace\'s search for a task\'s number. Nothing is written.',
             ],
             notes: [
                 'On Asana Enterprise, a service account\'s token, from the admin console under **Apps → Service accounts**, works too and belongs to no person.',
@@ -102,7 +102,40 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
             ->throw()
             ->json('data') ?? [];
 
-        return new Ticket($reference, $this->markdown($task, $subtasks, $this->comments($connection, $gid)), $task['permalink_url'] ?? null);
+        $attachments = $this->attachments($connection, $gid);
+
+        return new Ticket($reference, $this->markdown($task, $subtasks, $this->comments($connection, $gid), $attachments), $task['permalink_url'] ?? null, $attachments);
+    }
+
+    public function download(Connection $connection, TicketAttachment $attachment): AttachmentFile
+    {
+        // A signed address of Asana's storage, good for a few minutes: no token goes with it.
+        return AttachmentFile::fromResponse($attachment, Http::timeout(30)->connectTimeout(4)->get(AttachmentFile::check($attachment)));
+    }
+
+    /**
+     * The files on the task and in its comments. One kept elsewhere, such as a
+     * Google Drive link, is listed without an address to read it from.
+     *
+     * The download address Asana gives is signed for a few minutes: the ticket is
+     * read again for each download.
+     *
+     * @return array<int, TicketAttachment>
+     */
+    protected function attachments(Connection $connection, string $gid): array
+    {
+        // A token without attachments:read, as an app connected before it was asked
+        // for, reads the task all the same, without its files.
+        $response = $this->request($connection)
+            ->get(self::API."/tasks/{$gid}/attachments", ['opt_fields' => 'name,host,resource_subtype,size,download_url,view_url,permanent_url', 'limit' => 100]);
+        $listed = $response->successful() ? ($response->json('data') ?? []) : [];
+
+        return array_values(array_map(fn (array $file): TicketAttachment => new TicketAttachment(
+            name: (string) ($file['name'] ?? 'Unnamed file'),
+            size: is_int($file['size'] ?? null) ? $file['size'] : null,
+            downloadUrl: ($file['host'] ?? $file['resource_subtype'] ?? null) === 'asana' && is_string($file['download_url'] ?? null) ? $file['download_url'] : null,
+            viewUrl: $file['view_url'] ?? $file['permanent_url'] ?? null,
+        ), array_filter((array) $listed, 'is_array')));
     }
 
     /**
@@ -204,8 +237,9 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
      * @param  array<string, mixed>  $task
      * @param  array<int, array<string, mixed>>  $subtasks
      * @param  array<int, array<string, mixed>>  $comments
+     * @param  array<int, TicketAttachment>  $attachments
      */
-    protected function markdown(array $task, array $subtasks, array $comments): string
+    protected function markdown(array $task, array $subtasks, array $comments, array $attachments = []): string
     {
         $lines = ['# '.($task['name'] ?? 'Untitled task'), ''];
 
@@ -215,7 +249,8 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
             'Assignee' => $task['assignee']['name'] ?? null,
             'Due' => $task['due_on'] ?? null,
             'Projects' => implode(', ', array_filter(array_column($task['projects'] ?? [], 'name'))) ?: null,
-            'Parent' => $task['parent']['name'] ?? null,
+            // With its id, which reads the parent as a ticket of its own.
+            'Parent' => isset($task['parent']['gid']) ? trim(($task['parent']['name'] ?? '')." ({$task['parent']['gid']})") : null,
         ];
 
         foreach (array_filter($metadata) as $label => $value) {
@@ -241,7 +276,8 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
 
             foreach ($subtasks as $subtask) {
                 $assignee = isset($subtask['assignee']['name']) ? " ({$subtask['assignee']['name']})" : '';
-                $lines[] = '- ['.(($subtask['completed'] ?? false) ? 'x' : ' ').'] '.($subtask['name'] ?? 'Untitled').$assignee;
+                $id = isset($subtask['gid']) ? " ({$subtask['gid']})" : '';
+                $lines[] = '- ['.(($subtask['completed'] ?? false) ? 'x' : ' ').'] '.($subtask['name'] ?? 'Untitled').$assignee.$id;
             }
         }
 
@@ -256,6 +292,8 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
 
             array_pop($lines);
         }
+
+        $lines = array_merge($lines, TicketAttachment::section($attachments));
 
         return implode("\n", $lines)."\n";
     }
