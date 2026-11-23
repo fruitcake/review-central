@@ -23,7 +23,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property array<int, string>|null $prefixes
  * @property string|null $reference_prefix
  * @property int $position
- * @property bool $readable_over_mcp whether people of the tenant may read its tickets over MCP, with the connection's access
  */
 class TicketSource extends Model
 {
@@ -41,7 +40,6 @@ class TicketSource extends Model
             'style' => TicketStyle::class,
             'prefixes' => 'array',
             'position' => 'integer',
-            'readable_over_mcp' => 'boolean',
         ];
     }
 

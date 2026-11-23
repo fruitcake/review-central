@@ -187,43 +187,10 @@ it('reads a pull request by its branch: findings that hold the merge first, with
         ->assertStructuredContentPath('comments.1.text', 'Looks good otherwise.');
 });
 
-it('names the ticket but gives no text from a source an admin did not make readable over MCP', function () {
-    $source = TicketSource::factory()->create([
-        'connection_id' => Connection::factory()->jira()->create(['tenant_id' => $this->tenant->id]),
-        'prefixes' => ['PROJ'],
-    ]);
-
-    AgentServer::actingAs($this->member)
-        ->tool(TicketTool::class, ['repository' => 'acme/shop', 'reference' => 'PROJ-7'])
-        ->assertOk()
-        ->assertStructuredContentPaths(['reference' => 'PROJ-7', 'source' => 'Jira'])
-        ->assertStructuredContentMissingPath('markdown')
-        ->assertSee('not readable over MCP');
-
-    // The tracker was not asked: whether a ticket exists is something too.
-    Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'atlassian.net'));
-
-    // Nor is the text the review read given, until the source is made readable.
-    $this->run->update(['context' => ['ticket' => ['reference' => 'PROJ-7', 'source' => 'Jira', 'source_id' => $source->id, 'url' => 'https://acme.atlassian.net/browse/PROJ-7', 'markdown' => '# Export the orders', 'error' => null]]]);
-
-    AgentServer::actingAs($this->member)
-        ->tool(PullRequestFeedbackTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570])
-        ->assertStructuredContentPaths(['ticket.reference' => 'PROJ-7', 'ticket.url' => 'https://acme.atlassian.net/browse/PROJ-7'])
-        ->assertStructuredContentMissingPath('ticket.markdown');
-
-    $source->update(['readable_over_mcp' => true]);
-
-    AgentServer::actingAs($this->member)
-        ->tool(PullRequestFeedbackTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570])
-        ->assertStructuredContentPath('ticket.markdown', '# Export the orders')
-        ->assertStructuredContentMissingPaths(['ticket.error', 'ticket.notice']);
-});
-
 it('reads a ticket from the tenant\'s ticket sources by its reference or by the pull request whose title names it', function () {
     TicketSource::factory()->create([
         'connection_id' => Connection::factory()->jira()->create(['tenant_id' => $this->tenant->id]),
         'prefixes' => ['PROJ'],
-        'readable_over_mcp' => true,
     ]);
 
     AgentServer::actingAs($this->member)
@@ -278,6 +245,18 @@ it('reads a ticket from the tenant\'s ticket sources by its reference or by the 
     AgentServer::actingAs($this->member)
         ->tool(TicketTool::class, ['repository' => 'acme/shop', 'reference' => 'SHOP-1'])
         ->assertHasErrors(['No ticket source of acme/shop reads "SHOP-1"']);
+});
+
+it('gives the ticket the review graded the pull request against', function () {
+    $this->run->update(['context' => ['ticket' => ['reference' => 'PROJ-7', 'source' => 'Jira', 'url' => 'https://acme.atlassian.net/browse/PROJ-7', 'markdown' => '# Export the orders', 'error' => null]]]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(PullRequestFeedbackTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570])
+        ->assertStructuredContentPaths([
+            'ticket.reference' => 'PROJ-7',
+            'ticket.markdown' => '# Export the orders',
+        ])
+        ->assertStructuredContentMissingPath('ticket.error');
 });
 
 it('keeps the findings of the last review that reported when a newer attempt failed, and says it did', function () {
