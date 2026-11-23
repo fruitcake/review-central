@@ -4,6 +4,7 @@ use App\Filament\Admin\Pages\Platform;
 use App\Filament\App\Pages\Overview;
 use App\Filament\App\Resources\ReviewRuns\Pages\ListReviewRuns;
 use App\Models\Connection;
+use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\ReviewRating;
 use App\Models\ReviewRun;
@@ -210,4 +211,21 @@ it('shows times in the tenant\'s time zone, and counts a review on the tenant\'s
     $this->tenant->update(['timezone' => 'America/New_York']);
 
     $this->actingAs($user)->get("/app/acme/review-runs/{$run->uuid}")->assertOk()->assertSee('17 Nov 2026, 18:30:00');
+});
+
+it('lists each repository\'s open pull requests, and how many reviews a pull request took and how many asked for changes', function () {
+    OpenPullRequest::query()->create(['repository_id' => $this->repository->id, 'pull_request_id' => 7]);
+    OpenPullRequest::query()->create(['repository_id' => $this->repository->id, 'pull_request_id' => 8]);
+
+    // #7 took three reviews, two asking for changes; #8 one; a trial and a review without a pull request are no round.
+    ($this->run)(['result' => 'FAILED']);
+    ($this->run)(['result' => 'FAILED']);
+    ($this->run)([]);
+    ($this->run)(['pull_request_id' => 8]);
+    ($this->run)(['custom' => true, 'result' => 'FAILED']);
+    ($this->run)(['pull_request_id' => null]);
+
+    $row = app(TenantOverview::class)->for($this->tenant, 7)['repositories'][0];
+
+    expect($row)->toMatchArray(['open' => 2, 'reviews' => 6, 'per_pull_request' => '2.0', 'rejected_per_pull_request' => '1.0']);
 });
