@@ -6,6 +6,7 @@ namespace App\Filament\Auth;
 
 use App\Models\Tenant;
 use App\Models\User;
+use Filament\Actions\Action;
 use Filament\Auth\Pages\EditProfile as BaseEditProfile;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\TagsInput;
@@ -13,6 +14,8 @@ use Filament\Infolists\Components\TextEntry;
 use Filament\Panel;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Filament\Support\Facades\FilamentView;
+use Illuminate\Support\Js;
 
 /**
  * The profile, with who the user is on the hosts: which pull requests are theirs
@@ -23,15 +26,17 @@ class EditProfile extends BaseEditProfile
     protected static bool $shouldRegisterNavigation = false;
 
     /**
-     * A page of a tenant, so it keeps the sidebar and the way back to the tenant.
+     * In a tenant it keeps the sidebar and the way back; without one, for a user in
+     * no tenant, there is no sidebar to show.
      */
     public static function isSimple(): bool
     {
-        return false;
+        return Filament::getTenant() === null;
     }
 
     /**
-     * Registered as a page, so not under the panel's auth routes.
+     * The tenant's page; the panel's own profile, without a tenant, is reached
+     * through the panel's getProfileUrl().
      */
     public static function getRouteName(?Panel $panel = null): string
     {
@@ -41,16 +46,31 @@ class EditProfile extends BaseEditProfile
     }
 
     /**
-     * The profile in the tenant open now, or else in the user's first one; null for
-     * a user in no tenant.
+     * The profile in the tenant open now, or else in the user's first one, or else
+     * the one without a tenant.
      */
     public static function urlForCurrentUser(): ?string
     {
+        $panel = Filament::getPanel('app');
         $user = Filament::auth()->user();
-        $tenant = Filament::getTenant()
-            ?? ($user instanceof User ? $user->getTenants(Filament::getPanel('app'))->first() : null);
+        $tenant = Filament::getTenant() ?? ($user instanceof User ? $user->getDefaultTenant($panel) : null);
 
-        return $tenant instanceof Tenant ? static::getUrl(panel: 'app', tenant: $tenant) : null;
+        return $tenant instanceof Tenant ? static::getUrl(panel: 'app', tenant: $tenant) : $panel->getProfileUrl();
+    }
+
+    /**
+     * Back where the user came from, or else to the tenant the profile is in rather
+     * than the user's first one.
+     */
+    protected function getCancelFormAction(): Action
+    {
+        $url = Filament::getUrl(Filament::getTenant());
+
+        return parent::getCancelFormAction()->alpineClickHandler(
+            FilamentView::hasSpaMode($url)
+                ? 'document.referrer ? window.history.back() : Livewire.navigate('.Js::from($url).')'
+                : 'document.referrer ? window.history.back() : (window.location.href = '.Js::from($url).')',
+        );
     }
 
     public function form(Schema $schema): Schema

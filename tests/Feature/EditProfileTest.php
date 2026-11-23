@@ -21,12 +21,25 @@ it('opens the profile as a page of the tenant, linked from the user menu', funct
     $this->get('/app/acme')->assertSee(url('app/acme/profile'));
 });
 
-it('links the platform admin to their profile in a tenant', function () {
-    Tenant::factory()->create(['slug' => 'acme']);
+it('links the platform admin to their profile in the first tenant', function () {
+    Tenant::factory()->create(['name' => 'Zeta', 'slug' => 'zeta']);
+    Tenant::factory()->create(['name' => 'Acme', 'slug' => 'acme']);
 
     $this->actingAs(User::factory()->create(['is_admin' => true]))
         ->get('/admin')
-        ->assertSee(url('app/acme/profile'));
+        ->assertSee(url('app/acme/profile'))
+        ->assertDontSee(url('app/zeta/profile'));
+});
+
+it('keeps the profile for a user in no tenant, and the admin of an installation without any', function () {
+    $this->actingAs(User::factory()->create())
+        ->get(route('home'))
+        ->assertSee(url('app/profile'));
+    $this->get('/app/profile')->assertOk();
+
+    $this->actingAs(User::factory()->create(['is_admin' => true]))
+        ->get('/admin')
+        ->assertSee(url('app/profile'));
 });
 
 it('changes the email only once the new address has opened the link mailed to it', function () {
