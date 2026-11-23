@@ -94,7 +94,6 @@ final readonly class PullRequestTurn
             $record->commit,
             $run?->getKey(),
             $run?->status,
-            MergeState::current($record),
             $reviewers->map(fn (array $reviewer): string => Reviewers::key($reviewer).':'.$reviewer['state'])->sort()->values()->all(),
         ]));
 
