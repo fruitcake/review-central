@@ -32,6 +32,7 @@ use App\Services\ReviewPublisher;
 use App\Services\ReviewQuestions;
 use App\Services\ReviewRequest;
 use App\Services\ReviewTrial;
+use Closure;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Toggle;
@@ -331,8 +332,13 @@ class ViewReviewRun extends ViewRecord
                 ->limit(20)
                 ->get(),
             'verdicts' => auth()->user() instanceof User ? app(FindingFeedback::class)->of($run, auth()->user()) : [],
-            // A finding's file on the host, as it was at the commit this run reviewed.
-            'fileUrl' => fn (string $path, mixed $line): ?string => rescue(fn (): ?string => $run->repository->sourceControl()->fileUrl($run->commit, $path, is_numeric($line) ? (int) $line : null), null, false),
+            // A finding's file on the host, as it was at the commit this run reviewed;
+            // the host's client made once for all of them, or none when it cannot be.
+            'fileUrl' => (function () use ($run): Closure {
+                $host = rescue(fn () => $run->repository->sourceControl(), null, false);
+
+                return fn (string $path, mixed $line): ?string => $host?->fileUrl($run->commit, $path, is_numeric($line) ? (int) $line : null);
+            })(),
             'reasons' => auth()->user() instanceof User ? app(FindingFeedback::class)->reasons($run, auth()->user()) : [],
             // Why people in the team dismissed each finding, notes given from an AI assistant included.
             'explanations' => FindingVerdict::query()->with('user')->where('review_run_id', $run->getKey())
