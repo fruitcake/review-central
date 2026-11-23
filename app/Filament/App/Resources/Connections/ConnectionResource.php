@@ -188,7 +188,13 @@ class ConnectionResource extends Resource
             Toggle::make('add_repositories')
                 ->label('Add new repositories from webhooks')
                 ->default(false)
-                ->helperText('A repository the webhook tells of that is not here yet is added, without reviewing its pull requests by itself: it shows in the overview, and its pull requests are kept, for someone to start a review from Pull requests. One that was removed here is not added again.'),
+                ->live()
+                ->helperText('A repository the webhook tells of that is not here yet is added: it shows in the overview, and its pull requests are kept. One that was removed here is not added again.'),
+            Toggle::make('review_added_repositories')
+                ->label('Review them by themselves')
+                ->default(false)
+                ->visible(fn (Get $get): bool => (bool) $get('add_repositories'))
+                ->helperText('On, an added repository\'s pull requests are reviewed by themselves, starting with the one that told of it, as the repository\'s own Reviewed toggle does. Off, someone starts each review from Pull requests until Reviewed is turned on.'),
         ];
     }
 
