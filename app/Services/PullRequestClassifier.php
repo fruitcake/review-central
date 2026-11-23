@@ -103,7 +103,7 @@ class PullRequestClassifier
      *
      * @param  string|null  $pullRequestId  null finds the open pull request of the branch
      * @param  callable(string): void  $say
-     * @return array{effort: ReviewEffort, tier: string}|null
+     * @return array{effort: ReviewEffort, tier: string|null}|null no tier when each reviewer keeps its own model
      */
     public function pick(Repository $repository, ?string $pullRequestId, string $branch, string $commit, ?Trial $trial, callable $say): ?array
     {
