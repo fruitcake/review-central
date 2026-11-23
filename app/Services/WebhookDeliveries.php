@@ -43,11 +43,15 @@ class WebhookDeliveries
             return null;
         }
 
+        // Removed through this connection or another to the same host, such as
+        // the token it was reviewed with before the GitHub App.
         $removed = Repository::onlyTrashed()
-            ->where('connection_id', $connection->getKey())
-            ->where('workspace', $event->workspace)
-            ->where('slug', $event->slug)
-            ->exists();
+            ->with('integration')
+            ->where('tenant_id', $connection->tenant_id)
+            ->whereRaw('lower(workspace) = ?', [mb_strtolower($event->workspace)])
+            ->whereRaw('lower(slug) = ?', [mb_strtolower($event->slug)])
+            ->get()
+            ->contains(fn (Repository $repository): bool => $repository->integration->sameHostAs($connection));
 
         if ($removed) {
             return null;
@@ -65,12 +69,16 @@ class WebhookDeliveries
         }
     }
 
+    /**
+     * Hosts treat an owner's and a repository's names without regard to case, and
+     * a payload may write them otherwise than they were added.
+     */
     public function repository(Connection $connection, string $workspace, string $slug): ?Repository
     {
         return Repository::query()
             ->where('connection_id', $connection->getKey())
-            ->where('workspace', $workspace)
-            ->where('slug', $slug)
+            ->whereRaw('lower(workspace) = ?', [mb_strtolower($workspace)])
+            ->whereRaw('lower(slug) = ?', [mb_strtolower($slug)])
             ->first();
     }
 }

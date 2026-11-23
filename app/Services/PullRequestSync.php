@@ -32,7 +32,8 @@ class PullRequestSync
     /**
      * Lists every open pull request of the repository as the host has it, and reads
      * those listed here that it no longer lists open again, so a merged or declined
-     * one leaves the list.
+     * one leaves the list. Each is read whole, as a delivery would bring it: a
+     * host's list leaves out who reviewed. One whose read is refused is left as it is.
      *
      * @return array{listed: int, closed: int}
      */
@@ -41,12 +42,21 @@ class PullRequestSync
         $host = $repository->sourceControl();
         $open = [];
 
-        foreach ($host->openPullRequests() as $pullRequest) {
-            if (is_numeric($pullRequest['id'] ?? null)) {
-                $open[(int) $pullRequest['id']] = true;
-                $this->reviews->sync($repository, (int) $pullRequest['id'], $this->withReviews($host, $pullRequest));
+        foreach ($host->openPullRequests() as $listed) {
+            if (! is_numeric($listed['id'] ?? null)) {
+                continue;
+            }
+
+            $id = (int) $listed['id'];
+            $open[$id] = true;
+            $data = $host->getPullRequest((string) $id);
+
+            if ($data !== null) {
+                $this->reviews->sync($repository, $id, $this->withReviews($host, $data));
             }
         }
+
+        $closed = 0;
 
         $gone = OpenPullRequest::query()
             ->where('repository_id', $repository->getKey())
@@ -54,11 +64,18 @@ class PullRequestSync
             ->get();
 
         foreach ($gone as $record) {
-            $record->setRelation('repository', $repository);
-            $this->one($record);
+            $data = $host->getPullRequest((string) $record->pull_request_id);
+
+            // Nothing to go by, as when the host refused the read: it stays listed.
+            if ($data === null) {
+                continue;
+            }
+
+            $this->reviews->sync($repository, $record->pull_request_id, $this->withReviews($host, $data));
+            $closed += ($data['state'] ?? null) === 'OPEN' ? 0 : 1;
         }
 
-        return ['listed' => count($open), 'closed' => $gone->count()];
+        return ['listed' => count($open), 'closed' => $closed];
     }
 
     /**

@@ -548,7 +548,27 @@ it('detects the repository and the branch from a pull request\'s link, number or
 
     $detect('https://bitbucket.org/acme/elsewhere/pull-requests/1')
         ->assertSet('mountedActions.0.data.branch', null)
-        ->assertSet('mountedActions.0.data.detected', 'No open pull request of this team\'s repositories found for "https://bitbucket.org/acme/elsewhere/pull-requests/1". Fill in the repository and the branch below.');
+        ->assertSet('mountedActions.0.data.detected', 'Nothing found for "https://bitbucket.org/acme/elsewhere/pull-requests/1": no open pull request of this team\'s repositories, or its repository is on more than one connection. Pick the repository below and detect again, or fill in the branch.');
+
+    // A detection that fails after one that found something clears what that one filled in.
+    livewire(ListReviewRuns::class)
+        ->mountAction('review')
+        ->set('mountedActions.0.data.detect', 'https://bitbucket.org/acme/shop/pull-requests/39')
+        ->set('mountedActions.0.data.detect', 'https://bitbucket.org/acme/elsewhere/pull-requests/1')
+        ->assertSet('mountedActions.0.data.branch', null)
+        ->assertSet('mountedActions.0.data.repository_id', null);
+
+    // A ticket key whole: VZ-95 is not VZ-959.
+    livewire(ListReviewRuns::class)
+        ->mountAction('review')
+        ->set('mountedActions.0.data.detect', 'VZ-95')
+        ->assertSet('mountedActions.0.data.branch', null);
+
+    // The same repository on a second connection: the one chosen is kept.
+    $second = Repository::factory()->create(['tenant_id' => $this->tenant->id, 'connection_id' => Connection::factory()->create(['tenant_id' => $this->tenant->id])->id, 'workspace' => 'acme', 'slug' => 'shop']);
+
+    $detect('https://bitbucket.org/acme/shop/pull-requests/39', $second->id)->assertSet('mountedActions.0.data.repository_id', $second->id);
+    $detect('https://bitbucket.org/acme/shop/pull-requests/39')->assertSet('mountedActions.0.data.repository_id', null);
 
     // A link left in the branch is no branch.
     livewire(ListReviewRuns::class)

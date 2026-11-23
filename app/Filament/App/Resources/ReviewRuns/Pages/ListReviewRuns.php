@@ -93,15 +93,24 @@ class ListReviewRuns extends ListRecords
         $found = self::pullRequestFrom($input, $get('repository_id'));
 
         if ($found === null) {
+            // What an earlier detection filled in is not this one's: cleared, unless
+            // someone changed it by hand since.
+            if (filled($get('detected_branch')) && $get('branch') === $get('detected_branch')) {
+                $set('branch', null);
+                $set('repository_id', null);
+            }
+
+            $set('detected_branch', null);
             $set('detected', preg_match('/^#?\\d+$/', $input) === 1 && blank($get('repository_id'))
                 ? 'Pick the repository below first, then detect again.'
-                : "No open pull request of this team's repositories found for \"{$input}\". Fill in the repository and the branch below.");
+                : "Nothing found for \"{$input}\": no open pull request of this team's repositories, or its repository is on more than one connection. Pick the repository below and detect again, or fill in the branch.");
 
             return;
         }
 
         $set('repository_id', $found['repository_id']);
         $set('branch', $found['branch']);
+        $set('detected_branch', $found['branch']);
         $set('detected', "Found: {$found['branch']}.");
     }
 
@@ -119,11 +128,15 @@ class ListReviewRuns extends ListRecords
         $repositories = CurrentTenant::get()->repositories()->with('integration');
 
         if (($link = PullRequestLink::parse($input)) !== null) {
-            $repository = (clone $repositories)
+            $matches = (clone $repositories)
                 ->whereRaw('lower(workspace) = ?', [mb_strtolower($link->workspace)])
                 ->whereRaw('lower(slug) = ?', [mb_strtolower($link->slug)])
                 ->get()
-                ->first(fn (Repository $repository): bool => in_array($repository->integration->driver, RepositoryAccess::drivers($link->host === PullRequestLink::GITHUB ? 'github.com' : 'bitbucket.org') ?? [], true));
+                ->filter(fn (Repository $repository): bool => in_array($repository->integration->driver, RepositoryAccess::drivers($link->host === PullRequestLink::GITHUB ? 'github.com' : 'bitbucket.org') ?? [], true));
+
+            // On two connections, such as a token and the GitHub App: the one chosen,
+            // or none until one is.
+            $repository = $matches->firstWhere('id', (int) $repositoryId) ?? ($matches->count() === 1 ? $matches->first() : null);
 
             return $repository === null ? null : self::branchOf($repository, $link->id);
         }
@@ -136,12 +149,14 @@ class ListReviewRuns extends ListRecords
 
         if (preg_match('/^[A-Za-z][A-Za-z0-9]+-\d+$/', $input) === 1) {
             $key = mb_strtolower($input);
+            // The key whole: VZ-959 is not VZ-9590, nor XVZ-959.
+            $whole = '/(?<![a-z0-9])'.preg_quote($key, '/').'(?!\\d)/i';
             $found = OpenPullRequest::query()
                 ->whereIn('repository_id', (clone $repositories)->when(filled($repositoryId), fn ($query) => $query->whereKey($repositoryId))->select('id'))
                 ->where(fn ($query) => $query->whereRaw('lower(title) like ?', ["%{$key}%"])->orWhereRaw('lower(branch) like ?', ["%{$key}%"]))
                 ->whereNotNull('branch')
-                ->limit(2)
-                ->get();
+                ->get()
+                ->filter(fn (OpenPullRequest $record): bool => preg_match($whole, (string) $record->title) === 1 || preg_match($whole, (string) $record->branch) === 1);
 
             // Two that carry it are not one to pick.
             return $found->count() === 1 ? ['repository_id' => (int) $found->first()->repository_id, 'branch' => (string) $found->first()->branch] : null;
@@ -177,6 +192,7 @@ class ListReviewRuns extends ListRecords
                         ->suffixAction(Action::make('detectNow')->label('Detect')->icon(Heroicon::OutlinedMagnifyingGlass)->action(fn (Get $get, Set $set) => self::detect($get, $set)))
                         ->helperText(fn (Get $get): string => $get('detected') ?? 'Its link (https://bitbucket.org/acme/shop/pull-requests/39), its number in the repository below (39), or a ticket key its title or branch carries (VZ-959). It fills in the repository and the branch.'),
                     Hidden::make('detected')->dehydrated(false),
+                    Hidden::make('detected_branch')->dehydrated(false),
                     Select::make('repository_id')
                         ->label('Repository')
                         ->options(fn (): array => CurrentTenant::get()->repositories()->get()->mapWithKeys(fn (Repository $repository): array => [$repository->getKey() => $repository->fullName()])->all())
