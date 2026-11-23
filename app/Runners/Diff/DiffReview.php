@@ -234,7 +234,7 @@ class DiffReview
      * one that was picked is asked through the provider it connected first,
      * whichever that is.
      *
-     * @param  array{effort: ReviewEffort, tier: string}|null  $pick  what the classification picked, in apply mode
+     * @param  array{effort: ReviewEffort, tier: string|null}|null  $pick  what the classification picked, in apply mode
      * @return array{Connection, string|null, string|null}
      *
      * @throws ReviewerFailed when the tenant has no AI provider
