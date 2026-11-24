@@ -75,7 +75,7 @@ class PullRequestFeedback
     public const REPORTED = [ReviewRun::STATUS_FINISHED, ReviewRun::STATUS_UNPUBLISHED];
 
     /** The statuses of a run that never was an attempt at a review. */
-    public const NO_ATTEMPT = [ReviewRun::STATUS_SKIPPED, ReviewRun::STATUS_RESTARTED];
+    public const NO_ATTEMPT = [ReviewRun::STATUS_SKIPPED, ReviewRun::STATUS_RESTARTED, ReviewRun::STATUS_STOPPED];
 
     /**
      * The newest review of a pull request that reported its findings: the newest

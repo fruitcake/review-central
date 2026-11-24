@@ -2,6 +2,7 @@
 
 use App\Exceptions\CheckoutFailed;
 use App\Exceptions\ReviewStepFailed;
+use App\Exceptions\ReviewStopped;
 use App\Jobs\RunContainerReview;
 use App\Models\Connection;
 use App\Models\Repository;
@@ -23,9 +24,11 @@ use App\Runners\Runners;
 use App\Services\PlatformSettings;
 use App\Services\ReviewLock;
 use App\Services\ReviewSettings;
+use App\Services\ReviewStops;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Http\Client\Request;
 use Illuminate\Process\PendingProcess;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
@@ -1359,4 +1362,77 @@ it('keeps where the reviewer ran and what that cost on the run, when its sandbox
         ->toBe(['sandbox' => 'cloudflare', 'sandbox_size' => 'basic', 'sandbox_seconds' => 200, 'sandbox_cost' => '0.0016'])
         // Docker on the worker costs nothing by the run, and says nothing here.
         ->and($run->peak_memory_mb)->toBeNull();
+});
+
+it('stops a running review when someone asks: its sandbox goes, nothing is filed, and the run says who stopped it', function () {
+    Http::fake(['api.bitbucket.org/*' => Http::response([])]);
+    $steps = fakeSteps(whileReviewing: function () {
+        $run = ReviewRun::query()->create([
+            'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop', 'pull_request_id' => 570,
+            'branch' => 'feature/export', 'commit' => str_repeat('a', 40), 'build_number' => 41, 'status' => ReviewRun::STATUS_RUNNING, 'started_at' => now(),
+        ]);
+        app(ReviewStops::class)->stop($run, 'Robin Reviewer');
+
+        // What the sandbox does when it looks, as Docker's and Cloudflare's both do.
+        throw new ReviewStopped('The review step was stopped.');
+    });
+
+    app(ContainerReview::class)->run($this->repository, 'feature/export', null, 41);
+
+    $run = ReviewRun::query()->where('build_number', 41)->first();
+
+    expect($run->status)->toBe(ReviewRun::STATUS_STOPPED)
+        ->and($run->summary)->toBe('Stopped by Robin Reviewer.')
+        ->and(collect($steps)->contains(fn (array $step): bool => $step['command'] === ['worker', 'report']))->toBeFalse()
+        ->and(app(RunLog::class)->tail(ReviewRun::query()->where('build_number', 41)->first())['text'] ?? '')->toContain('Stopped by Robin Reviewer.');
+    Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/statuses/build') && $request['state'] === 'STOPPED' && $request['description'] === 'Stopped by Robin Reviewer');
+});
+
+it('closes a review that waits when it is stopped, and its job does nothing once it gets to it', function () {
+    Http::fake(['api.bitbucket.org/*' => Http::response([])]);
+    $steps = fakeSteps();
+    $run = ReviewRun::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop', 'pull_request_id' => 570,
+        'branch' => 'feature/export', 'commit' => str_repeat('a', 40), 'build_number' => 41, 'status' => ReviewRun::STATUS_QUEUED, 'started_at' => now(),
+    ]);
+
+    expect(app(ReviewStops::class)->stop($run, 'Robin Reviewer'))->toBeTrue()
+        ->and($run->refresh()->status)->toBe(ReviewRun::STATUS_STOPPED);
+
+    app(ContainerReview::class)->run($this->repository, 'feature/export', str_repeat('a', 40), 41);
+
+    // No clone and no sandbox: the review never began.
+    expect(collect($steps)->filter(fn (array $step): bool => in_array($step['command'][0], ['git', 'docker'], true))->all())->toBe([])
+        // Done is done: there is nothing to stop a second time.
+        ->and(app(ReviewStops::class)->stop($run->refresh(), 'Robin Reviewer'))->toBeFalse();
+});
+
+it('files nothing when the review is stopped after its reviewer finished, while its files came back', function () {
+    Http::fake(['api.bitbucket.org/*' => Http::response([])]);
+    // Stopped without the sandbox noticing: it was done by then.
+    $steps = fakeSteps(whileReviewing: fn () => app(ReviewStops::class)->stop(ReviewRun::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop', 'pull_request_id' => 570,
+        'branch' => 'feature/export', 'commit' => str_repeat('a', 40), 'build_number' => 41, 'status' => ReviewRun::STATUS_RUNNING, 'started_at' => now(),
+    ]), 'Robin Reviewer'));
+
+    app(ContainerReview::class)->run($this->repository, 'feature/export', null, 41);
+
+    expect(ReviewRun::query()->where('build_number', 41)->value('status'))->toBe(ReviewRun::STATUS_STOPPED)
+        ->and(collect($steps)->contains(fn (array $step): bool => $step['command'] === ['worker', 'report']))->toBeFalse();
+});
+
+it('still knows a waiting review was stopped when its job starts long after, once the cache forgot', function () {
+    Http::fake(['api.bitbucket.org/*' => Http::response([])]);
+    $steps = fakeSteps();
+    $run = ReviewRun::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop', 'pull_request_id' => 570,
+        'branch' => 'feature/export', 'commit' => str_repeat('a', 40), 'build_number' => 41, 'status' => ReviewRun::STATUS_QUEUED, 'started_at' => now(),
+    ]);
+    app(ReviewStops::class)->stop($run, 'Robin Reviewer');
+    Cache::flush();
+
+    app(ContainerReview::class)->run($this->repository, 'feature/export', str_repeat('a', 40), 41);
+
+    expect(collect($steps)->filter(fn (array $step): bool => in_array($step['command'][0], ['git', 'docker'], true))->all())->toBe([])
+        ->and(app(ReviewStops::class)->requested($this->repository, 41))->toBe('Robin Reviewer');
 });

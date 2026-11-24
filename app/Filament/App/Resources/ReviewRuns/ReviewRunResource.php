@@ -11,11 +11,13 @@ use App\Filament\CurrentTenant;
 use App\Filament\LocalTime;
 use App\Filament\RunPresenter;
 use App\Models\ReviewRun;
+use App\Models\User;
 use App\Runners\DiffRunner;
 use App\Runners\Runners;
 use App\Services\Currency;
 use App\Services\ReviewCredentials;
 use App\Services\ReviewSettings;
+use App\Services\ReviewStops;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
@@ -229,6 +231,30 @@ class ReviewRunResource extends Resource
             ReviewProvider::CodexCli->value => ReviewSettingsForm::openAiModels(),
             default => array_diff_key(ReviewSettingsForm::claudeModels() + ReviewSettingsForm::openAiModels(), array_flip([...ReviewSettings::TIERS, ...ReviewSettingsForm::CLAUDE_ALIASES])),
         };
+    }
+
+    /** What stopping a review does, for the question before it. */
+    public const STOP_DESCRIPTION = 'A review that waits is closed at once. One that runs is stopped within a few seconds, with its sandbox: nothing it found is posted, and the pull request shows it as stopped. What its AI provider already did is still paid for. "Re-run" starts a new one.';
+
+    /**
+     * Stops a review that waits or runs, as the person who asked, and says so.
+     */
+    public static function stopped(?ReviewRun $run, ReviewStops $stops): void
+    {
+        $user = auth()->user();
+        $running = $run?->status === ReviewRun::STATUS_RUNNING;
+
+        if ($run === null || ! $stops->stop($run, $user instanceof User ? $user->name : 'someone')) {
+            Notification::make()->title('There is no review to stop')->body('It finished, or was stopped, meanwhile.')->warning()->send();
+
+            return;
+        }
+
+        Notification::make()
+            ->title($running ? 'The review is stopping' : 'The review is stopped')
+            ->body($running ? 'Its reviewer and sandbox are stopped within a few seconds.' : null)
+            ->success()
+            ->send();
     }
 
     /**

@@ -16,6 +16,7 @@ use App\Services\Currency;
 use App\Services\MergeState;
 use App\Services\PullRequestTurn;
 use App\Services\ReviewRequest;
+use App\Services\ReviewStops;
 use App\Services\TicketLookup;
 use BackedEnum;
 use Closure;
@@ -57,9 +58,9 @@ class PullRequestResource extends Resource
     protected static bool $isScopedToTenant = false;
 
     /**
-     * Runs that were never a review of their own: skipped, started again, or not begun.
+     * Runs that were never a review of their own: skipped, started again, stopped, or not begun.
      */
-    private const array NOT_A_REVIEW = [ReviewRun::STATUS_SKIPPED, ReviewRun::STATUS_RESTARTED, ReviewRun::STATUS_PENDING];
+    private const array NOT_A_REVIEW = [ReviewRun::STATUS_SKIPPED, ReviewRun::STATUS_RESTARTED, ReviewRun::STATUS_PENDING, ReviewRun::STATUS_STOPPED];
 
     /**
      * What whose turn it is and where the review stands are read from of a run:
@@ -160,6 +161,7 @@ class PullRequestResource extends Resource
                         // Started from the details as from the row, for the pull request they are of.
                         self::startAction($record),
                         self::openReviewAction($record),
+                        self::stopAction($record),
                         Action::make('readTicket')
                             // Read from its source here, before any review did, or again since.
                             ->label(fn (): string => (self::ticketOf($record)['url'] ?? null) === null ? 'Read the ticket' : 'Refresh the ticket')
@@ -335,6 +337,23 @@ class PullRequestResource extends Resource
             ->color('gray')
             ->visible(fn (?OpenPullRequest $record): bool => $running($record) !== null)
             ->url(fn (?OpenPullRequest $record): ?string => ($run = $running($record)) === null ? null : ReviewRunResource::getUrl('view', ['record' => $run]));
+    }
+
+    /**
+     * Stops the review that is queued or running, from the details.
+     */
+    private static function stopAction(OpenPullRequest $for): Action
+    {
+        return Action::make('stopReview')
+            ->label('Stop the review')
+            ->icon(Heroicon::OutlinedStop)
+            ->color('danger')
+            ->visible(fn (): bool => ($run = self::reviewing($for)) !== null && ReviewStops::stoppable($run))
+            ->requiresConfirmation()
+            ->modalHeading('Stop this review')
+            ->modalDescription(ReviewRunResource::STOP_DESCRIPTION)
+            ->modalSubmitActionLabel('Stop')
+            ->action(fn (ReviewStops $stops) => ReviewRunResource::stopped(self::reviewing($for), $stops));
     }
 
     /**

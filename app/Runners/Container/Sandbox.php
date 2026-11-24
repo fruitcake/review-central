@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Runners\Container;
 
+use App\Exceptions\ReviewStopped;
 use Closure;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\Process;
@@ -47,6 +48,17 @@ class Sandbox
 
     /** What the last step's sandbox cost in dollars, as far as that can be estimated; null where it costs nothing by the run. */
     public ?float $cost = null;
+
+    /**
+     * Asked while the step runs: true stops it, as someone stopped the review.
+     * Set for the step it is for, and cleared after.
+     *
+     * @var (Closure(): bool)|null
+     */
+    public ?Closure $stopWhen = null;
+
+    /** Seconds between two looks at whether the review was stopped. */
+    protected const STOP_CHECK_SECONDS = 2.0;
 
     /**
      * Where the steps run, as a review's record names it.
@@ -124,6 +136,7 @@ class Sandbox
             $deadline = microtime(true) + $timeout;
             $every = (float) $config['sample_seconds'];
             $next = microtime(true) + $every;
+            $look = microtime(true);
 
             // While it runs, the container is asked now and then what it uses. Past
             // the time it may take, the wait below is what cuts it short.
@@ -133,6 +146,17 @@ class Sandbox
                 if (microtime(true) >= $next) {
                     $this->sample($config['docker'], $name);
                     $next = microtime(true) + $every;
+                }
+
+                // Someone stopped the review: the container goes, in the finally below.
+                if ($this->stopWhen !== null && microtime(true) >= $look) {
+                    if (($this->stopWhen)()) {
+                        $process->signal(SIGKILL);
+
+                        throw new ReviewStopped("The {$name} step was stopped.");
+                    }
+
+                    $look = microtime(true) + self::STOP_CHECK_SECONDS;
                 }
             }
 

@@ -30,6 +30,7 @@ class RunPresenter
                 : ['label' => 'Nothing to act on', 'tone' => 'approved'],
             $run->status === ReviewRun::STATUS_UNPUBLISHED => ['label' => 'Trial, not posted', 'tone' => 'neutral'],
             $run->status === ReviewRun::STATUS_TIMEOUT => ['label' => 'Timed out', 'tone' => 'failed'],
+            $run->status === ReviewRun::STATUS_STOPPED => ['label' => 'Stopped', 'tone' => 'neutral'],
             $run->status === ReviewRun::STATUS_FAILED => ['label' => 'Did not finish', 'tone' => 'failed'],
             $run->status === ReviewRun::STATUS_FINISHED && strtoupper((string) $run->result) === 'FAILED' => ['label' => 'Changes requested', 'tone' => 'changes'],
             $run->status === ReviewRun::STATUS_FINISHED && $run->needsManualReview() => ['label' => 'Manual review', 'tone' => 'manual'],
@@ -53,6 +54,7 @@ class RunPresenter
                 : 'Not reviewed: a newer commit was reviewed instead.',
             ReviewRun::STATUS_FAILED => 'The review did not finish. Its log, where there is one, says where it stopped; "Re-run" starts a new one.',
             ReviewRun::STATUS_TIMEOUT => 'The review never reported back and was stopped. "Re-run" starts a new one.',
+            ReviewRun::STATUS_STOPPED => 'Stopped before it finished. "Re-run" starts a new one.',
             default => 'No summary.',
         };
     }

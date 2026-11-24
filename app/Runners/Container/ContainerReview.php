@@ -6,12 +6,14 @@ namespace App\Runners\Container;
 
 use App\Enums\BuildState;
 use App\Exceptions\CheckoutFailed;
+use App\Exceptions\ReviewStopped;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Runners\ContainerRunner;
 use App\Runners\QueuedRuns;
 use App\Runners\RunConclusion;
 use App\Services\ReviewCredentials;
+use App\Services\ReviewStops;
 use App\Services\RunMetrics;
 use App\SourceControl\GitDriver;
 use App\SourceControl\PullRef;
@@ -64,6 +66,7 @@ class ContainerReview
         protected Precheck $precheck,
         protected Report $report,
         protected Sandboxes $sandboxes,
+        protected ReviewStops $stops,
     ) {}
 
     /**
@@ -165,6 +168,13 @@ class ContainerReview
      */
     protected function review(Repository $repository, string $branch, ?string $commit, int $build, string $directory, ?string $home, int $round, ?int $waited, ?Trial $trial = null, bool $carriesOn = false): bool
     {
+        // Stopped while it waited: closed then, and nothing to do now.
+        if (($by = $this->stops->requested($repository, $build)) !== null) {
+            $this->log->writer((int) $repository->getKey(), $build)?->note("Stopped by {$by} before it started.");
+
+            return false;
+        }
+
         $this->runner->markRunning($repository, $build);
 
         $reviewing = false;
@@ -342,11 +352,24 @@ class ContainerReview
             // whichever worker runs them. A home of the job's own is not kept.
             $this->sessions->store($repository, $trial === null ? $branch : ReviewSessions::forTrial($branch, $build));
 
+            // Stopped after the reviewer was done, while its files came back or its
+            // session was kept: nothing is filed either. Looked at last, before filing.
+            if ($this->stops->requested($repository, $build) !== null) {
+                throw new ReviewStopped('The review was stopped after its reviewer finished.');
+            }
+
             // Filed here, by the worker: it reads what the reviewer wrote as data and
             // runs nothing of it, so it needs no container either.
             $log?->note('── report ──');
 
             return $this->report->run($repository, $branch, $commit, $build, (int) $outcome['REVIEW_PR_ID'], $directory, $trial, $log);
+        } catch (ReviewStopped) {
+            // Its sandbox is gone; nothing of it is filed or posted.
+            $by = $this->stops->requested($repository, $build) ?? 'someone';
+            $this->stops->stopped($repository, $build, $by);
+            $this->log->writer((int) $repository->getKey(), $build)?->note("Stopped by {$by}.");
+
+            return false;
         } finally {
             // Never in the way of the review: a run without them only has none.
             rescue(fn () => $this->metrics->store($repository, $build, $used), null, false);
@@ -543,12 +566,19 @@ class ContainerReview
         $log = $this->log->writer((int) $repository->getKey(), $build, $environment);
         $log?->note("── {$name} ──");
 
+        // Someone may stop the review while its reviewer works.
+        $this->sandbox->stopWhen = fn (): bool => $this->stops->requested($repository, $build) !== null;
+
         try {
             $result = $this->sandbox->run("review-{$repository->getKey()}-{$build}-{$name}", $script, $directory, $environment, $trusted, $timeout, $home, $lockedGit, $log === null ? null : $log->write(...), $composerCache, $clone);
+        } catch (ReviewStopped $exception) {
+            throw $exception;
         } catch (Throwable $exception) {
             $log?->note("The {$name} step was cut short: ".class_basename($exception).'.');
 
             throw $exception;
+        } finally {
+            $this->sandbox->stopWhen = null;
         }
 
         if ($result->failed()) {

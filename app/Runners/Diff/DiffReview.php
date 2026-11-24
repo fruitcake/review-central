@@ -26,6 +26,7 @@ use App\Services\ReviewInstructions;
 use App\Services\ReviewOpening;
 use App\Services\ReviewPublisher;
 use App\Services\ReviewSettings;
+use App\Services\ReviewStops;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\File;
 use Throwable;
@@ -57,6 +58,7 @@ class DiffReview
         protected RunLog $log,
         protected QueuedRuns $queued,
         protected PullRequestClassifier $classifier,
+        protected ReviewStops $stops,
     ) {}
 
     /**
@@ -66,6 +68,13 @@ class DiffReview
     {
         $log = $this->log->writer((int) $repository->getKey(), $build);
         $opened = null;
+
+        // Stopped while it waited: closed then, and nothing to do now.
+        if (($by = $this->stops->requested($repository, $build)) !== null) {
+            $log?->note("Stopped by {$by} before it started.");
+
+            return;
+        }
 
         try {
             // A trial names its pull request, which may be merged by now.
@@ -186,6 +195,14 @@ class DiffReview
             }
 
             $log?->note("{$answer->model} answered: ".count($answer->report['findings'] ?? []).' finding(s), '.number_format($answer->usage['input'] + $answer->usage['cache_read'] + $answer->usage['cache_creation']).' tokens in and '.number_format($answer->usage['output']).' out.');
+
+            // The provider's call cannot be cut short; its answer is not filed.
+            if (($by = $this->stops->requested($repository, $build)) !== null) {
+                $this->stops->stopped($repository, $build, $by);
+                $log?->note("Stopped by {$by}: the answer is not filed.");
+
+                return;
+            }
 
             $filed = $this->filing->file($repository, $this->report($answer, $diff, $branch, $commit, $build, (int) $pullRequest['id'], $connection, $effort, $failOn) + ($trial === null ? [] : ['custom' => true]) + ($trial === null && $repository->sourceControl()->publishes() ? [] : ['publish' => false]));
 
