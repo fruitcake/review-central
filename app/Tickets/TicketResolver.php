@@ -30,7 +30,7 @@ class TicketResolver
 
     /**
      * `#1234` at the start of the title, or after the kind of change:
-     * "#29386 - Implement AI pipeline", "feat #29249 show notes".
+     * "#4321 - Add the order export", "feat #8765 add a filter".
      */
     public const LEADING_NUMBER = '/^\s*(?:[A-Za-z]+(?:\([^)]*\))?!?:?\s+)?#(?<number>\d+)(?!\d)/';
 
@@ -82,7 +82,7 @@ class TicketResolver
     /**
      * The source a reference is for: as a title would carry it, or as a ticket
      * that was read gave it back, with the prefix a numbered source adds
-     * (`SHOP-29386` for `#29386`).
+     * (`SHOP-4321` for `#4321`).
      *
      * @param  Collection<int, TicketSource>  $sources
      * @return array{0: TicketSource, 1: string}|null
