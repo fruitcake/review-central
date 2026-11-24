@@ -74,12 +74,16 @@ reviewer_drop_project_settings() {
   reviewer_strip_skill_settings
 }
 
-# The settings in the frontmatter of the pull request's skills, agents and
-# commands. `allowed-tools` lets a command run without asking while the skill is
-# in use, `permissionMode` sets how an agent asks, and `hooks` and `mcpServers`
-# run commands of their own. The rest of the file, its description and its text,
-# stays, so a skill still loads. A link is left alone: nothing is written through it.
-REVIEWER_SKILL_SETTINGS='allowed-tools|permissionMode|hooks|mcpServers'
+# The frontmatter of the pull request's skills, agents and commands, down to
+# what describes them. The rest can be a setting: `allowed-tools` lets a command
+# run without asking while the skill is in use, `permissionMode` sets how an agent
+# asks, and `hooks` and `mcpServers` run commands of their own. Kept by name, not
+# left out by name, as YAML spells a key in more ways than one ("allowed-tools",
+# a flow mapping): a top-level line stays only when it is one of these keys,
+# unquoted, and an indented line or list item only under one. The text after the
+# frontmatter stays, so a skill still loads. A frontmatter that never closes is
+# none, and is left alone, as is a link: nothing is written through it.
+REVIEWER_SKILL_KEYS='name|description|when_to_use|argument-hint|license|version|metadata|compatibility|tools|color|user-invocable|disable-model-invocation'
 
 reviewer_strip_skill_settings() {
   stripped=$(
@@ -87,18 +91,22 @@ reviewer_strip_skill_settings() {
       [ -d "$root" ] && [ ! -L "$root" ] && find "$root" -type f -name '*.md' 2> /dev/null
     done | while IFS= read -r file; do
       head -n 1 "$file" | grep -qx -- '---' || continue
-      awk -v keys="^($REVIEWER_SKILL_SETTINGS)[[:space:]]*:" '
+      # Written outside the checkout, where the pull request has put nothing.
+      kept=$(mktemp) || continue
+      if ! awk -v keys="^($REVIEWER_SKILL_KEYS)[[:space:]]*:" '
         NR == 1 { inside = 1; print; next }
-        inside && /^---[[:space:]]*$/ { inside = 0; skipping = 0; print; next }
-        inside && $0 ~ keys { skipping = 1; next }
-        inside && skipping && /^([[:space:]]|-)/ { next }
-        { skipping = 0; print }
-      ' "$file" > "$file.review-stripped" || { rm -f -- "$file.review-stripped"; continue; }
-      if cmp -s "$file" "$file.review-stripped"; then
-        rm -f -- "$file.review-stripped"
+        inside && /^---[[:space:]]*$/ { inside = 0; print; next }
+        inside && /^([[:space:]]|-|$)/ { if (keeping || $0 ~ /^[[:space:]]*$/) print; next }
+        inside { keeping = ($0 ~ keys); if (keeping) print; next }
+        { print }
+        END { exit inside ? 3 : 0 }
+      ' "$file" > "$kept" || cmp -s "$file" "$kept"; then
+        rm -f -- "$kept"
         continue
       fi
-      mv -f -- "$file.review-stripped" "$file"
+      # In place of the file, not through it: rm takes a link itself.
+      rm -f -- "$file" && cp -- "$kept" "$file"
+      rm -f -- "$kept"
       git ls-files -z -- "$file" 2> /dev/null | xargs -0 -r git update-index --skip-worktree -- 2> /dev/null || true
       echo "$file"
     done | wc -l | tr -d ' '
