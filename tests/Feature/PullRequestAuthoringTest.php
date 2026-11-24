@@ -7,6 +7,7 @@ use App\Models\Connection;
 use App\Models\PersonalConnection;
 use App\Models\Repository;
 use App\Models\User;
+use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 
@@ -36,7 +37,9 @@ beforeEach(function () {
                 $request->method() === 'POST' => Http::response(['id' => 71, 'links' => ['html' => ['href' => 'https://bitbucket.org/acme/shop/pull-requests/71']]], 201),
                 $request->method() === 'PUT' => Http::response([]),
                 preg_match('#/pullrequests/(\d+)$#', $path, $id) === 1 => isset($this->onHost[$id[1]]) ? Http::response($this->onHost[$id[1]]) : Http::response([], 404),
-                default => Http::response(['values' => array_values(array_filter($this->onHost, fn (array $pullRequest): bool => str_contains((string) $request['q'], "\"{$pullRequest['source']['branch']['name']}\"")))]),
+                // The query names the branch, and the repository it is in where it is asked.
+                default => Http::response(['values' => array_values(array_filter($this->onHost, fn (array $pullRequest): bool => str_contains((string) $request['q'], "source.branch.name=\"{$pullRequest['source']['branch']['name']}\"")
+                    && (! str_contains((string) $request['q'], 'source.repository.full_name') || str_contains((string) $request['q'], "source.repository.full_name=\"{$pullRequest['source']['repository']['full_name']}\""))))]),
             };
         },
     ]);
@@ -68,9 +71,22 @@ it('opens a pull request as the user, with the default reviewers but them, and n
         && $request['draft'] === true
         && $request['reviewers'] === [['uuid' => '{nora}']]);
 
+    // A fork's branch of the same name is another branch.
+    $this->onHost[60] = array_replace_recursive(($this->pullRequest)(60, 'id-bob'), ['source' => ['repository' => ['full_name' => 'bob/shop']]]);
+
+    ($this->create)()->assertOk();
+
     $this->onHost[71] = ($this->pullRequest)(71, 'id-sam');
 
     ($this->create)()->assertHasErrors(['feature/export already has an open pull request: https://bitbucket.org/acme/shop/pull-requests/71']);
+});
+
+it('says the host refused, where the user\'s account cannot reach the repository', function () {
+    Http::swap(new HttpFactory);
+    Http::fake(['api.bitbucket.org/*' => Http::response(['error' => ['message' => 'You may not have access to this repository.']], 403)]);
+
+    ($this->create)()->assertHasErrors(['acme/shop refused the pull request: You may not have access to this repository.']);
+    ($this->update)()->assertHasErrors(['acme/shop refused to show the pull request to your account: You may not have access to this repository.']);
 });
 
 it('says how to connect where the user cannot open one as themselves', function () {

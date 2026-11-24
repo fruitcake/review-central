@@ -358,6 +358,19 @@ class GitHubClient implements FiltersSecrets, OpensPullRequests, SourceControl
     }
 
     /**
+     * By `head` as owner:branch, which a fork's branch of the same name is not.
+     */
+    public function findOpenPullRequestFromBranch(string $branch): ?array
+    {
+        $found = $this->request(10)
+            ->get($this->url('pulls'), ['state' => 'open', 'head' => "{$this->owner}:{$branch}", 'sort' => 'updated', 'direction' => 'desc', 'per_page' => 1])
+            ->throw()
+            ->json()[0] ?? null;
+
+        return is_array($found) ? self::pullRequest($found) : null;
+    }
+
+    /**
      * Into the repository's default branch unless another is named. GitHub has no
      * default reviewers to add: a CODEOWNERS file asks its own.
      */

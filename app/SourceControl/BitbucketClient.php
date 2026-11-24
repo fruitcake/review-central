@@ -183,6 +183,18 @@ class BitbucketClient implements FiltersSecrets, OpensPullRequests, SourceContro
             ->json() ?? [];
     }
 
+    public function findOpenPullRequestFromBranch(string $branch): ?array
+    {
+        $found = $this->request(10)->get($this->url('pullrequests'), [
+            'state' => 'OPEN',
+            'q' => 'source.branch.name="'.addcslashes($branch, '"\\').'" AND source.repository.full_name="'.addcslashes("{$this->workspace}/{$this->slug}", '"\\').'"',
+            'sort' => '-updated_on',
+            'pagelen' => 1,
+        ])->throw()->json('values.0');
+
+        return is_array($found) ? $found : null;
+    }
+
     /**
      * With the repository's default reviewers, which Bitbucket adds only to one
      * opened on its site, but not the one who opens it, whom it refuses.

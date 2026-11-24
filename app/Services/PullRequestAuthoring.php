@@ -30,13 +30,13 @@ class PullRequestAuthoring
     {
         ['client' => $host] = $this->connections->authorFor($user, $repository);
 
-        $open = $host->findOpenPullRequestByBranch($branch);
-
-        if ($open !== null) {
-            throw new ActionRefused("{$branch} already has an open pull request: {$host->pullRequestUrl((int) $open['id'])}. Use `update-pull-request` to rewrite it.");
-        }
-
         try {
+            $open = $host->findOpenPullRequestFromBranch($branch);
+
+            if ($open !== null) {
+                throw new ActionRefused("{$branch} already has an open pull request: {$host->pullRequestUrl((int) $open['id'])}. Use `update-pull-request` to rewrite it.");
+            }
+
             return $host->openPullRequest($branch, $destination, $title, ReviewContext::authorDescription($description), $draft);
         } catch (RequestException $exception) {
             throw new ActionRefused("{$repository->fullName()} refused the pull request: ".$this->reason($exception));
@@ -55,7 +55,11 @@ class PullRequestAuthoring
     {
         ['client' => $host, 'account_id' => $accountId] = $this->connections->authorFor($user, $repository);
 
-        $current = $pullRequestId !== null ? $host->getPullRequest((string) $pullRequestId) : $host->findOpenPullRequestByBranch((string) $branch);
+        try {
+            $current = $pullRequestId !== null ? $host->getPullRequest((string) $pullRequestId) : $host->findOpenPullRequestFromBranch((string) $branch);
+        } catch (RequestException $exception) {
+            throw new ActionRefused("{$repository->fullName()} refused to show the pull request to your account: ".$this->reason($exception));
+        }
 
         if ($current === null) {
             throw new ActionRefused($pullRequestId !== null
