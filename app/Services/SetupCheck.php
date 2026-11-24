@@ -478,7 +478,7 @@ class SetupCheck
                 $missing === [],
                 "{$title}: the bucket's keys",
                 "The disk {$diskName} on the bucket ".($bucket['R2_BUCKET'] ?? '').'.',
-                'Set the account ID and the bucket\'s keys under Settings → Cloudflare sandboxes (or '.implode(', ', $missing).' in .env). In the Cloudflare dashboard: R2 → Manage API Tokens → Create Account API token, with Object Read & Write on the bucket only. It shows the Access Key ID and the Secret Access Key.',
+                'The deploy makes the bucket, not its keys: those are a step of their own. In the Cloudflare dashboard: R2 → Manage API Tokens → Create Account API token, with Object Read & Write on the bucket only. Paste the Access Key ID and the Secret Access Key it shows under Settings → Cloudflare sandboxes (or '.implode(', ', $missing).' in .env).',
                 'Missing: '.implode(', ', $missing).'.',
             ) + ($missing === [] ? [] : ['guide' => SetupGuides::R2_KEYS]),
         ];

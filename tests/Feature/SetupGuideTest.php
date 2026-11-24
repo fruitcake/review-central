@@ -145,7 +145,7 @@ describe('for the installation', function () {
     it('explains the Cloudflare token and the bucket\'s keys under Settings', function () {
         livewire(Settings::class)
             ->mountAction(TestAction::make('cloudflareTokenGuide')->schemaComponent('cloudflare.cloudflare_api_token'))
-            ->assertMountedActionModalSee(['https://dash.cloudflare.com/profile/api-tokens', 'Workers Scripts: Edit', 'Containers: Edit', 'Account Settings: Read']);
+            ->assertMountedActionModalSee(['https://dash.cloudflare.com/profile/api-tokens', 'Workers Scripts: Edit', 'Containers: Edit', 'Workers R2 Storage: Edit']);
 
         livewire(Settings::class)
             ->mountAction(TestAction::make('r2KeysGuide')->schemaComponent('cloudflare.r2_access_key_id'))
