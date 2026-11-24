@@ -149,6 +149,8 @@ class ReviewContext
         $requested = collect($conversation)
             ->contains(fn (array $comment): bool => $comment['after_last_review'] && ! $comment['is_review'] && ReviewRequest::isRequest($comment['text'])
                 && $repository->tenant->allowsReviewCommandFrom($authors[(string) $comment['id']]['account_id'] ?? null, $authors[(string) $comment['id']]['nickname'] ?? null));
+        // Kept for the opening, where it also starts a review over the pull request's budget.
+        $context['review_requested'] = $requested;
 
         if ($context['pull_request']['draft'] && ! $reviewDrafts && ! $requested) {
             $context['skip'] = true;

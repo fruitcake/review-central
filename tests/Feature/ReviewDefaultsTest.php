@@ -15,6 +15,7 @@ use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\PullRequestBudget;
 use App\Services\ReviewSettings;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
@@ -363,4 +364,17 @@ it('holds the merge from the severity set per category, the repository\'s over t
 
     expect($this->repository->fresh()->reviewSetting)->toBeNull()
         ->and(ReviewSettings::failOn($this->repository->fresh()))->toBe('high,security:any,maintainability:never');
+});
+
+it('saves a budget per pull request for the team, which a repository can set its own over', function () {
+    livewire(ReviewDefaults::class)
+        ->fillForm(['pull_request_budget' => '2.5'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect(app(PullRequestBudget::class)->budget($this->repository->fresh()))->toBe(2.5);
+
+    ReviewSettings::saveFor($this->repository, ['pull_request_budget' => 10]);
+
+    expect(app(PullRequestBudget::class)->budget($this->repository->fresh()))->toBe(10.0);
 });

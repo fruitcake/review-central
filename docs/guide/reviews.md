@@ -76,6 +76,10 @@ A review of a pull request after its first is a follow-up: it re-checks the open
 
 Trials are not rounds of a pull request's review and are left alone.
 
+### Budget per pull request
+
+Follow-up rounds limit what a review may add; **Budget per pull request** limits what the reviews of one pull request may cost, in the team's currency. Set it under Review defaults, and a repository can set its own under Review settings. Once the reviews of a pull request have cost it, a push no longer starts one, and the pull request gets one comment saying so. A `/review` comment still starts a review each time. Trials do not count towards it. Empty is no limit.
+
 ## What the reviewer reads in the repository
 
 A team writes down how its code works, and what counts as a defect there, in the repository itself. The reviewer reads these files where they exist, and they win over its general rules:

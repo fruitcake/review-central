@@ -326,7 +326,7 @@ class ReviewSettings
     {
         $setting = self::defaults($tenant);
         // The notes on whose turn are the team's alone, and no repository's.
-        $setting->fill(array_intersect_key(self::withOwnThresholds($data), self::VARIABLES + self::STRATEGY_FIELDS + ['providers' => true, 'follow_ups' => true, 'max_rounds' => true, 'fail_on' => true, 'turn_notes' => true, 'turn_model' => true, 'findings_check' => true]));
+        $setting->fill(array_intersect_key(self::withOwnThresholds($data), self::VARIABLES + self::STRATEGY_FIELDS + ['providers' => true, 'follow_ups' => true, 'max_rounds' => true, 'fail_on' => true, 'pull_request_budget' => true, 'turn_notes' => true, 'turn_model' => true, 'findings_check' => true]));
         $setting->save();
     }
 
@@ -346,7 +346,7 @@ class ReviewSettings
      */
     public static function saveFor(Repository $repository, array $data): void
     {
-        $data = array_intersect_key(self::withOwnThresholds($data), self::VARIABLES + self::STRATEGY_FIELDS + ['providers' => true, 'follow_ups' => true, 'max_rounds' => true, 'fail_on' => true]);
+        $data = array_intersect_key(self::withOwnThresholds($data), self::VARIABLES + self::STRATEGY_FIELDS + ['providers' => true, 'follow_ups' => true, 'max_rounds' => true, 'fail_on' => true, 'pull_request_budget' => true]);
 
         if (array_filter($data, fn (mixed $value): bool => filled($value)) === []) {
             $repository->reviewSetting()->delete();

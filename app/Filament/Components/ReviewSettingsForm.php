@@ -156,6 +156,14 @@ class ReviewSettingsForm
                 ->maxValue(50)
                 ->placeholder(fn (): string => $defaults !== null && $defaults->max_rounds !== null ? "Default: {$defaults->max_rounds}" : (string) ReviewFollowUps::MAX_ROUNDS)
                 ->helperText('After this many reviews of a pull request after its first, nothing new is recorded: the open findings are still checked, and what the review would add goes under Open questions for a person. From the third follow-up on, a new finding below HIGH no longer holds the merge. Against a review, a fix, a review on and on.'),
+            TextInput::make('pull_request_budget')
+                ->label('Budget per pull request')
+                ->numeric()
+                ->minValue(0)
+                ->prefix(fn (): string => app(Currency::class)->symbol(CurrentTenant::get()))
+                ->placeholder(fn (): string => $defaults !== null && $defaults->pull_request_budget !== null ? 'Default: '.Currency::showOwn((float) $defaults->pull_request_budget) : 'No limit')
+                ->helperText('Once the reviews of one pull request have cost this, a push no longer starts one, and the pull request is told so once. A /review comment still starts one, each time. Trials do not count. Against a pull request that is pushed to over and over.')
+                ->dehydrateStateUsing(fn (mixed $state): ?float => filled($state) ? (float) $state : null),
             Select::make('follow_ups')
                 ->label('New commit during a review')
                 ->options([0 => 'Start a fresh review for it', 1 => 'Carry on with it, once', 2 => 'Carry on with it, up to twice'])
@@ -622,7 +630,7 @@ class ReviewSettingsForm
     public static function state(?ReviewSetting $setting): array
     {
         return $setting === null ? [] : collect($setting->attributesToArray())
-            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'ocr', 'scan', 'floor_guard', 'max_rounds', 'fail_on', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model', 'findings_check'])
+            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'ocr', 'scan', 'floor_guard', 'max_rounds', 'fail_on', 'pull_request_budget', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model', 'findings_check'])
             ->all();
     }
 }
