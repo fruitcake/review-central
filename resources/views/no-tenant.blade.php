@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex">
     <title>{{ config('app.name') }}</title>
-    <link rel="icon" href="{{ asset('favicon.svg') }}" type="image/svg+xml">
+    <link rel="icon" href="{{ app(\App\Services\PlatformSettings::class)->favicon() }}">
     <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
     <style>
         :root { color-scheme: light dark; --muted: #71717a; --accent: #0d6861; }

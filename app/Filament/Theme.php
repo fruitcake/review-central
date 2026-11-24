@@ -54,7 +54,7 @@ class Theme
                 'subtitle' => $subtitle,
             ]))
             ->brandLogoHeight('2rem')
-            ->favicon(fn (): string => app(PlatformSettings::class)->logo() ?? asset('favicon.svg'))
+            ->favicon(fn (): string => app(PlatformSettings::class)->favicon())
             ->renderHook(PanelsRenderHook::SIDEBAR_FOOTER, fn (): string|View => app(PlatformSettings::class)->credit() ? view('filament.credit') : '')
             ->renderHook(PanelsRenderHook::AUTH_LOGIN_FORM_AFTER, fn (): View => view('filament.sign-in-with', ['providers' => SingleSignOn::providers()]))
             ->renderHook(PanelsRenderHook::HEAD_END, fn (): View => view('filament.theme', ['admin' => $subtitle !== '', 'colours' => Themes::for(CurrentTenant::find())]))
