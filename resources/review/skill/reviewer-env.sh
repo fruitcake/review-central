@@ -56,8 +56,9 @@ reviewer_env_report() {
 # reads them as the project's: a hook in .claude/settings.json runs a command as
 # the reviewer, and an env entry such as ANTHROPIC_BASE_URL sends the key to
 # whoever it names. Codex reads .codex/config.toml, and Pi loads .pi/ with its
-# extensions, the same way. The skills, agents and CLAUDE.md stay: those are text
-# the reviewer reads, not settings it runs.
+# extensions, the same way. The skills, agents, commands and CLAUDE.md stay: those
+# are text the reviewer reads. What in their frontmatter is a setting goes, see
+# reviewer_strip_skill_settings.
 #
 # Run after the vendor cache is unpacked, so a file an archive brought goes too.
 # Marked skip-worktree where the repository tracks it, so the removal is no change
@@ -70,6 +71,39 @@ reviewer_drop_project_settings() {
       echo "Left out the pull request's $path: the reviewer runs with the review's own settings."
     fi
   done
+  reviewer_strip_skill_settings
+}
+
+# The settings in the frontmatter of the pull request's skills, agents and
+# commands. `allowed-tools` lets a command run without asking while the skill is
+# in use, `permissionMode` sets how an agent asks, and `hooks` and `mcpServers`
+# run commands of their own. The rest of the file, its description and its text,
+# stays, so a skill still loads. A link is left alone: nothing is written through it.
+REVIEWER_SKILL_SETTINGS='allowed-tools|permissionMode|hooks|mcpServers'
+
+reviewer_strip_skill_settings() {
+  stripped=$(
+    for root in .claude/skills .claude/agents .claude/commands .agents/skills; do
+      [ -d "$root" ] && [ ! -L "$root" ] && find "$root" -type f -name '*.md' 2> /dev/null
+    done | while IFS= read -r file; do
+      head -n 1 "$file" | grep -qx -- '---' || continue
+      awk -v keys="^($REVIEWER_SKILL_SETTINGS)[[:space:]]*:" '
+        NR == 1 { inside = 1; print; next }
+        inside && /^---[[:space:]]*$/ { inside = 0; skipping = 0; print; next }
+        inside && $0 ~ keys { skipping = 1; next }
+        inside && skipping && /^([[:space:]]|-)/ { next }
+        { skipping = 0; print }
+      ' "$file" > "$file.review-stripped" || { rm -f -- "$file.review-stripped"; continue; }
+      if cmp -s "$file" "$file.review-stripped"; then
+        rm -f -- "$file.review-stripped"
+        continue
+      fi
+      mv -f -- "$file.review-stripped" "$file"
+      git ls-files -z -- "$file" 2> /dev/null | xargs -0 -r git update-index --skip-worktree -- 2> /dev/null || true
+      echo "$file"
+    done | wc -l | tr -d ' '
+  )
+  [ "$stripped" -eq 0 ] || echo "Left out the settings in the frontmatter of $stripped of the pull request's skills, agents and commands: they run with the review's own permissions."
 }
 
 # The parts of the review the team turned off (REVIEW_OCR, REVIEW_FLOOR_GUARD,
