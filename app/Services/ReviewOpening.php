@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Tickets\TicketResolver;
@@ -71,7 +70,7 @@ class ReviewOpening
             $pullRequest,
             $comments,
             $commit,
-            (bool) ($input['drafts'] ?? false) || $this->askedByHand($repository, (int) $id),
+            (bool) ($input['drafts'] ?? false) || $this->askedByHand($repository, (int) $id, $pullRequest['source']['branch']['name'] ?? null),
         );
 
         // "Reviewed up to <commit>" is read from a marker in the description or in a
@@ -332,14 +331,11 @@ class ReviewOpening
      * has finished since: it is then reviewed as a draft too, as on a /review
      * comment, and left alone again once that review is done.
      */
-    protected function askedByHand(Repository $repository, int $pullRequestId): bool
+    protected function askedByHand(Repository $repository, int $pullRequestId, mixed $branch): bool
     {
-        $requestedAt = OpenPullRequest::query()
-            ->where('repository_id', $repository->getKey())
-            ->where('pull_request_id', $pullRequestId)
-            ->value('review_requested_at');
+        $askedAt = is_string($branch) && $branch !== '' ? ReviewRequest::askedAt($repository, $branch) : null;
 
-        return $requestedAt !== null && $this->budget->requestStands($repository, $pullRequestId, (string) $requestedAt);
+        return $askedAt !== null && $this->budget->requestStands($repository, $pullRequestId, $askedAt);
     }
 
     /**

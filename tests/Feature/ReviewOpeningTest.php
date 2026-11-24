@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Enums\ReviewCommandAccess;
 use App\Enums\ReviewsFrom;
-use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Runners\ContainerRunner;
@@ -191,9 +190,8 @@ class ReviewOpeningTest extends TestCase
 
     public function test_it_reviews_a_draft_someone_started_by_hand_until_a_review_has_finished(): void
     {
+        // Not listed here yet: the Reviews page starts a branch the host knows of.
         $this->fakeBitbucket([], ['draft' => true]);
-        $record = OpenPullRequest::query()->create(['repository_id' => $this->repository->getKey(), 'pull_request_id' => 570]);
-        $record->forceFill(['branch' => 'feature/review', 'draft' => true])->save();
         config(['review.diff.enabled' => true]);
         $this->repository->update(['review_runner' => DiffRunner::NAME]);
         Queue::fake();
