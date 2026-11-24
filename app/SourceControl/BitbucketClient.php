@@ -13,7 +13,7 @@ use Throwable;
 /**
  * A repository on Bitbucket Cloud.
  */
-class BitbucketClient implements FiltersSecrets, SourceControl
+class BitbucketClient implements FiltersSecrets, OpensPullRequests, SourceControl
 {
     use SecretFiltering;
 
@@ -181,6 +181,45 @@ class BitbucketClient implements FiltersSecrets, SourceControl
             ->put($this->url("pullrequests/{$id}/tasks/{$taskId}"), ['state' => 'RESOLVED', 'content' => ['raw' => $content]])
             ->throw()
             ->json() ?? [];
+    }
+
+    public function findOpenPullRequestFromBranch(string $branch): ?array
+    {
+        $found = $this->request(10)->get($this->url('pullrequests'), [
+            'state' => 'OPEN',
+            'q' => 'source.branch.name="'.addcslashes($branch, '"\\').'" AND source.repository.full_name="'.addcslashes("{$this->workspace}/{$this->slug}", '"\\').'"',
+            'sort' => '-updated_on',
+            'pagelen' => 1,
+        ])->throw()->json('values.0');
+
+        return is_array($found) ? $found : null;
+    }
+
+    /**
+     * With the repository's default reviewers, which Bitbucket adds only to one
+     * opened on its site, but not the one who opens it, whom it refuses.
+     */
+    public function openPullRequest(string $branch, ?string $destination, string $title, string $description, bool $draft): array
+    {
+        $self = $this->accountId();
+        $reviewers = collect(rescue(fn (): array => $this->pages($this->url('effective-default-reviewers').'?pagelen=100'), [], false))
+            ->map(fn (array $reviewer): ?string => is_string($reviewer['user']['uuid'] ?? null) && ($reviewer['user']['account_id'] ?? null) !== $self ? $reviewer['user']['uuid'] : null)
+            ->filter()
+            ->unique()
+            ->map(fn (string $uuid): array => ['uuid' => $uuid])
+            ->values()
+            ->all();
+
+        $pullRequest = $this->request(20)->post($this->url('pullrequests'), array_filter([
+            'title' => $title,
+            'description' => $description,
+            'source' => ['branch' => ['name' => $branch]],
+            'destination' => $destination === null ? null : ['branch' => ['name' => $destination]],
+            'draft' => $draft,
+            'reviewers' => $reviewers,
+        ], fn (mixed $value): bool => $value !== null))->throw()->json();
+
+        return ['id' => (int) ($pullRequest['id'] ?? 0), 'url' => (string) ($pullRequest['links']['html']['href'] ?? $this->pullRequestUrl((int) ($pullRequest['id'] ?? 0)))];
     }
 
     public function updatePullRequestDescription(string $id, string $title, string $description): int

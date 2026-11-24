@@ -75,7 +75,7 @@ A user whose address is already known signs in as that user, when Google holds t
 
 Replies to findings that an AI assistant posts for you are written by the tenant's connection, with your name above them. With a Bitbucket OAuth consumer added under **Admin → Apps**, or `BITBUCKET_CLIENT_ID` and `BITBUCKET_CLIENT_SECRET` in `.env`, each person can connect their own Bitbucket account under **Bitbucket and GitHub** on their profile, and their replies are then written as them.
 
-Make the consumer in any Bitbucket workspace you administer, under **Settings → OAuth consumers**, with `<APP_URL>/connections/bitbucket/callback` as its callback URL and the permissions **Account: Email**, **Account: Read** and **Pull requests: Read**, which includes commenting, and no others: Bitbucket gives every token the consumer's permissions, whatever is asked for, signing in included. People of other workspaces connect through it too. The account is kept for that person only and used for nothing but their replies, though Bitbucket lets its token comment on every pull request they can. A connected account also tells which pull requests are theirs under **With me**; the profile shows it as *Bitbucket: nickname*. When Bitbucket refuses a reply as them, as on a repository their account cannot reach, the connection posts it as before.
+Make the consumer in any Bitbucket workspace you administer, under **Settings → OAuth consumers**, with `<APP_URL>/connections/bitbucket/callback` as its callback URL and the permissions **Account: Email**, **Account: Read** and **Pull requests: Read**, which includes commenting: Bitbucket gives every token the consumer's permissions, whatever is asked for, signing in included. Add **Pull requests: Write** only to let an assistant open and edit people's own pull requests as them (see [Opening pull requests as yourself](#opening-pull-requests-as-yourself)): it also lets the token merge, and Bitbucket ticks Repositories: Write with it, which lets it push. People of other workspaces connect through it too. The account is kept for that person only and used for nothing but their replies, though Bitbucket lets its token comment on every pull request they can. A connected account also tells which pull requests are theirs under **With me**; the profile shows it as *Bitbucket: nickname*. When Bitbucket refuses a reply as them, as on a repository their account cannot reach, the connection posts it as before.
 
 The tenant's connection itself stays a token of its own: the review comments, approves and adds webhooks as it, whoever connects their account.
 
@@ -90,6 +90,15 @@ With the GitHub App set up, each person can connect their own GitHub account und
 Connected, a reply to a finding that an AI assistant posts for you is written as you, with the app's badge next to your name, instead of by the app with your name above it. GitHub gives the app's token for a person the app's permissions and no more than theirs, and only on the repositories the app is installed on: a repository whose connection is a token of its own gets the reply from that connection, signed with your name, as before. The token lasts eight hours and is renewed by itself; **Disconnect** also has GitHub revoke it. A connected account also tells which pull requests are yours under **With me**.
 
 Signing in works as with Bitbucket: GitHub names an account's verified addresses, but "verified" was true once and an address may belong to someone else by now, so the first sign-in with an account that is not linked yet mails a code to one of them, chosen as with Bitbucket. A connected account signs in by itself. Someone without an account here gets one that way only when a tenant lists their address's domain under **Sign-in domains**. Without the app's *Email addresses* permission GitHub names no address, and signing in with an account that is not linked yet is refused. Signing in connects the account as well.
+
+## Opening pull requests as yourself
+
+A coding agent connected to `/mcp/agent` can open the pull request of a pushed branch with `create-pull-request`, and rewrite the title and description of one later with `update-pull-request`, both under the user's own name. It goes through the account the user connected on their profile:
+
+- **Bitbucket**: the consumer needs **Pull requests: Write**, and the user connects their account after it was added. The pull request gets the repository's default reviewers, as one opened on Bitbucket's site does.
+- **GitHub**: through the GitHub App, which needs nothing more, on the repositories it is installed on and reviews through. It shows the user's name with the app's badge.
+
+`update-pull-request` changes only a pull request whose author is the user's connected account; someone else's is refused. The review's own section in the description stays as it is. A repository whose connection is set to write nothing gets neither.
 
 ## Signing in to Asana and Jira
 
