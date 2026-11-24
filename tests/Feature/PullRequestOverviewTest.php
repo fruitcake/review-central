@@ -119,7 +119,8 @@ it('keeps a merged or declined pull request under its tab, open again only for n
     deliverPullRequest(['updated_on' => '2026-11-19T13:00:00+00:00'])->assertOk();
 
     expect($all()->closed_as)->toBe('merged');
-    $tab('merged')->assertCanSeeTableRecords([$all()]);
+    // Nothing to review: its branch may be another pull request's by now.
+    $tab('merged')->assertCanSeeTableRecords([$all()])->assertTableActionHidden('start', $all());
 
     // Gone once it has been closed long enough.
     $this->travel(OpenPullRequest::CLOSED_DAYS + 1)->days();
@@ -362,4 +363,28 @@ it('fetches a repository\'s open pull requests from its host without reviewing t
         ->filterTable('repository_id', $this->repository->id)
         ->assertCanSeeTableRecords(OpenPullRequest::query()->where('repository_id', $this->repository->id)->get())
         ->assertCanNotSeeTableRecords([$other]);
+});
+
+it('takes a merge that comes after a declining, with the reopening between them late or missing', function () {
+    $all = fn (): OpenPullRequest => OpenPullRequest::query()->withoutGlobalScope(OpenPullRequest::OPEN)->where('pull_request_id', 7)->sole();
+    deliverPullRequest()->assertOk();
+
+    deliverPullRequest(['state' => 'DECLINED', 'updated_on' => '2026-11-19T11:00:00+00:00'])->assertOk();
+    deliverPullRequest(['state' => 'MERGED', 'updated_on' => '2026-11-19T13:00:00+00:00'])->assertOk();
+
+    expect($all()->closed_as)->toBe('merged');
+
+    // The reopening between them arrives now, and a repeat of the declining after it.
+    deliverPullRequest(['updated_on' => '2026-11-19T12:00:00+00:00'])->assertOk();
+    deliverPullRequest(['state' => 'DECLINED', 'updated_on' => '2026-11-19T11:00:00+00:00'])->assertOk();
+
+    expect($all()->closed_as)->toBe('merged')
+        ->and(collect($all()->history)->pluck('kind')->filter(fn (string $kind): bool => in_array($kind, ['merged', 'declined', 'reopened'], true))->values()->all())->toBe(['declined', 'merged']);
+});
+
+it('leaves an open pull request open for a declining from before its newest news', function () {
+    deliverPullRequest(['updated_on' => '2026-11-19T12:00:00+00:00'])->assertOk();
+    deliverPullRequest(['state' => 'DECLINED', 'updated_on' => '2026-11-19T11:00:00+00:00'])->assertOk();
+
+    expect(OpenPullRequest::query()->sole()->closed_as)->toBeNull();
 });

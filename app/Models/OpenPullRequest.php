@@ -81,24 +81,31 @@ class OpenPullRequest extends Model
     }
 
     /**
-     * Keeps a pull request as closed, merged or declined, rather than removing it.
-     * One not listed here stays unlisted.
+     * Keeps a pull request as closed, merged or declined, rather than removing it:
+     * also one already closed here, as declined, that a newer snapshot says was
+     * merged since. A snapshot older than the one kept says nothing, and merged
+     * is for good. One not listed here stays unlisted.
      *
      * @param  string|null  $updatedOn  when the host says it last changed, as source_updated_on keeps it
      */
     public static function close(int $repositoryId, int $pullRequestId, bool $merged, ?string $updatedOn = null): void
     {
-        $record = static::query()->where(['repository_id' => $repositoryId, 'pull_request_id' => $pullRequestId])->first();
+        $record = static::withoutGlobalScope(self::OPEN)->where(['repository_id' => $repositoryId, 'pull_request_id' => $pullRequestId])->first();
+        $closedAs = $merged ? self::MERGED : self::DECLINED;
 
-        if ($record === null) {
+        if ($record === null || $record->closed_as === self::MERGED || $record->closed_as === $closedAs) {
             return;
         }
 
-        $record->closed_as = $merged ? self::MERGED : self::DECLINED;
+        if ($updatedOn !== null && $record->source_updated_on !== null && $updatedOn < $record->source_updated_on) {
+            return;
+        }
+
+        $record->closed_as = $closedAs;
         $record->closed_at = now();
         $record->awaiting_approval = false;
         $record->source_updated_on = $updatedOn ?? $record->source_updated_on;
-        $record->record($record->closed_as, $merged ? 'Merged' : 'Declined');
+        $record->record($closedAs, $merged ? 'Merged' : 'Declined');
         $record->save();
     }
 
