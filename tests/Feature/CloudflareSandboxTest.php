@@ -360,7 +360,7 @@ it('has the Worker clone the repository and checks that it did before the step r
 
         return Http::response(sandboxEvents([['exit', ['exitCode' => 0, 'seconds' => 10, 'kept' => false]]]), 200, ['Content-Type' => 'text/event-stream']);
     }]);
-    $clone = ['url' => 'https://bitbucket.org/acme/shop.git', 'authorization' => 'Basic dG9rZW4=', 'ref' => 'refs/heads/feature', 'name' => 'feature', 'commit' => str_repeat('a', 40), 'destination' => 'main', 'base' => null];
+    $clone = ['url' => 'https://bitbucket.org/acme/shop.git', 'authorization' => 'Basic dG9rZW4=', 'ref' => 'refs/heads/feature', 'name' => 'feature', 'commit' => str_repeat('a', 40), 'destination' => 'main', 'base' => null, 'since' => null];
 
     app(CloudflareSandbox::class)->run('review-7-41-review', 'sh .review/skill/run-review.sh', $this->work, [], trusted: false, timeout: 1800, composerCache: storage_path('app/review/cache/7'), clone: $clone);
 

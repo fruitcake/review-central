@@ -255,18 +255,25 @@ class Checkout
      * ref fetched under refs/remotes/origin/<name>, as a clone here has it, the
      * commit checked out, and the destination branch beside it. A merged pull
      * request's destination is put back to `base`, where it was before the merge.
+     * The comparison with `since`, the commit the last review ended on, is fetched
+     * with the clone, as prepareRange() does here.
      *
      * The host's credentials go to the Worker as the header git would send. It adds
      * that header to reading this repository only; the sandbox never has it.
      *
-     * @return array{url: string, authorization: string|null, ref: string, name: string, commit: string, destination: string|null, base: string|null}
+     * @return array{url: string, authorization: string|null, ref: string, name: string, commit: string, destination: string|null, base: string|null, since: string|null}
      *
      * @throws CheckoutFailed
      */
-    public function forSandbox(Repository $repository, string $ref, string $name, string $commit, ?string $destination, ?string $base = null): array
+    public function forSandbox(Repository $repository, string $ref, string $name, string $commit, ?string $destination, ?string $base = null, ?string $since = null): array
     {
         foreach ([$ref, $name, ...array_filter([$destination])] as $part) {
             $this->guard($part);
+        }
+
+        // A commit that is gone after a force push has nothing to compare with.
+        if ($since !== null && preg_match('/^[0-9a-f]{7,40}$/', $since) !== 1) {
+            $since = null;
         }
 
         foreach (array_filter([$commit, $base]) as $hash) {
@@ -285,6 +292,7 @@ class Checkout
             'commit' => $commit,
             'destination' => $destination,
             'base' => $base,
+            'since' => $since,
         ];
     }
 

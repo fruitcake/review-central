@@ -522,7 +522,7 @@ class CloudflareSandbox extends Sandbox
     }
 
     /** The first version of the Worker that clones a repository in the sandbox. */
-    public const CLONES_SINCE = '2026-11-24.3';
+    public const CLONES_SINCE = '2026-11-24.4';
 
     /**
      * Whether the Worker clones a repository in the sandbox. One deployed before it

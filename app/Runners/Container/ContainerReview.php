@@ -242,7 +242,7 @@ class ContainerReview
             // The sandbox fetches the destination beside the commit. It can fetch
             // what it is missing later on, so nothing is compared ahead of it.
             // A merged pull request's is the trial's: the one its base was taken from.
-            $clone = $source === null ? null : $this->checkout->forSandbox($repository, $source['ref'], $source['name'], $commit, $source['destination'] ?? ($destination !== '' ? $destination : null), $source['base']);
+            $clone = $source === null ? null : $this->checkout->forSandbox($repository, $source['ref'], $source['name'], $commit, $source['destination'] ?? ($destination !== '' ? $destination : null), $source['base'], $trial?->mergeCommit === null ? $this->lastReviewedCommit($directory) : null);
 
             // A merged pull request was compared when it was cloned, with the
             // destination as it was; fetching it now would move it past the merge.
@@ -498,7 +498,7 @@ class ContainerReview
 
     /**
      * @param  array<string, string>  $environment
-     * @param  array{url: string, authorization: string|null, ref: string, name: string, commit: string, destination: string|null, base: string|null}|null  $clone  what a Cloudflare sandbox clones for itself, from Checkout::forSandbox()
+     * @param  array{url: string, authorization: string|null, ref: string, name: string, commit: string, destination: string|null, base: string|null, since: string|null}|null  $clone  what a Cloudflare sandbox clones for itself, from Checkout::forSandbox()
      */
     protected function step(string $name, Repository $repository, int $build, string $script, string $directory, array $environment, bool $trusted, int $timeout, ?string $home = null, bool $lockedGit = false, ?string $composerCache = null, ?array $clone = null): ProcessResult
     {

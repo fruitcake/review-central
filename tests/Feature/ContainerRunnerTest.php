@@ -715,6 +715,8 @@ it('has the Cloudflare sandbox clone a private repository for a connection that 
             'commit' => str_repeat('b', 40),
             'destination' => 'main',
             'base' => null,
+            // Where the last review ended: what a follow-up compares with is fetched with the clone.
+            'since' => str_repeat('c', 40),
         ]);
 });
 

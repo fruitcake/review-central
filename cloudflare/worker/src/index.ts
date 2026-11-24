@@ -40,7 +40,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
  * after one is told apart. tests/Feature/CloudflareWorkerVersionTest.php fails
  * on a change that leaves it as it was.
  */
-const WORKER_VERSION = "2026-11-24.3";
+const WORKER_VERSION = "2026-11-24.4";
 
 interface Env {
   REVIEW_SANDBOX: DurableObjectNamespace<ReviewSandbox>;
@@ -104,6 +104,8 @@ interface CloneSpec {
   destination: string | null;
   /** Where the destination is put back to, for a merged pull request; or null. */
   base: string | null;
+  /** The commit the last review ended on, whose comparison with this one is fetched too; or null. */
+  since: string | null;
 }
 
 /** What GitGateway is started with: the host, the repository's path on it, and the header for reading it. */
@@ -118,13 +120,14 @@ interface GitGatewayProps {
  * as its arguments: blobless, as review-central clones, so the merge base is
  * there and a file's contents are fetched when they are read. A commit the ref no
  * longer reaches, after a force push, is fetched by itself. The contents of what
- * the review compares are fetched now, as review-central does before a review:
- * a credential lent for the clone may not outlast it. Where the review writes
+ * the review compares, with the merge base and with the commit the last review
+ * ended on, are fetched now, as review-central does before a review: a
+ * credential lent for the clone may not outlast it. Where the review writes
  * what the reviewer reads is made the review's own, whatever the pull request
  * committed there, as review-central's Precheck::take() does on the worker.
  */
 const CLONE = `set -e
-url=$1 ref=$2 name=$3 commit=$4 destination=$5 base=$6
+url=$1 ref=$2 name=$3 commit=$4 destination=$5 base=$6 previous=$7
 git -c init.defaultBranch=main init -q .
 git remote add origin "$url"
 git config remote.origin.promisor true
@@ -141,11 +144,17 @@ fi
 if [ -n "$destination" ] && since=$(git merge-base "refs/remotes/origin/$destination" HEAD 2> /dev/null); then
   git diff --no-ext-diff --no-textconv --stat "$since" HEAD > /dev/null || true
 fi
+if [ -n "$previous" ]; then
+  git diff --no-ext-diff --no-textconv --stat "$previous" HEAD > /dev/null 2>&1 || true
+fi
 rm -rf -- review-context.json review-ticket.md .review-instructions
 echo "Cloned $(git rev-parse HEAD)."`;
 
 /** A ref, branch or remote-tracking name the clone is given: as review-central's Checkout::guard() lets one through. */
-const GIT_NAME = /^(?!-)(?!.*\.\.)[^\s\x00-\x1f:^~?*\[\\]{1,250}$/;
+const GIT_NAME = /^(?!-)(?!.*\.\.)[^\s\x00-\x1f:^~?*\[\\]{1,1024}$/;
+
+/** Seconds the clone may take, as one git command on review-central's worker. */
+const CLONE_SECONDS = 600;
 
 /** A key, the host it is for, and what the sandbox has in its place. */
 interface Credential {
@@ -674,8 +683,9 @@ export class ReviewSandbox extends DurableObject<Env> {
       }
 
       await this.must(["sh", "-c", `mkdir -p /work /home/reviewer && chown ${REVIEWER} /work /home/reviewer`], "make the work directory");
-      const { url, ref, name, commit, destination, base } = spec.clone;
-      const cloned = await streamed(["sh", "-c", CLONE, "clone", url, ref, name, commit, destination ?? "", base ?? ""], {
+      const { url, ref, name, commit, destination, base, since } = spec.clone;
+      // A host that stops answering does not hold the sandbox for the review's whole time.
+      const cloned = await streamed(["timeout", "--signal=TERM", "--kill-after=30", String(CLONE_SECONDS), "sh", "-c", CLONE, "clone", url, ref, name, commit, destination ?? "", base ?? "", since ?? ""], {
         cwd: "/work",
         // As review-central's own git: no LFS download, no local repository as a remote.
         env: {
@@ -1082,6 +1092,7 @@ function readClone(value: unknown, credentials: Credential[]): CloneSpec | null 
     !hash(clone.commit) ||
     (clone.destination !== undefined && clone.destination !== null && !name(clone.destination)) ||
     (clone.base !== undefined && clone.base !== null && (!hash(clone.base) || !name(clone.destination))) ||
+    (clone.since !== undefined && clone.since !== null && !hash(clone.since)) ||
     (authorization !== null && (typeof authorization !== "string" || authorization === "" || /[\r\n]/.test(authorization)))
   ) {
     return wrong;
@@ -1099,6 +1110,7 @@ function readClone(value: unknown, credentials: Credential[]): CloneSpec | null 
     commit: clone.commit,
     destination: (clone.destination as string | null | undefined) ?? null,
     base: (clone.base as string | null | undefined) ?? null,
+    since: (clone.since as string | null | undefined) ?? null,
   };
 }
 
