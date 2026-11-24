@@ -18,6 +18,7 @@ use App\Services\PullRequestTurn;
 use App\Services\ReviewRequest;
 use App\Services\TicketLookup;
 use BackedEnum;
+use Closure;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
@@ -28,7 +29,9 @@ use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\JoinClause;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 use Throwable;
@@ -57,6 +60,17 @@ class PullRequestResource extends Resource
      * Runs that were never a review of their own: skipped, started again, or not begun.
      */
     private const array NOT_A_REVIEW = [ReviewRun::STATUS_SKIPPED, ReviewRun::STATUS_RESTARTED, ReviewRun::STATUS_PENDING];
+
+    /**
+     * What whose turn it is and where the review stands are read from of a run:
+     * see PullRequestTurn::of(), standing() and RunPresenter::outcome().
+     */
+    private const array TURN_COLUMNS = ['id', 'repository_id', 'pull_request_id', 'kind', 'status', 'result', 'commit', 'findings', 'manual_review', 'started_at'];
+
+    /**
+     * The relation a row of the list carries its newest run in, null where it has none.
+     */
+    private const string NEWEST_RUN = 'newestRun';
 
     /**
      * The runs of the list's row, for a subquery of the list.
@@ -92,10 +106,15 @@ class PullRequestResource extends Resource
         return $table
             // Each row's newest review, how many it had and what they cost, in the list's own query.
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('repository.integration')->addSelect([
-                'latest_review' => self::runsOf()->select('uuid')->latest('started_at')->limit(1),
+                'latest_review' => self::runsOf()->select('uuid')->latest('started_at')->latest('id')->limit(1),
                 'reviews_count' => self::runsOf()->whereNotIn('status', self::NOT_A_REVIEW)->selectRaw('count(*)'),
                 'reviews_cost' => self::runsOf()->selectRaw('sum(cost)'),
-            ]))
+            ])->afterQuery(function (SupportCollection $records): void {
+                // The page's rows, not a plucked column: their newest runs in one query rather than two per row.
+                $rows = $records->filter(fn (mixed $record): bool => $record instanceof OpenPullRequest);
+                $runs = self::latestRuns(array_values(array_map(fn (OpenPullRequest $record): int => $record->id, $rows->all())));
+                $rows->each(fn (OpenPullRequest $record): OpenPullRequest => $record->setRelation(self::NEWEST_RUN, $runs->get(self::pairOf($record))));
+            }))
             ->defaultSort('updated_at', 'desc')
             ->columns([
                 TextColumn::make('title')
@@ -205,7 +224,7 @@ class PullRequestResource extends Resource
             return new HtmlString('<span class="rc-muted">'.e(self::closedText($record)).'</span>');
         }
 
-        $turn = PullRequestTurn::of($record);
+        $turn = PullRequestTurn::of($record, self::newestRun($record), lookUp: false);
         $note = $turn->note($record);
         $user = auth()->user();
         $mine = $user instanceof User && $turn->isFor($user);
@@ -300,19 +319,64 @@ class PullRequestResource extends Resource
         }
 
         $records = self::getEloquentQuery()->with('repository.tenant')->get();
-
-        // Each one's newest review, in one query rather than one per pull request.
-        $runs = ReviewRun::query()
-            ->whereIn('repository_id', $records->pluck('repository_id')->unique())
-            ->whereIn('pull_request_id', $records->pluck('pull_request_id')->unique())
-            ->orderBy('started_at')
-            ->get()
-            ->keyBy(fn (ReviewRun $run): string => $run->repository_id.':'.$run->pull_request_id);
+        $runs = self::latestRuns($records->modelKeys());
 
         return $records
             ->filter(fn (Model $record): bool => $record instanceof OpenPullRequest
-                && PullRequestTurn::of($record, $runs->get($record->repository_id.':'.$record->pull_request_id))->isFor($user))
+                && PullRequestTurn::of($record, $runs->get(self::pairOf($record)), lookUp: false)->isFor($user))
             ->modelKeys();
+    }
+
+    /**
+     * The newest run of each of these pull requests, by "repository id:pull request id",
+     * with only the columns of TURN_COLUMNS: one query, for these pull requests only.
+     *
+     * @param  array<int, int|string>  $ids  of the open pull requests
+     * @return SupportCollection<string, ReviewRun>
+     */
+    private static function latestRuns(array $ids): SupportCollection
+    {
+        if ($ids === []) {
+            return collect();
+        }
+
+        $samePullRequest = fn (string $table): Closure => fn (JoinClause $join): JoinClause => $join
+            ->on("{$table}.repository_id", '=', 'review_runs.repository_id')
+            ->on("{$table}.pull_request_id", '=', 'review_runs.pull_request_id');
+
+        $newest = ReviewRun::query()
+            ->join('open_pull_requests', $samePullRequest('open_pull_requests'))
+            ->whereIntegerInRaw('open_pull_requests.id', $ids)
+            ->groupBy('review_runs.repository_id', 'review_runs.pull_request_id')
+            ->select(['review_runs.repository_id', 'review_runs.pull_request_id'])
+            ->selectRaw('max(review_runs.started_at) as newest_started_at');
+
+        return ReviewRun::query()
+            ->select(array_map(fn (string $column): string => "review_runs.{$column}", self::TURN_COLUMNS))
+            ->joinSub($newest, 'newest', fn (JoinClause $join): JoinClause => $samePullRequest('newest')($join)->on('newest.newest_started_at', '=', 'review_runs.started_at'))
+            // Of two that started in the same second, keyBy() keeps the one created last.
+            ->orderBy('review_runs.id')
+            ->get()
+            ->keyBy(fn (ReviewRun $run): string => $run->repository_id.':'.$run->pull_request_id);
+    }
+
+    private static function pairOf(OpenPullRequest $record): string
+    {
+        return $record->repository_id.':'.$record->pull_request_id;
+    }
+
+    /**
+     * The newest run of the pull request: the one the list fetched with its row, or read now.
+     */
+    private static function newestRun(OpenPullRequest $record): ?ReviewRun
+    {
+        if ($record->relationLoaded(self::NEWEST_RUN)) {
+            $run = $record->getRelation(self::NEWEST_RUN);
+
+            return $run instanceof ReviewRun ? $run : null;
+        }
+
+        return $record->latestRun();
     }
 
     /**
@@ -322,7 +386,7 @@ class PullRequestResource extends Resource
      */
     public static function standing(OpenPullRequest $record): array
     {
-        $run = $record->latestRun();
+        $run = self::newestRun($record);
         $current = $run !== null && $record->commit !== null && str_starts_with($record->commit, substr($run->commit, 0, 7));
 
         return match (true) {

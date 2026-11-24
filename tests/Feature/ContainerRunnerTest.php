@@ -1160,6 +1160,104 @@ it('starts fresh after a review that resumed a session and failed, so one bad se
     expect(stepRunning($steps, 'run-review.sh')['environment'])->not->toHaveKey('REVIEW_CONTINUE');
 });
 
+it('removes the links a step left in the reviewer\'s home, but not those of the CLIs in its caches', function () {
+    $home = app(ReviewSessions::class)->home($this->repository, 'feature/export');
+    $outside = storage_path('framework/testing/review-work/outside.txt');
+    File::ensureDirectoryExists(dirname($outside));
+    File::put($outside, 'the worker\'s own');
+
+    Process::fake(function (PendingProcess $process) use ($home, $outside) {
+        $command = (array) $process->command;
+
+        // The step: the pull request's code leaves links in the home, beside the
+        // CLI the reviewer installed.
+        if ($command[1] === 'run') {
+            File::ensureDirectoryExists("{$home}/.claude");
+            File::ensureDirectoryExists("{$home}/.local/share/claude");
+            File::ensureDirectoryExists("{$home}/.local/bin");
+            File::put("{$home}/.local/share/claude/2.1.0", 'the CLI');
+            symlink($outside, "{$home}/.review-resumes");
+            symlink(dirname($outside), "{$home}/.claude/projects");
+            symlink("{$home}/.local/share/claude/2.1.0", "{$home}/.local/bin/claude");
+        }
+
+        // find is the worker's own, and runs as it would.
+        if ($command[0] === 'find') {
+            (new Symfony\Component\Process\Process($command))->mustRun();
+        }
+
+        return Process::result();
+    });
+
+    app(Sandbox::class)->run('review-7-41-review', 'sh .review/skill/run-review.sh', storage_path('framework/testing/review-work/7-41'), [], trusted: false, timeout: 60, home: $home);
+
+    expect(is_link("{$home}/.review-resumes"))->toBeFalse()
+        ->and(is_link("{$home}/.claude/projects"))->toBeFalse()
+        ->and(is_link("{$home}/.local/bin/claude"))->toBeTrue()
+        ->and(File::get($outside))->toBe('the worker\'s own');
+});
+
+it('removes the links in a kept home before a review starts in it', function () {
+    $sessions = app(ReviewSessions::class);
+    $home = $sessions->home($this->repository, 'feature/export');
+    $outside = storage_path('framework/testing/review-work/outside.txt');
+    File::ensureDirectoryExists(dirname($outside));
+    File::put($outside, 'the worker\'s own');
+    symlink($outside, "{$home}/.review-session");
+
+    $sessions->home($this->repository, 'feature/export');
+
+    expect(is_link("{$home}/.review-session"))->toBeFalse()
+        ->and(File::get($outside))->toBe('the worker\'s own');
+});
+
+it('counts a resumed session in a file of its own, never through a link in the home', function () {
+    $sessions = app(ReviewSessions::class);
+    $home = $sessions->home($this->repository, 'feature/export');
+    $outside = storage_path('framework/testing/review-work/outside.txt');
+    File::ensureDirectoryExists(dirname($outside));
+    File::put($outside, 'the worker\'s own');
+    symlink($outside, "{$home}/.review-resumes");
+
+    $sessions->resumed($home);
+
+    expect(File::get($outside))->toBe('the worker\'s own')
+        ->and(is_link("{$home}/.review-resumes"))->toBeFalse()
+        ->and(File::get("{$home}/.review-resumes"))->toBe('1');
+});
+
+it('copies a session for a question without what the links in it point to', function () {
+    $sessions = app(ReviewSessions::class);
+    $home = $sessions->home($this->repository, 'feature/export');
+    $outside = storage_path('framework/testing/review-work/outside');
+    File::ensureDirectoryExists($outside);
+    File::put("{$outside}/secret.txt", 'the worker\'s own');
+    File::put("{$home}/.review-session", "session-one\n");
+    File::ensureDirectoryExists("{$home}/.claude/projects/work");
+    File::put("{$home}/.claude/projects/work/session-one.jsonl", '{}');
+    symlink("{$outside}/secret.txt", "{$home}/.claude/projects/work/secret.jsonl");
+    symlink($outside, "{$home}/.claude/elsewhere");
+
+    $copy = $sessions->copy($this->repository, 'feature/export', storage_path('framework/testing/review-work/question-home'));
+
+    expect(File::get("{$copy}/.claude/projects/work/session-one.jsonl"))->toBe('{}')
+        ->and(file_exists("{$copy}/.claude/projects/work/secret.jsonl"))->toBeFalse()
+        ->and(file_exists("{$copy}/.claude/elsewhere"))->toBeFalse();
+});
+
+it('forgets a session without removing what a linked .claude points to', function () {
+    $sessions = app(ReviewSessions::class);
+    $home = $sessions->home($this->repository, 'feature/export');
+    $outside = storage_path('framework/testing/review-work/outside');
+    File::ensureDirectoryExists("{$outside}/projects");
+    File::put("{$outside}/projects/kept.txt", 'the worker\'s own');
+    symlink($outside, "{$home}/.claude");
+
+    $sessions->reset($home);
+
+    expect(File::get("{$outside}/projects/kept.txt"))->toBe('the worker\'s own');
+});
+
 it('keeps what the reviewer\'s container was seen to use on the run, with the limit it had', function () {
     Http::fake(['api.bitbucket.org/*' => Http::response([])]);
     config(['review.container.memory' => '3g']);

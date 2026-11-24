@@ -70,7 +70,7 @@ class ReviewOpening
             $pullRequest,
             $comments,
             $commit,
-            (bool) ($input['drafts'] ?? false),
+            (bool) ($input['drafts'] ?? false) || $this->askedByHand($repository, (int) $id, $pullRequest['source']['branch']['name'] ?? null),
         );
 
         // "Reviewed up to <commit>" is read from a marker in the description or in a
@@ -324,6 +324,18 @@ class ReviewOpening
                 'started_at' => now(),
             ],
         );
+    }
+
+    /**
+     * Whether someone started this pull request's review by hand and no review
+     * has finished since: it is then reviewed as a draft too, as on a /review
+     * comment, and left alone again once that review is done.
+     */
+    protected function askedByHand(Repository $repository, int $pullRequestId, mixed $branch): bool
+    {
+        $askedAt = is_string($branch) && $branch !== '' ? ReviewRequest::askedAt($repository, $branch) : null;
+
+        return $askedAt !== null && $this->budget->requestStands($repository, $pullRequestId, $askedAt);
     }
 
     /**
