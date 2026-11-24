@@ -121,8 +121,9 @@ class TicketLookup
         $named = $this->tickets->referenceIn($record->repository, $record->title);
         $read = Cache::get(self::detailsKey($record));
 
-        // Only while the title still names that ticket: a renamed pull request may be for another.
-        if (is_array($read) && filled($read['reference'] ?? null) && $named !== null && ($read['named'] ?? null) === $named['reference']) {
+        // Only while the title still names that ticket, for the same source: a renamed
+        // pull request may be for another, and a source set up since may read it elsewhere.
+        if (is_array($read) && filled($read['reference'] ?? null) && $named !== null && ($read['named'] ?? null) === [$named['reference'], $named['source_id']]) {
             return self::shown($read, is_string($read['read_at'] ?? null) ? $read['read_at'] : null);
         }
 
@@ -130,7 +131,7 @@ class TicketLookup
             return self::shown($reviewed, null);
         }
 
-        return $named === null ? null : [...$named, 'url' => null, 'markdown' => null, 'error' => null, 'read_at' => null];
+        return $named === null ? null : ['reference' => $named['reference'], 'source' => $named['source'], 'url' => null, 'markdown' => null, 'error' => null, 'read_at' => null];
     }
 
     /**
@@ -160,7 +161,7 @@ class TicketLookup
         ];
 
         // With the reference the title named, which the details hold it against.
-        Cache::put(self::detailsKey($record), [...$read, 'named' => $named['reference']], now()->addDays(self::DETAILS_DAYS));
+        Cache::put(self::detailsKey($record), [...$read, 'named' => [$named['reference'], $named['source_id']]], now()->addDays(self::DETAILS_DAYS));
 
         return $read;
     }

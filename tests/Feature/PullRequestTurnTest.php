@@ -267,6 +267,15 @@ it('shows the ticket the title names before any review read it, and reads it whe
         ->toContain('Fix the export')
         ->not->toContain('not read yet');
 
+    // A source of the repository's own, set up since, reads that reference elsewhere.
+    $other = Connection::factory()->jira()->create(['tenant_id' => $this->repository->tenant_id, 'settings' => ['site' => 'other.atlassian.net', 'email' => 'dev@example.com']]);
+    $source = TicketSource::query()->create(['tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'connection_id' => $other->id, 'name' => 'Other Jira', 'style' => TicketStyle::Key, 'prefixes' => ['DEV'], 'position' => 1]);
+
+    expect(view('filament.app.pull-request', PullRequestResource::details($record))->render())
+        ->toContain('Other Jira')
+        ->not->toContain('browse/DEV-5007');
+    $source->delete();
+
     // Renamed for another ticket: what was read for the first one is not shown for it.
     $record->forceFill(['title' => 'DEV-5008 Something else'])->save();
 
