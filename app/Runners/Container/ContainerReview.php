@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Runners\Container;
 
 use App\Enums\BuildState;
+use App\Exceptions\CheckoutFailed;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Runners\ContainerRunner;
@@ -12,6 +13,8 @@ use App\Runners\QueuedRuns;
 use App\Runners\RunConclusion;
 use App\Services\ReviewCredentials;
 use App\Services\RunMetrics;
+use App\SourceControl\GitDriver;
+use App\SourceControl\PullRef;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
@@ -20,12 +23,16 @@ use Throwable;
 /**
  * One review on this installation's own worker.
  *
- *  1. The repository is cloned here, on the worker.
+ *  1. The repository is cloned here, on the worker; or, for a connection that asks
+ *     for it, by the Cloudflare sandbox itself in step 3, and only its commit
+ *     looked up here.
  *  2. The precheck decides whether to review and writes the context, here too.
  *  3. The reviewer reads the code and writes its report, in a container that is
  *     thrown away. It is the only step that sees the pull request's code run, and
  *     it gets the AI provider's key and nothing else: no credential for this
- *     server, none for the repository's host.
+ *     server, none for the repository's host. A sandbox that clones for itself
+ *     reaches the host through the Worker, which keeps the credential and adds it
+ *     to reading this one repository only.
  *  4. The worker reads that report as data and files it, which posts it on the
  *     pull request.
  *  5. The review lock is released, and the pull request is told how it ended.
@@ -165,14 +172,34 @@ class ContainerReview
         $used = null;
 
         try {
-            $this->log->writer((int) $repository->getKey(), $build)?->note($round > 0 ? '── fetch ──' : '── clone ──');
+            // What a sandbox that clones for itself is to clone. The worker then
+            // clones nothing: it only looks up the commit.
+            $source = $this->sandboxSource($repository, $branch, $commit, $trial);
 
-            $commit = match (true) {
-                $round > 0 => $this->checkout->update($repository, $directory, $branch, $commit),
-                $trial?->mergeCommit !== null => $this->checkout->cloneMerged($repository, $trial->destination, $trial->mergeCommit, $directory)['head'],
-                $trial?->pullRef !== null => $this->checkout->clonePullRef($repository, $trial->destination, $trial->pullRef, $directory),
-                default => $this->checkout->clone($repository, $branch, $commit, $directory),
-            };
+            if ($source !== null) {
+                $this->log->writer((int) $repository->getKey(), $build)?->note("The sandbox clones the repository itself, at {$source['commit']}.");
+                // A later review of the job starts from what the last one left here.
+                File::ensureDirectoryExists($directory, 0700);
+                File::cleanDirectory($directory);
+                $commit = $source['commit'];
+            } else {
+                $this->log->writer((int) $repository->getKey(), $build)?->note($round > 0 ? '── fetch ──' : '── clone ──');
+
+                // A job whose earlier review was cloned in a sandbox has no clone
+                // here to update.
+                $update = $round > 0 && File::isDirectory("{$directory}/.git");
+
+                if ($round > 0 && ! $update) {
+                    File::deleteDirectory($directory);
+                }
+
+                $commit = match (true) {
+                    $update => $this->checkout->update($repository, $directory, $branch, $commit),
+                    $trial?->mergeCommit !== null => $this->checkout->cloneMerged($repository, $trial->destination, $trial->mergeCommit, $directory)['head'],
+                    $trial?->pullRef !== null => $this->checkout->clonePullRef($repository, $trial->destination, $trial->pullRef, $directory),
+                    default => $this->checkout->clone($repository, $branch, $commit, $directory),
+                };
+            }
 
             $this->takeReviewFiles($directory);
 
@@ -212,15 +239,20 @@ class ContainerReview
 
             $destination = $outcome['REVIEW_DESTINATION_BRANCH'];
 
+            // The sandbox fetches the destination beside the commit. It can fetch
+            // what it is missing later on, so nothing is compared ahead of it.
+            // A merged pull request's is the trial's: the one its base was taken from.
+            $clone = $source === null ? null : $this->checkout->forSandbox($repository, $source['ref'], $source['name'], $commit, $source['destination'] ?? ($destination !== '' ? $destination : null), $source['base'], $trial?->mergeCommit === null ? $this->lastReviewedCommit($directory) : null);
+
             // A merged pull request was compared when it was cloned, with the
             // destination as it was; fetching it now would move it past the merge.
-            if ($destination !== '' && $trial?->mergeCommit === null) {
+            if ($source === null && $destination !== '' && $trial?->mergeCommit === null) {
                 $this->checkout->prepareRange($repository, $directory, $destination, $this->lastReviewedCommit($directory));
             }
 
             $handover = array_intersect_key($outcome, array_flip(['REVIEW_REVIEWER', 'REVIEW_PR_ID', 'REVIEW_DESTINATION_BRANCH']));
 
-            if ($carriesOn) {
+            if ($carriesOn && $source === null) {
                 // The reviewer cannot write the git directory when the job may carry
                 // on, so what its scripts would note there is noted for them.
                 $this->excludeReviewFiles($directory);
@@ -242,8 +274,9 @@ class ContainerReview
                 trusted: false,
                 timeout: (int) config('review.container.timeout'),
                 home: $home,
-                lockedGit: $carriesOn,
+                lockedGit: $carriesOn && $source === null,
                 composerCache: $this->composerCache->directory($repository),
+                clone: $clone,
             );
 
             $used = ['samples' => $this->sandbox->samples, 'processors' => $this->sandbox->processors, 'memory_mb' => $this->sandbox->memoryMb];
@@ -411,15 +444,69 @@ class ContainerReview
     }
 
     /**
-     * @param  array<string, string>  $environment
+     * What the sandbox clones for itself, or null when the worker clones: on Docker,
+     * for a connection that does not ask for it, for a host the sandbox cannot
+     * reach, for a Worker deployed before it could clone, and for a merged pull
+     * request whose host does not say what its merge was made on. A public
+     * repository on GitHub or Bitbucket needs no credential and is on the
+     * internet, so a sandbox always clones it; a git server may be on a network
+     * only the worker reaches.
+     *
+     * @return array{ref: string, name: string, commit: string, base: string|null, destination?: string}|null
+     *
+     * @throws CheckoutFailed
      */
-    protected function step(string $name, Repository $repository, int $build, string $script, string $directory, array $environment, bool $trusted, int $timeout, ?string $home = null, bool $lockedGit = false, ?string $composerCache = null): ProcessResult
+    protected function sandboxSource(Repository $repository, string $branch, ?string $commit, ?Trial $trial): ?array
+    {
+        if (! $this->sandbox instanceof CloudflareSandbox
+            || ! ($repository->integration->clonesInSandbox() || ($this->checkout->anonymous($repository) && ! $repository->driver() instanceof GitDriver))
+            || ! $this->checkout->reachableFromSandbox($repository)
+            || ! $this->sandbox->clonesItself()) {
+            return null;
+        }
+
+        if ($trial?->mergeCommit !== null) {
+            $merge = $repository->sourceControl()->resolveCommit($trial->mergeCommit);
+            $parents = $merge === null ? [] : ($repository->sourceControl()->getCommit($merge)['parents'] ?? []);
+
+            if ($parents === []) {
+                return null;
+            }
+
+            // A merge commit has the branch as its second parent. A squash is the
+            // change itself, on top of the destination as it was.
+            [$head, $base] = count($parents) > 1 ? [$parents[1], $parents[0]] : [$merge, $parents[0]];
+
+            return ['ref' => "refs/heads/{$trial->destination}", 'name' => $trial->destination, 'commit' => $head, 'base' => $base, 'destination' => $trial->destination];
+        }
+
+        if ($trial?->pullRef !== null) {
+            if (preg_match('#^pull/[0-9]+/head$#', $trial->pullRef) !== 1) {
+                throw CheckoutFailed::unsafeName($trial->pullRef);
+            }
+
+            $ref = "refs/{$trial->pullRef}";
+
+            return ['ref' => $ref, 'name' => 'pull-head', 'commit' => $this->checkout->remoteCommit($repository, $ref), 'base' => null];
+        }
+
+        // A pull ref is a ref of its own, not under heads/.
+        $ref = PullRef::id($branch) !== null ? "refs/{$branch}" : "refs/heads/{$branch}";
+
+        return ['ref' => $ref, 'name' => $branch, 'commit' => $commit ?? $this->checkout->remoteCommit($repository, $ref), 'base' => null];
+    }
+
+    /**
+     * @param  array<string, string>  $environment
+     * @param  array{url: string, authorization: string|null, ref: string, name: string, commit: string, destination: string|null, base: string|null, since: string|null}|null  $clone  what a Cloudflare sandbox clones for itself, from Checkout::forSandbox()
+     */
+    protected function step(string $name, Repository $repository, int $build, string $script, string $directory, array $environment, bool $trusted, int $timeout, ?string $home = null, bool $lockedGit = false, ?string $composerCache = null, ?array $clone = null): ProcessResult
     {
         $log = $this->log->writer((int) $repository->getKey(), $build, $environment);
         $log?->note("── {$name} ──");
 
         try {
-            $result = $this->sandbox->run("review-{$repository->getKey()}-{$build}-{$name}", $script, $directory, $environment, $trusted, $timeout, $home, $lockedGit, $log === null ? null : $log->write(...), $composerCache);
+            $result = $this->sandbox->run("review-{$repository->getKey()}-{$build}-{$name}", $script, $directory, $environment, $trusted, $timeout, $home, $lockedGit, $log === null ? null : $log->write(...), $composerCache, $clone);
         } catch (Throwable $exception) {
             $log?->note("The {$name} step was cut short: ".class_basename($exception).'.');
 

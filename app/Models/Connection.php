@@ -106,6 +106,15 @@ class Connection extends Model
         return ($this->settings['review_added_repositories'] ?? false) === true;
     }
 
+    /**
+     * Whether a review in a Cloudflare sandbox clones its repository there, through
+     * the Worker, instead of on the worker and through the bucket.
+     */
+    public function clonesInSandbox(): bool
+    {
+        return ($this->settings['clone_in_sandbox'] ?? false) === true;
+    }
+
     public function reachesOwner(string $workspace): bool
     {
         $owner = $this->setting('workspace');

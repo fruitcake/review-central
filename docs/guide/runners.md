@@ -115,7 +115,7 @@ Deploying without the admin panel, and running the Worker on your own machine wi
 
 ### What the sandbox holds
 
-The checkout, the review's scripts and the reviewer's session go to the sandbox through the bucket, and the report and the session come back the same way. The CLIs and caches in the reviewer's home stay behind: the snapshot has the tools. The AI provider's key never enters the sandbox: it holds a placeholder, and the Worker puts the key in only on a request over HTTPS to that provider's own host.
+The checkout, the review's scripts and the reviewer's session go to the sandbox through the bucket, and the report and the session come back the same way. With **Clone in the Cloudflare sandbox** on, under the source control connection's settings, the sandbox clones the repository itself and the worker clones nothing; a public repository on GitHub or Bitbucket is always cloned there. The host's token then stays in the Worker, which adds it only to fetching that one repository, never to a push ([how](https://github.com/fruitcake/review-central/blob/main/cloudflare/README.md#cloning-in-the-sandbox)). The CLIs and caches in the reviewer's home stay behind: the snapshot has the tools. The AI provider's key never enters the sandbox: it holds a placeholder, and the Worker puts the key in only on a request over HTTPS to that provider's own host.
 
 ### Its size, and what it measured
 

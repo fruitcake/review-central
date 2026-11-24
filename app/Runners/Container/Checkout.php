@@ -11,7 +11,8 @@ use Illuminate\Support\Facades\Process;
 
 /**
  * A fresh clone of a repository for one review, made on the worker itself, so the
- * credentials it takes never reach the container that reads the code.
+ * credentials it takes never reach the container that reads the code. A Cloudflare
+ * sandbox can clone for itself instead, through the Worker: see forSandbox().
  *
  * Blobless rather than shallow: every commit and tree is there, so the merge base
  * with the destination and the commit the last review ended on are always found,
@@ -199,6 +200,100 @@ class Checkout
         $this->git($repository, $directory, ['clean', '-ffdx'], 'clean');
 
         return trim($this->git($repository, $directory, ['rev-parse', 'HEAD'], 'rev-parse'));
+    }
+
+    /**
+     * The commit a ref is at on the repository's host, asked without a clone.
+     *
+     * @throws CheckoutFailed when the host does not have the ref
+     */
+    public function remoteCommit(Repository $repository, string $ref): string
+    {
+        $this->guard($ref);
+
+        $access = $repository->sourceControl()->cloneAccess();
+        $listed = $this->git($repository, null, ['ls-remote', '--', $access['url'], $ref], 'ls-remote');
+
+        foreach (preg_split('/\R/', trim($listed)) ?: [] as $line) {
+            [$commit, $name] = array_pad(explode("\t", $line, 2), 2, '');
+
+            if ($name === $ref && preg_match('/^[0-9a-f]{40}$/', $commit) === 1) {
+                return $commit;
+            }
+        }
+
+        throw CheckoutFailed::during('ls-remote', "{$ref} is not on the repository's host.");
+    }
+
+    /**
+     * Whether the repository is cloned without a credential: one anyone may read.
+     */
+    public function anonymous(Repository $repository): bool
+    {
+        return blank($repository->sourceControl()->cloneAccess()['password'] ?? null);
+    }
+
+    /**
+     * Whether a Cloudflare sandbox can clone the repository: over HTTPS, and with a
+     * credential only through the Worker, which stands between it and a host on
+     * the usual port alone.
+     */
+    public function reachableFromSandbox(Repository $repository): bool
+    {
+        $url = parse_url($repository->sourceControl()->cloneAccess()['url']);
+
+        return is_array($url)
+            && ($url['scheme'] ?? null) === 'https'
+            && (($url['port'] ?? 443) === 443 || $this->anonymous($repository))
+            && ! isset($url['user'])
+            && filled($url['host'] ?? null)
+            && filled($url['path'] ?? null);
+    }
+
+    /**
+     * What a Cloudflare sandbox is told to clone, for the Worker to do it there: the
+     * ref fetched under refs/remotes/origin/<name>, as a clone here has it, the
+     * commit checked out, and the destination branch beside it. A merged pull
+     * request's destination is put back to `base`, where it was before the merge.
+     * The comparison with `since`, the commit the last review ended on, is fetched
+     * with the clone, as prepareRange() does here.
+     *
+     * The host's credentials go to the Worker as the header git would send. It adds
+     * that header to reading this repository only; the sandbox never has it.
+     *
+     * @return array{url: string, authorization: string|null, ref: string, name: string, commit: string, destination: string|null, base: string|null, since: string|null}
+     *
+     * @throws CheckoutFailed
+     */
+    public function forSandbox(Repository $repository, string $ref, string $name, string $commit, ?string $destination, ?string $base = null, ?string $since = null): array
+    {
+        foreach ([$ref, $name, ...array_filter([$destination])] as $part) {
+            $this->guard($part);
+        }
+
+        // A commit that is gone after a force push has nothing to compare with.
+        if ($since !== null && preg_match('/^[0-9a-f]{7,40}$/', $since) !== 1) {
+            $since = null;
+        }
+
+        foreach (array_filter([$commit, $base]) as $hash) {
+            if (preg_match('/^[0-9a-f]{7,40}$/', $hash) !== 1) {
+                throw CheckoutFailed::unsafeName($hash);
+            }
+        }
+
+        $access = $repository->sourceControl()->cloneAccess();
+
+        return [
+            'url' => $access['url'],
+            'authorization' => $this->anonymous($repository) ? null : 'Basic '.base64_encode("{$access['username']}:{$access['password']}"),
+            'ref' => $ref,
+            'name' => $name,
+            'commit' => $commit,
+            'destination' => $destination,
+            'base' => $base,
+            'since' => $since,
+        ];
     }
 
     /**

@@ -8,6 +8,7 @@ use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Runners\CloudflareRunner;
 use App\Runners\Container\Checkout;
+use App\Runners\Container\CloudflareSandbox;
 use App\Runners\Container\ComposerCache;
 use App\Runners\Container\ContainerReview;
 use App\Runners\Container\Precheck;
@@ -200,6 +201,7 @@ function fakeSteps(string $needed = 'true', int $reviewerExit = 0, int $precheck
 
             return Process::result(match (true) {
                 in_array('rev-parse', $command, true) => str_repeat('a', 40)."\n",
+                in_array('ls-remote', $command, true) => str_repeat('b', 40)."\t".end($command)."\n",
                 // A merge commit, the destination before it and the branch that went in.
                 in_array('rev-list', $command, true) => str_repeat('d', 40).' '.str_repeat('e', 40).' '.str_repeat('f', 40)."\n",
                 default => '',
@@ -668,6 +670,113 @@ it('reviews a merged pull request as it went in, against the destination as it w
         ->and(stepRunning($steps, 'run-review.sh'))->not->toBeNull();
 });
 
+/**
+ * A Cloudflare sandbox that notes what it was told to clone, and runs nothing.
+ */
+function cloningSandbox(bool $clonesItself = true): ArrayObject
+{
+    $told = new ArrayObject;
+
+    app()->bind(Sandbox::class, fn () => new class($told, $clonesItself) extends CloudflareSandbox
+    {
+        public function __construct(protected ArrayObject $told, protected bool $clones) {}
+
+        public function clonesItself(): bool
+        {
+            return $this->clones;
+        }
+
+        public function run(string $name, string $script, string $workDirectory, array $environment, bool $trusted, int $timeout, ?string $home = null, bool $lockedGit = false, ?Closure $output = null, ?string $composerCache = null, ?array $clone = null): ProcessResult
+        {
+            $this->told[] = $clone;
+
+            return Process::result();
+        }
+    });
+
+    return $told;
+}
+
+it('has the Cloudflare sandbox clone a private repository for a connection that asks for it, and clones nothing here', function () {
+    Http::fake(['api.bitbucket.org/*' => Http::response([])]);
+    $this->repository->integration->update(['settings' => ['clone_in_sandbox' => true]]);
+    $steps = fakeSteps();
+    $told = cloningSandbox();
+
+    app(ContainerReview::class)->run($this->repository, 'feature/export', null, 41);
+
+    // The commit is looked up on the host; the code stays there.
+    expect(gitCommands($steps))->toBe(['ls-remote'])
+        ->and($told[0])->toBe([
+            'url' => 'https://bitbucket.org/acme/shop.git',
+            'authorization' => 'Basic '.base64_encode('x-token-auth:bitbucket-token'),
+            'ref' => 'refs/heads/feature/export',
+            'name' => 'feature/export',
+            'commit' => str_repeat('b', 40),
+            'destination' => 'main',
+            'base' => null,
+            // Where the last review ended: what a follow-up compares with is fetched with the clone.
+            'since' => str_repeat('c', 40),
+        ]);
+});
+
+it('clones here for the Cloudflare sandbox when the connection does not ask otherwise, or the Worker cannot clone yet', function (bool $asks, bool $clonesItself) {
+    Http::fake(['api.bitbucket.org/*' => Http::response([])]);
+    $this->repository->integration->update(['settings' => ['clone_in_sandbox' => $asks]]);
+    $steps = fakeSteps();
+    $told = cloningSandbox($clonesItself);
+
+    app(ContainerReview::class)->run($this->repository, 'feature/export', null, 41);
+
+    expect(gitCommands($steps))->toContain('clone')
+        ->and($told[0])->toBeNull();
+})->with([
+    'the connection does not ask' => [false, true],
+    'a Worker deployed before it could clone' => [true, false],
+]);
+
+it('has the Cloudflare sandbox clone a public repository without a credential, whatever its connection says', function () {
+    Http::fake(['api.github.com/*' => Http::response([])]);
+    $connection = Connection::factory()->gitHubSource()->create(['tenant_id' => $this->repository->tenant_id, 'credentials' => [], 'settings' => []]);
+    $repository = Repository::factory()->create(['connection_id' => $connection->id, 'slug' => 'shop']);
+    $steps = fakeSteps();
+    $told = cloningSandbox();
+
+    app(ContainerReview::class)->run($repository, 'feature/export', $this->sha, 41);
+
+    expect(gitCommands($steps))->toBe([])
+        ->and($told[0])->toMatchArray(['url' => 'https://github.com/acme/shop.git', 'authorization' => null, 'commit' => $this->sha]);
+});
+
+it('clones a public repository of a git server here, which the sandbox may not reach, unless its connection asks otherwise', function () {
+    $connection = Connection::factory()->create(['tenant_id' => $this->repository->tenant_id, 'driver' => 'git', 'credentials' => [], 'settings' => ['base_url' => 'https://git.example.com/acme']]);
+    $repository = Repository::factory()->create(['connection_id' => $connection->id, 'slug' => 'shop']);
+    $steps = fakeSteps();
+    $told = cloningSandbox();
+
+    app(ContainerReview::class)->run($repository, 'feature/export', $this->sha, 41);
+
+    expect(gitCommands($steps))->toContain('clone')
+        ->and($told[0])->toBeNull();
+});
+
+it('has the Cloudflare sandbox clone a merged pull request as it went in, from the parents its host gives the merge', function () {
+    Http::fake(['api.bitbucket.org/*/commit/*' => Http::response([
+        'hash' => str_repeat('d', 40),
+        'message' => 'Merge feature/export',
+        'parents' => [['hash' => str_repeat('e', 40)], ['hash' => str_repeat('f', 40)]],
+    ]), 'api.bitbucket.org/*' => Http::response([])]);
+    $this->repository->integration->update(['settings' => ['clone_in_sandbox' => true]]);
+    $steps = fakeSteps();
+    $told = cloningSandbox();
+
+    app(ContainerReview::class)->run($this->repository, 'feature/export', null, 41, trial: new Trial(pullRequestId: 570, destination: 'main', mergeCommit: str_repeat('d', 12)));
+
+    // The branch that went in, against the destination put back to before the merge.
+    expect(gitCommands($steps))->toBe([])
+        ->and($told[0])->toMatchArray(['ref' => 'refs/heads/main', 'name' => 'main', 'commit' => str_repeat('f', 40), 'destination' => 'main', 'base' => str_repeat('e', 40)]);
+});
+
 it('starts nothing from the webhook for a repository that only trials run on', function () {
     Queue::fake();
     $this->repository->update(['reviews_enabled' => false]);
@@ -1063,7 +1172,7 @@ it('keeps what the reviewer\'s container was seen to use on the run, with the li
     // What the sandbox saw while the reviewer ran.
     $this->app->bind(Sandbox::class, fn () => new class extends Sandbox
     {
-        public function run(string $name, string $script, string $workDirectory, array $environment, bool $trusted, int $timeout, ?string $home = null, bool $lockedGit = false, ?Closure $output = null, ?string $composerCache = null): ProcessResult
+        public function run(string $name, string $script, string $workDirectory, array $environment, bool $trusted, int $timeout, ?string $home = null, bool $lockedGit = false, ?Closure $output = null, ?string $composerCache = null, ?array $clone = null): ProcessResult
         {
             $this->peakMemory = (int) (1.5 * 1024 ** 3);
 
@@ -1092,7 +1201,7 @@ it('keeps where the reviewer ran and what that cost on the run, when its sandbox
             return 'cloudflare';
         }
 
-        public function run(string $name, string $script, string $workDirectory, array $environment, bool $trusted, int $timeout, ?string $home = null, bool $lockedGit = false, ?Closure $output = null, ?string $composerCache = null): ProcessResult
+        public function run(string $name, string $script, string $workDirectory, array $environment, bool $trusted, int $timeout, ?string $home = null, bool $lockedGit = false, ?Closure $output = null, ?string $composerCache = null, ?array $clone = null): ProcessResult
         {
             $this->seconds = 200;
             $this->cost = 0.0016;

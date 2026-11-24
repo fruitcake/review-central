@@ -133,7 +133,9 @@ interface SourceControl
     public function requestChanges(string $id, bool $requested): int;
 
     /**
-     * @return array{message: string, author: string}|null
+     * A commit's subject and author, and the commits it was made on, first parent first.
+     *
+     * @return array{message: string, author: string, parents?: list<string>}|null
      */
     public function getCommit(string $commit): ?array;
 

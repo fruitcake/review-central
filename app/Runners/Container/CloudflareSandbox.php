@@ -9,6 +9,7 @@ use App\Services\PlatformSettings;
 use Closure;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
@@ -25,6 +26,9 @@ use RuntimeException;
  * as one archive; the reviewer's home and the files it wrote come back as another.
  * What the step prints is streamed, as Docker's is.
  *
+ * For a connection that asks for it, the sandbox clones the repository itself, and
+ * the archive holds only the review's own files: see Checkout::forSandbox().
+ *
  * What differs from Docker, and is not made up for:
  * - The sandbox starts from Cloudflare's own image. The first review installs PHP,
  *   Composer and the reviewers' CLIs, and the Worker keeps a snapshot of that for
@@ -39,6 +43,9 @@ use RuntimeException;
 class CloudflareSandbox extends Sandbox
 {
     public const NAME = 'cloudflare';
+
+    /** What a step that clones in the sandbox checks first: that the Worker did clone. */
+    protected const CLONED = '{ [ -d .git ] || { echo "The sandbox has no checkout: deploy the Worker again, from Admin → Setup, to have it clone." >&2; exit 1; }; }';
 
     /** What a step may leave in the work directory that this worker reads afterwards. */
     protected const KEEP = [
@@ -77,7 +84,7 @@ class CloudflareSandbox extends Sandbox
         return filled(config('review.cloudflare.url')) && filled(config('review.cloudflare.token')) && filled(config('review.cloudflare.disk'));
     }
 
-    public function run(string $name, string $script, string $workDirectory, array $environment, bool $trusted, int $timeout, ?string $home = null, bool $lockedGit = false, ?Closure $output = null, ?string $composerCache = null): ProcessResult
+    public function run(string $name, string $script, string $workDirectory, array $environment, bool $trusted, int $timeout, ?string $home = null, bool $lockedGit = false, ?Closure $output = null, ?string $composerCache = null, ?array $clone = null): ProcessResult
     {
         $this->peakMemory = null;
         $this->seconds = null;
@@ -117,7 +124,9 @@ class CloudflareSandbox extends Sandbox
             // of the result, until the script changes.
             $setup = self::setupScript();
 
-            $vendor = $composerCache === null ? null : self::vendorCache($composerCache, $workDirectory);
+            // A checkout the sandbox clones is not here to look in for a composer.json:
+            // the script uses the cache only where there is one.
+            $vendor = $composerCache === null ? null : self::vendorCache($composerCache, $workDirectory, cloned: $clone !== null);
 
             // The keys stay in the Worker, which puts them in for their placeholders
             // on the way to the providers' hosts.
@@ -130,7 +139,10 @@ class CloudflareSandbox extends Sandbox
                 'output' => $kept,
                 'setup' => $setup,
                 'setupVersion' => $setup === null ? null : self::setupVersion($setup),
-                'script' => 'mkdir -p "$HOME" && '.$script,
+                // A Worker deployed before it could clone would run the script on
+                // no checkout at all.
+                'script' => 'mkdir -p "$HOME" && '.($clone === null ? '' : self::CLONED.' && ').$script,
+                'clone' => $clone,
                 'env' => $keys['environment'] + ($vendor === null ? [] : ['COMPOSER_CACHE_DIR' => self::COMPOSER_CACHE, 'REVIEW_VENDOR_BASE' => $vendor['file']]),
                 'credentials' => $keys['credentials'],
                 'keep' => self::KEEP,
@@ -170,13 +182,14 @@ class CloudflareSandbox extends Sandbox
      * Under the repository's own name, as the cache on the worker is: the reviewer
      * runs the pull request's code and can write there.
      *
+     * @param  bool  $cloned  whether the sandbox clones the checkout, so it is not in the work directory to look at
      * @return array{key: string, file: string}|null null for a checkout without a composer.json
      */
-    public static function vendorCache(string $composerCache, string $workDirectory): ?array
+    public static function vendorCache(string $composerCache, string $workDirectory, bool $cloned = false): ?array
     {
         $json = rtrim($workDirectory, '/').'/composer.json';
 
-        if (! is_file($json) || is_link($json)) {
+        if (! $cloned && (! is_file($json) || is_link($json))) {
             return null;
         }
 
@@ -506,6 +519,26 @@ class CloudflareSandbox extends Sandbox
         return self::local()
             ? new WorkerFiles(fn (int $timeout): PendingRequest => $this->client($timeout))
             : new BucketFiles(Storage::disk((string) config('review.cloudflare.disk')));
+    }
+
+    /** The first version of the Worker that clones a repository in the sandbox. */
+    public const CLONES_SINCE = '2026-11-24.4';
+
+    /**
+     * Whether the Worker clones a repository in the sandbox. One deployed before it
+     * could would run the reviewer on no checkout, so until it is deployed again
+     * the worker clones. Asked of the Worker, and remembered for ten minutes.
+     */
+    public function clonesItself(): bool
+    {
+        $url = (string) (self::local() ? config('review.cloudflare.local_url') : config('review.cloudflare.url'));
+
+        return Cache::remember('review.cloudflare.clones.'.md5($url), 600, function (): bool {
+            $version = rescue(fn (): mixed => $this->client(10)->get('health')->json('version'), null, false);
+            $comparable = fn (string $version): string => str_replace('-', '.', $version);
+
+            return is_string($version) && version_compare($comparable($version), $comparable(self::CLONES_SINCE), '>=');
+        });
     }
 
     protected function client(int $timeout): PendingRequest

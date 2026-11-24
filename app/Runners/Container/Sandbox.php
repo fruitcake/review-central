@@ -64,8 +64,9 @@ class Sandbox
      * @param  bool  $lockedGit  the clone's own git directory read-only, so the step cannot change what git does on the worker afterwards
      * @param  Closure(string, string): void|null  $output  called with each piece of what the step prints, as it prints it
      * @param  string|null  $composerCache  a directory on the worker that Composer keeps its downloads in, from one review to the next
+     * @param  array{url: string, authorization: string|null, ref: string, name: string, commit: string, destination: string|null, base: string|null, since: string|null}|null  $clone  what the sandbox clones for itself (Checkout::forSandbox()): only a Cloudflare sandbox does, and Docker is never handed one
      */
-    public function run(string $name, string $script, string $workDirectory, array $environment, bool $trusted, int $timeout, ?string $home = null, bool $lockedGit = false, ?Closure $output = null, ?string $composerCache = null): ProcessResult
+    public function run(string $name, string $script, string $workDirectory, array $environment, bool $trusted, int $timeout, ?string $home = null, bool $lockedGit = false, ?Closure $output = null, ?string $composerCache = null, ?array $clone = null): ProcessResult
     {
         $config = config('review.container');
 

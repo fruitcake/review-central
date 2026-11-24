@@ -115,6 +115,8 @@ class ConnectionResource extends Resource
                 : null;
         };
 
+        $settings = fn (Get $get): array => [...$driver($get)?->settingFields() ?? [], ...self::webhookFields($driver($get)), ...self::sandboxFields($driver($get))];
+
         return [
             $fixed !== null
                 ? Hidden::make('kind')->default($fixed->value)
@@ -167,8 +169,28 @@ class ConnectionResource extends Resource
             Section::make('Settings')
                 ->key('settings')
                 ->statePath('settings')
-                ->schema(fn (Get $get): array => [...$driver($get)?->settingFields() ?? [], ...self::webhookFields($driver($get))])
-                ->visible(fn (Get $get): bool => [...$driver($get)?->settingFields() ?? [], ...self::webhookFields($driver($get))] !== []),
+                ->schema(fn (Get $get): array => $settings($get))
+                ->visible(fn (Get $get): bool => $settings($get) !== []),
+        ];
+    }
+
+    /**
+     * For a source control host: whether a review in a Cloudflare sandbox clones
+     * the repository there, or the worker clones it and sends it through the bucket.
+     *
+     * @return array<int, Toggle>
+     */
+    protected static function sandboxFields(?ConnectionDriver $driver): array
+    {
+        if (! $driver instanceof SourceControlDriver) {
+            return [];
+        }
+
+        return [
+            Toggle::make('clone_in_sandbox')
+                ->label('Clone in the Cloudflare sandbox')
+                ->default(false)
+                ->helperText('For reviews on the Cloudflare runner. On, the sandbox clones the repository itself, through the Worker: the token stays in the Worker, which adds it only to reading this repository, never to a push. The worker then clones nothing and sends only the review\'s own files through the bucket. Off, the worker clones and the checkout goes through the bucket. The host must be reachable from Cloudflare over HTTPS. A public repository on GitHub or Bitbucket, cloned without a token, is always cloned in the sandbox.'),
         ];
     }
 

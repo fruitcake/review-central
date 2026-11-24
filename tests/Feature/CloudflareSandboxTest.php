@@ -344,6 +344,48 @@ it('talks to the Worker on this machine where none is deployed, and sends the fi
     expect(CloudflareSandbox::local())->toBeFalse();
 });
 
+it('has the Worker clone the repository and checks that it did before the step runs', function () {
+    $asked = null;
+    Process::fake(function ($process) {
+        $command = (array) $process->command;
+
+        if ($command[0] === 'gzip') {
+            File::put(end($command).'.gz', 'the review\'s files, packed');
+        }
+
+        return Process::result();
+    });
+    Http::fake(['sandbox.example.com/*' => function (Request $request) use (&$asked) {
+        $asked ??= $request->data();
+
+        return Http::response(sandboxEvents([['exit', ['exitCode' => 0, 'seconds' => 10, 'kept' => false]]]), 200, ['Content-Type' => 'text/event-stream']);
+    }]);
+    $clone = ['url' => 'https://bitbucket.org/acme/shop.git', 'authorization' => 'Basic dG9rZW4=', 'ref' => 'refs/heads/feature', 'name' => 'feature', 'commit' => str_repeat('a', 40), 'destination' => 'main', 'base' => null, 'since' => null];
+
+    app(CloudflareSandbox::class)->run('review-7-41-review', 'sh .review/skill/run-review.sh', $this->work, [], trusted: false, timeout: 1800, composerCache: storage_path('app/review/cache/7'), clone: $clone);
+
+    // An older Worker would run the step on no checkout; the step stops instead.
+    expect($asked['clone'])->toBe($clone)
+        ->and($asked['script'])->toStartWith('mkdir -p "$HOME" && { [ -d .git ] ||')
+        ->and($asked['script'])->toEndWith('&& sh .review/skill/run-review.sh')
+        // Whether there is a composer.json is for the script to see in the clone.
+        ->and($asked['cache'])->toBe(['key' => 'review/cache/7/vendor-base.tar', 'file' => '/cache/composer/vendor-base.tar']);
+});
+
+it('knows from the Worker\'s version whether it clones in the sandbox, and asks again only after a while', function (?string $version, bool $clones) {
+    Http::fake(['sandbox.example.com/health' => Http::response(['ok' => true, 'version' => $version])]);
+
+    expect(app(CloudflareSandbox::class)->clonesItself())->toBe($clones)
+        ->and(app(CloudflareSandbox::class)->clonesItself())->toBe($clones);
+
+    Http::assertSentCount(1);
+})->with([
+    'this version' => [CloudflareSandbox::CLONES_SINCE, true],
+    'a later one' => ['2026-12-01.1', true],
+    'an earlier one' => ['2026-11-20.5', false],
+    'none said' => [null, false],
+]);
+
 it('keeps one vendor/ per repository, of its destination branch, under the repository\'s name', function () {
     File::put("{$this->work}/composer.json", '{"require": {"laravel/framework": "^13.0"}}');
 

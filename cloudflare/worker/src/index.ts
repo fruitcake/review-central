@@ -40,7 +40,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
  * after one is told apart. tests/Feature/CloudflareWorkerVersionTest.php fails
  * on a change that leaves it as it was.
  */
-const WORKER_VERSION = "2026-11-20.5";
+const WORKER_VERSION = "2026-11-24.4";
 
 interface Env {
   REVIEW_SANDBOX: DurableObjectNamespace<ReviewSandbox>;
@@ -82,7 +82,79 @@ interface RunSpec {
    * wrote at `<file>.new` put in the bucket after it. Null without a composer.json.
    */
   cache?: { key: string; file: string } | null;
+  /**
+   * The repository for the sandbox to clone itself, before the input is unpacked
+   * over it; null when the input holds the checkout. See CLONE.
+   */
+  clone?: CloneSpec | null;
 }
+
+/** What the sandbox clones, as review-central's Checkout::forSandbox() says it. */
+interface CloneSpec {
+  /** An https URL. */
+  url: string;
+  /** The header git would send, which GitGateway adds; null for a repository anyone may read. */
+  authorization: string | null;
+  /** The ref fetched, under refs/remotes/origin/<name>. */
+  ref: string;
+  name: string;
+  /** The commit checked out. */
+  commit: string;
+  /** The branch fetched beside it, or null. */
+  destination: string | null;
+  /** Where the destination is put back to, for a merged pull request; or null. */
+  base: string | null;
+  /** The commit the last review ended on, whose comparison with this one is fetched too; or null. */
+  since: string | null;
+}
+
+/** What GitGateway is started with: the host, the repository's path on it, and the header for reading it. */
+interface GitGatewayProps {
+  host: string;
+  path: string;
+  authorization: string;
+}
+
+/**
+ * The clone, by `sh -c` as the reviewer in an empty /work, with the spec's values
+ * as its arguments: blobless, as review-central clones, so the merge base is
+ * there and a file's contents are fetched when they are read. A commit the ref no
+ * longer reaches, after a force push, is fetched by itself. The contents of what
+ * the review compares, with the merge base and with the commit the last review
+ * ended on, are fetched now, as review-central does before a review: a
+ * credential lent for the clone may not outlast it. Where the review writes
+ * what the reviewer reads is made the review's own, whatever the pull request
+ * committed there, as review-central's Precheck::take() does on the worker.
+ */
+const CLONE = `set -e
+url=$1 ref=$2 name=$3 commit=$4 destination=$5 base=$6 previous=$7
+git -c init.defaultBranch=main init -q .
+git remote add origin "$url"
+git config remote.origin.promisor true
+git config remote.origin.partialclonefilter blob:none
+git fetch -q --filter=blob:none --no-tags origin "+$ref:refs/remotes/origin/$name"
+if [ -n "$destination" ] && [ "$destination" != "$name" ]; then
+  git fetch -q --filter=blob:none --no-tags origin "+refs/heads/$destination:refs/remotes/origin/$destination"
+fi
+git cat-file -e "$commit^{commit}" 2> /dev/null || git fetch -q --filter=blob:none --no-tags origin "$commit"
+git checkout -q --detach "$commit"
+if [ -n "$base" ]; then
+  git update-ref "refs/remotes/origin/$destination" "$base"
+fi
+if [ -n "$destination" ] && since=$(git merge-base "refs/remotes/origin/$destination" HEAD 2> /dev/null); then
+  git diff --no-ext-diff --no-textconv --stat "$since" HEAD > /dev/null || true
+fi
+if [ -n "$previous" ]; then
+  git diff --no-ext-diff --no-textconv --stat "$previous" HEAD > /dev/null 2>&1 || true
+fi
+rm -rf -- review-context.json review-ticket.md .review-instructions
+echo "Cloned $(git rev-parse HEAD)."`;
+
+/** A ref, branch or remote-tracking name the clone is given: as review-central's Checkout::guard() lets one through. */
+const GIT_NAME = /^(?!-)(?!.*\.\.)[^\s\x00-\x1f:^~?*\[\\]{1,1024}$/;
+
+/** Seconds the clone may take, as one git command on review-central's worker. */
+const CLONE_SECONDS = 600;
 
 /** A key, the host it is for, and what the sandbox has in its place. */
 interface Credential {
@@ -287,6 +359,44 @@ export class KeyProxy extends WorkerEntrypoint<Env, KeyProxyProps> {
   }
 }
 
+/**
+ * The way from a sandbox to the host of the repository it clones. Reading that one
+ * repository gets the credential: the two requests git makes to fetch, by GET of
+ * info/refs for git-upload-pack and by POST to git-upload-pack. Nothing else gets
+ * it, a push (git-receive-pack) least of all, so what the token may do besides
+ * reading this repository cannot be done from the sandbox. Every other request to
+ * the host goes on as it came, with nothing added: the sandbox has the internet,
+ * and the host's other addresses are reached through here too.
+ */
+export class GitGateway extends WorkerEntrypoint<Env, GitGatewayProps> {
+  async fetch(request: Request): Promise<Response> {
+    const { host, path, authorization } = this.ctx.props;
+    const url = new URL(request.url);
+
+    if (url.protocol !== "https:" || url.hostname !== host || (url.port !== "" && url.port !== "443")) {
+      return new Response(`Only https://${host} is reached this way.`, { status: 403 });
+    }
+
+    const reads =
+      (request.method === "GET" && url.pathname === `${path}/info/refs` && url.searchParams.get("service") === "git-upload-pack" && [...url.searchParams.keys()].length === 1) ||
+      (request.method === "POST" && url.pathname === `${path}/git-upload-pack` && url.search === "");
+    const headers = new Headers();
+
+    for (const [name, value] of request.headers) {
+      if (name.toLowerCase() !== "host") {
+        headers.set(name, value);
+      }
+    }
+
+    if (reads) {
+      headers.set("Authorization", authorization);
+    }
+
+    // Not after a redirect: that would take the credential to wherever it points.
+    return fetch(new Request(url, { method: request.method, headers, body: request.body, redirect: "manual" }));
+  }
+}
+
 export class ReviewSandbox extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -409,11 +519,21 @@ export class ReviewSandbox extends DurableObject<Env> {
 
   /**
    * Hands the sandbox's HTTPS to each key's host to KeyProxy, with that host's
-   * keys. Before every start: an interception lasts as long as its sandbox.
+   * keys, and to the host of a repository it clones with a credential to
+   * GitGateway. Before every start: an interception lasts as long as its sandbox.
    */
-  private async intercept(credentials: Credential[]): Promise<void> {
+  private async intercept(credentials: Credential[], clone: CloneSpec | null | undefined): Promise<void> {
     const container = this.ctx.container!;
-    const exports = this.ctx.exports as unknown as { KeyProxy: (options: { props: KeyProxyProps }) => Fetcher };
+    const exports = this.ctx.exports as unknown as {
+      KeyProxy: (options: { props: KeyProxyProps }) => Fetcher;
+      GitGateway: (options: { props: GitGatewayProps }) => Fetcher;
+    };
+
+    if (clone?.authorization) {
+      const url = new URL(clone.url);
+      await container.interceptOutboundHttps(url.hostname, exports.GitGateway({ props: { host: url.hostname, path: url.pathname, authorization: clone.authorization } }));
+    }
+
     const hosts = new Map<string, Array<[string, string]>>();
 
     for (const credential of credentials) {
@@ -448,7 +568,8 @@ export class ReviewSandbox extends DurableObject<Env> {
     await send("note", "##[phase] start");
 
     // The reviewer installs the repository's packages and calls its AI provider,
-    // so it has the internet. It gets no credential of the repository's host.
+    // so it has the internet. It gets no credential of the repository's host: a
+    // clone with one goes through GitGateway, which keeps it.
     //
     // From the snapshot of a sandbox that ran this setup. Made once, by a
     // sandbox of its own for that setup, which a review that finds none asks
@@ -477,7 +598,7 @@ export class ReviewSandbox extends DurableObject<Env> {
       }
 
       try {
-        await this.intercept(spec.credentials);
+        await this.intercept(spec.credentials, spec.clone);
         container.start({ ...always, containerSnapshot: { id: snapshot.id } });
         await this.ready();
         prepared = true;
@@ -490,7 +611,7 @@ export class ReviewSandbox extends DurableObject<Env> {
     }
 
     if (!prepared) {
-      await this.intercept(spec.credentials);
+      await this.intercept(spec.credentials, spec.clone);
       container.start({ ...always, image });
       await this.ready();
       await send("note", `Sandbox started (${spec.instance}, ${image}).`);
@@ -536,15 +657,54 @@ export class ReviewSandbox extends DurableObject<Env> {
       }
     }
 
-    // The certificate the keys' hosts are answered with from here, which every
-    // client in the sandbox has to trust: the system's, and Node's through
-    // NODE_EXTRA_CA_CERTS below. Root's work, before the reviewer runs.
-    if (spec.credentials.length > 0) {
+    const gateway = spec.clone?.authorization ? new URL(spec.clone.url).hostname : null;
+    const intercepted = spec.credentials.length > 0 || gateway !== null;
+
+    // The certificate the keys' hosts and the repository's are answered with from
+    // here, which every client in the sandbox has to trust: the system's, and
+    // Node's through NODE_EXTRA_CA_CERTS below. Root's work, before the reviewer runs.
+    if (intercepted) {
       await this.must(
         ["sh", "-c", `test -s ${INTERCEPT_CA} && cp ${INTERCEPT_CA} /usr/local/share/ca-certificates/cloudflare-containers-ca.crt && update-ca-certificates > /dev/null`],
-        "trust the certificate the AI providers' hosts are answered with",
+        "trust the certificate the intercepted hosts are answered with",
       );
+    }
+
+    if (spec.credentials.length > 0) {
       await send("note", `The AI providers' keys stay in the Worker: ${[...new Set(spec.credentials.map((credential) => credential.host))].join(", ")} reached through it.`);
+    }
+
+    // The sandbox clones the repository itself; what is unpacked next goes over it.
+    if (spec.clone) {
+      await send("note", "##[phase] clone");
+
+      if (gateway !== null) {
+        await send("note", `The repository's credential stays in the Worker: ${gateway} reached through it, which adds it to reading this repository only.`);
+      }
+
+      await this.must(["sh", "-c", `mkdir -p /work /home/reviewer && chown ${REVIEWER} /work /home/reviewer`], "make the work directory");
+      const { url, ref, name, commit, destination, base, since } = spec.clone;
+      // A host that stops answering does not hold the sandbox for the review's whole time.
+      const cloned = await streamed(["timeout", "--signal=TERM", "--kill-after=30", String(CLONE_SECONDS), "sh", "-c", CLONE, "clone", url, ref, name, commit, destination ?? "", base ?? "", since ?? ""], {
+        cwd: "/work",
+        // As review-central's own git: no LFS download, no local repository as a remote.
+        env: {
+          HOME: "/home/reviewer",
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_LFS_SKIP_SMUDGE: "1",
+          GIT_CONFIG_COUNT: "1",
+          GIT_CONFIG_KEY_0: "protocol.file.allow",
+          GIT_CONFIG_VALUE_0: "never",
+          ...(gateway !== null ? { GIT_SSL_CAINFO: SYSTEM_CA_BUNDLE } : {}),
+        },
+        user: REVIEWER,
+      });
+
+      // No review ran: an error, as a checkout on the worker that failed is, not
+      // a reviewer that failed.
+      if (cloned !== 0) {
+        throw new Error(`The sandbox could not clone the repository (exit ${cloned}).`);
+      }
     }
 
     await send("note", "##[phase] unpack");
@@ -555,9 +715,15 @@ export class ReviewSandbox extends DurableObject<Env> {
     }
 
     // Straight from the bucket into tar: tar and gzip are in any image, so the
-    // sandbox needs nothing of ours to be handed its files.
+    // sandbox needs nothing of ours to be handed its files. Over a clone, the
+    // scripts' place is made the review's own first, whatever the clone has there.
     await this.must(
-      ["sh", "-c", `mkdir -p /work /home/reviewer && tar -xzf - -C / --no-same-owner && chown -R ${REVIEWER} /work /home/reviewer`],
+      [
+        "sh",
+        "-c",
+        "mkdir -p /work /home/reviewer && for place in /work/.review /work/.review/skill; do if [ -L \"$place\" ]; then rm -f \"$place\"; fi; done && " +
+          `tar -xzf - -C / --no-same-owner && chown -R ${REVIEWER} /work /home/reviewer`,
+      ],
       "unpack the checkout",
       input.body,
     );
@@ -584,7 +750,7 @@ export class ReviewSandbox extends DurableObject<Env> {
         cwd: "/work",
         env: {
           ...spec.env,
-          ...(spec.credentials.length > 0 ? { NODE_EXTRA_CA_CERTS: INTERCEPT_CA, SSL_CERT_FILE: SYSTEM_CA_BUNDLE } : {}),
+          ...(intercepted ? { NODE_EXTRA_CA_CERTS: INTERCEPT_CA, SSL_CERT_FILE: SYSTEM_CA_BUNDLE } : {}),
           HOME: "/home/reviewer",
         },
         user: REVIEWER,
@@ -871,6 +1037,12 @@ function readSpec(body: unknown): RunSpec | string {
     return "cache names a key and a file, or is left out.";
   }
 
+  const clone = readClone(spec.clone, credentials as Credential[]);
+
+  if (typeof clone === "string") {
+    return clone;
+  }
+
   return {
     input: spec.input,
     output: spec.output,
@@ -883,6 +1055,62 @@ function readSpec(body: unknown): RunSpec | string {
     timeout,
     instance,
     cache: cache === null ? null : { key: cache.key as string, file: cache.file as string },
+    clone,
+  };
+}
+
+/**
+ * The clone that was asked for, null for none, or what is wrong with it. A
+ * credential goes only to a host no AI key is for: one interception a host.
+ */
+function readClone(value: unknown, credentials: Credential[]): CloneSpec | null | string {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const wrong = "clone names an https URL, a ref, a name and a commit, and may name a destination, a base and an authorization.";
+
+  if (typeof value !== "object") {
+    return wrong;
+  }
+
+  const clone = value as Record<string, unknown>;
+  const name = (part: unknown): part is string => typeof part === "string" && GIT_NAME.test(part);
+  const hash = (part: unknown): part is string => typeof part === "string" && /^[0-9a-f]{7,40}$/.test(part);
+  const url = typeof clone.url === "string" ? URL.parse(clone.url) : null;
+  const authorization = clone.authorization ?? null;
+
+  if (
+    url === null ||
+    url.protocol !== "https:" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.search !== "" ||
+    url.hash !== "" ||
+    !name(clone.ref) ||
+    !name(clone.name) ||
+    !hash(clone.commit) ||
+    (clone.destination !== undefined && clone.destination !== null && !name(clone.destination)) ||
+    (clone.base !== undefined && clone.base !== null && (!hash(clone.base) || !name(clone.destination))) ||
+    (clone.since !== undefined && clone.since !== null && !hash(clone.since)) ||
+    (authorization !== null && (typeof authorization !== "string" || authorization === "" || /[\r\n]/.test(authorization)))
+  ) {
+    return wrong;
+  }
+
+  if (authorization !== null && ((url.port !== "" && url.port !== "443") || credentials.some((credential) => credential.host === url.hostname))) {
+    return "A clone with a credential reaches its host on port 443, and not a host an AI key is for.";
+  }
+
+  return {
+    url: url.toString(),
+    authorization: authorization as string | null,
+    ref: clone.ref,
+    name: clone.name,
+    commit: clone.commit,
+    destination: (clone.destination as string | null | undefined) ?? null,
+    base: (clone.base as string | null | undefined) ?? null,
+    since: (clone.since as string | null | undefined) ?? null,
   };
 }
 
