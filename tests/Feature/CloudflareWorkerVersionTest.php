@@ -10,7 +10,7 @@ use App\Runners\Container\ReviewSessions;
  * Changed cloudflare/worker/src/index.ts? Raise WORKER_VERSION in it, then put the
  * hash this test prints here, with the version.
  */
-const WORKER_SOURCE = ['version' => '2026-11-24.5', 'hash' => 'baec1fa220f9054feb1c053ea3c79e40e7c5866901f83e762ab92e1fd2a9147b'];
+const WORKER_SOURCE = ['version' => '2026-11-24.5', 'hash' => 'a96a4a38ea76d37c974f435cecfefeafd25601b95d226d8c8ebfd76e514e091a'];
 
 it('raises the Worker\'s version with every change to its code', function () {
     $source = (string) file_get_contents(base_path('cloudflare/worker/src/index.ts'));

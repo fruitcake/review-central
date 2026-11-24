@@ -136,7 +136,7 @@ interface GitGatewayProps {
  * In a warm sandbox the same script runs over a .git that WARM_RESET left only
  * the objects of: git init makes the rest again, the commit the last review ended
  * on tells the fetch what is there already, and the checkout and clean put the
- * working tree back to the commit.
+ * working tree back to the commit, vendor/ aside.
  */
 const CLONE = `set -e
 url=$1 ref=$2 name=$3 commit=$4 destination=$5 base=$6 previous=$7
@@ -154,7 +154,7 @@ if [ -n "$destination" ] && [ "$destination" != "$name" ]; then
 fi
 git cat-file -e "$commit^{commit}" 2> /dev/null || git fetch -q --filter=blob:none --no-tags origin "$commit"
 git checkout -q -f --detach "$commit"
-git clean -q -ffdx
+git clean -q -ffdx -e /vendor
 if [ -n "$base" ]; then
   git update-ref "refs/remotes/origin/$destination" "$base"
 fi
@@ -200,10 +200,14 @@ done
  *   newer than the mark: that is what the reviewer wrote or changed, and a ctime
  *   cannot be set back. Git fetches a blob that went again when it is read.
  *   Config, hooks, refs and the index are made again by CLONE, and its clean
- *   takes the rest of the working tree, vendor/ with it;
+ *   takes the rest of the working tree but vendor/;
  * - its home goes (the session comes back in the input), and everything it owns
  *   anywhere else but /work. What root owns stays: the tools, and the vendor/
- *   cache of the destination branch, which prepare-review.sh unpacks again.
+ *   cache of the destination branch.
+ * vendor/ stays, for Composer to bring in line with the new lock: reviews are of
+ * a team's own pull requests, whose authors decide what is in it anyway. Composer
+ * does not restore a file the reviewer edited there, so that is the trade. It is
+ * never kept as the cache for other pull requests.
  * Fails when anything is not as a run of ours left it; the review then starts in
  * a fresh sandbox.
  */
@@ -213,6 +217,7 @@ ${KILL_REVIEWER}
 find /work/.git/objects -mindepth 1 \\( -type l -o \\( ! -type d -cnewer ${REVIEWER_STARTED} \\) \\) -exec rm -f {} +
 rm -rf /work/.git/objects/info
 find /work/.git -mindepth 1 -maxdepth 1 ! -name objects -exec rm -rf {} +
+if [ -L /work/vendor ] || { [ -e /work/vendor ] && [ ! -d /work/vendor ]; }; then rm -f /work/vendor; fi
 find / -xdev \\( -path /proc -o -path /sys -o -path /dev -o -path /work -o -path /home/reviewer \\) -prune -o -user 1000 -print0 | xargs -0r rm -rf --
 rm -rf /home/reviewer
 mkdir -p /home/reviewer
@@ -945,8 +950,13 @@ export class ReviewSandbox extends DurableObject<Env> {
 
     const cache = spec.cache && CACHE_KEY.test(spec.cache.key) && CACHE_FILE.test(spec.cache.file) ? spec.cache : null;
     let restored = false;
+    // The vendor/ the last review of the branch installed, which Composer brings
+    // in line with this commit's lock (WARM_RESET says why it stays).
+    const keptVendor = warm && (await this.succeeds(["sh", "-c", "[ -d /work/vendor ] && [ ! -L /work/vendor ]"]));
 
-    if (cache !== null) {
+    if (keptVendor) {
+      await send("note", "vendor/ of the last review of this branch is still there; Composer brings it in line with this commit.");
+    } else if (cache !== null) {
       await send("note", "##[phase] vendor");
 
       // A warm sandbox still has the destination branch's vendor/ that root put
@@ -979,6 +989,8 @@ export class ReviewSandbox extends DurableObject<Env> {
         env: {
           ...spec.env,
           ...(intercepted ? { NODE_EXTRA_CA_CERTS: INTERCEPT_CA, SSL_CERT_FILE: SYSTEM_CA_BUNDLE } : {}),
+          // prepare-review.sh then keeps vendor/ as it is, and never stores it for others.
+          ...(keptVendor ? { REVIEW_WARM_VENDOR: "true" } : {}),
           HOME: "/home/reviewer",
         },
         ...reviewer,
