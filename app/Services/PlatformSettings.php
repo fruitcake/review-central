@@ -20,7 +20,8 @@ use Throwable;
  * the currency and the time zone the admin panel shows its figures and times in,
  * and that a new tenant starts with (a tenant reads its own pages in its own),
  * how a repository's reviews run when it picks nothing, and how the installation
- * looks: its name, its logo, its colour and whether it credits its makers.
+ * looks: its name, its logo, its colour and whether it credits its makers, and
+ * where an MCP client may have its sign-in sent beyond the known assistants.
  *
  * Read on every page, so kept in the cache until they are saved again.
  */
@@ -85,6 +86,12 @@ class PlatformSettings
      */
     public const OAUTH_KEYS = 'oauth_keys';
 
+    /**
+     * Origins (https://example.com) and schemes (zed://) an MCP client may have
+     * its sign-in sent to, beyond those config/mcp.php allows, one per line.
+     */
+    public const MCP_REDIRECTS = 'mcp_redirects';
+
     /** Kept encrypted, and never shown again. */
     public const SECRETS = [self::CLOUDFLARE_API_TOKEN, self::R2_SECRET_ACCESS_KEY, self::CLOUDFLARE_TOKEN];
 
@@ -118,6 +125,7 @@ class PlatformSettings
         self::CLOUDFLARE_TOKEN => null,
         self::CLOUDFLARE_CLIS => null,
         self::OAUTH_KEYS => null,
+        self::MCP_REDIRECTS => null,
     ];
 
     protected const CACHE = 'platform-settings';
@@ -351,6 +359,45 @@ class PlatformSettings
         }
 
         return is_array($keys) && is_string($keys['private'] ?? null) && is_string($keys['public'] ?? null) ? ['private' => $keys['private'], 'public' => $keys['public']] : null;
+    }
+
+    /**
+     * Adds the redirect origins and schemes set here and in MCP_REDIRECT_DOMAINS
+     * to those config/mcp.php allows, for registering an MCP client. Called once
+     * per request that registers one, which starts from the configuration as is.
+     */
+    public function applyMcpRedirects(): void
+    {
+        $environment = self::parseRedirects((string) config('mcp.extra_redirects'));
+        $settings = self::parseRedirects((string) $this->text(self::MCP_REDIRECTS));
+
+        config([
+            'mcp.redirect_domains' => array_values(array_unique([...(array) config('mcp.redirect_domains', []), ...$environment['domains'], ...$settings['domains']])),
+            'mcp.custom_schemes' => array_values(array_unique([...(array) config('mcp.custom_schemes', []), ...$environment['schemes'], ...$settings['schemes']])),
+        ]);
+    }
+
+    /**
+     * A list of redirect origins and schemes, split by commas or line breaks: an
+     * origin such as https://example.com (or "*" for any), a scheme such as zed://.
+     *
+     * @return array{domains: list<string>, schemes: list<string>, invalid: list<string>}
+     */
+    public static function parseRedirects(string $text): array
+    {
+        $parsed = ['domains' => [], 'schemes' => [], 'invalid' => []];
+
+        foreach (preg_split('/[\s,]+/', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $entry) {
+            if ($entry === '*' || preg_match('#^https?://[a-z0-9.-]+(:\d{1,5})?/?$#i', $entry) === 1) {
+                $parsed['domains'][] = rtrim(strtolower($entry), '/');
+            } elseif (preg_match('#^([a-z][a-z0-9+.-]*):(//)?$#i', $entry, $match) === 1 && ! in_array(strtolower($match[1]), ['http', 'https'], true)) {
+                $parsed['schemes'][] = strtolower($match[1]);
+            } else {
+                $parsed['invalid'][] = $entry;
+            }
+        }
+
+        return $parsed;
     }
 
     /**

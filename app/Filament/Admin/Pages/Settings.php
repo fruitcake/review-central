@@ -20,6 +20,7 @@ use Filament\Forms\Components\ColorPicker;
 use Filament\Forms\Components\Field;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -68,6 +69,7 @@ class Settings extends Page
             PlatformSettings::CLOUDFLARE_BUCKET => $settings->text(PlatformSettings::CLOUDFLARE_BUCKET),
             PlatformSettings::CLOUDFLARE_INSTANCE => $settings->text(PlatformSettings::CLOUDFLARE_INSTANCE),
             PlatformSettings::R2_ACCESS_KEY_ID => $settings->text(PlatformSettings::R2_ACCESS_KEY_ID),
+            PlatformSettings::MCP_REDIRECTS => $settings->text(PlatformSettings::MCP_REDIRECTS),
             // Secrets are never sent back to the browser.
             PlatformSettings::CLOUDFLARE_API_TOKEN => null,
             PlatformSettings::R2_SECRET_ACCESS_KEY => null,
@@ -148,6 +150,26 @@ class Settings extends Page
                         Toggle::make(PlatformSettings::CREDIT)
                             ->label('Show "developed by Fruitcake"')
                             ->helperText('A small credit at the foot of the sidebar.'),
+                    ]),
+                Section::make('MCP clients')
+                    ->description('An AI assistant connects to the MCP servers by registering itself, under a name of its own choosing. Where it may have the sign-in sent decides who gets a token. Claude, ChatGPT, VS Code, Cursor and clients on the user\'s own computer are allowed already.')
+                    ->collapsible()
+                    ->collapsed(fn (): bool => app(PlatformSettings::class)->text(PlatformSettings::MCP_REDIRECTS) === null)
+                    ->schema([
+                        Textarea::make(PlatformSettings::MCP_REDIRECTS)
+                            ->label('Extra MCP redirect domains')
+                            ->rows(3)
+                            ->placeholder("https://assistant.example.com\nzed://")
+                            ->rule(fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
+                                $parsed = PlatformSettings::parseRedirects((string) $value);
+                                // Any domain at all is for MCP_REDIRECT_DOMAINS, set by whoever runs the server.
+                                $refused = [...$parsed['invalid'], ...array_intersect($parsed['domains'], ['*'])];
+
+                                if ($refused !== []) {
+                                    $fail('Not an origin such as https://example.com or a scheme such as zed://: '.implode(', ', $refused));
+                                }
+                            })
+                            ->helperText('One per line: the origin a web assistant sends the sign-in back to, such as https://assistant.example.com, or the scheme of a desktop app, such as zed://. Add only one you trust: the consent screen shows where access goes, but a client can call itself anything. MCP_REDIRECT_DOMAINS in .env adds to these.'),
                     ]),
                 Section::make('Cloudflare sandboxes')->id('cloudflare')
                     ->key('cloudflare')

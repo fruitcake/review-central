@@ -7,18 +7,23 @@ return [
     | Redirect Domains
     |--------------------------------------------------------------------------
     |
-    | These domains are the domains that OAuth clients are permitted to use
-    | for redirect URIs. Each domain should be specified with its scheme
-    | and host. Domains not in this list will raise validation errors.
-    |
-    | An "*" may be used to allow all domains.
+    | Where an MCP client that registers itself may have the authorization
+    | code sent. Its name is whatever it registers with, so these decide who
+    | can be handed a token: the assistants Review Central is used with, and
+    | a client on the user's own computer (http://localhost or 127.0.0.1 on
+    | any port). More go under Admin -> Settings, or in MCP_REDIRECT_DOMAINS,
+    | comma separated, where "*" allows any domain again.
     |
     */
 
     'redirect_domains' => [
-        '*',
-        // 'https://example.com',
-        // 'http://localhost',
+        'http://localhost',
+        'http://127.0.0.1',
+        'https://claude.ai',
+        'https://claude.com',
+        'https://chatgpt.com',
+        'https://vscode.dev',
+        'https://insiders.vscode.dev',
     ],
 
     /*
@@ -33,10 +38,19 @@ return [
     */
 
     'custom_schemes' => [
-        // 'claude',
-        // 'cursor',
-        // 'vscode',
+        'claude',
+        'cursor',
+        'vscode',
+        'vscode-insiders',
     ],
+
+    /*
+    | More of both for this installation, comma separated: an origin such as
+    | https://example.com, or a scheme such as zed://. Added to the ones above
+    | and to those set under Admin -> Settings.
+    */
+
+    'extra_redirects' => env('MCP_REDIRECT_DOMAINS'),
 
     /*
     |--------------------------------------------------------------------------

@@ -13,6 +13,8 @@
         main { max-width: 32rem; margin: 0 auto; }
         h1 { font-size: 1.4rem; margin: 0 0 .5rem; }
         .muted { color: var(--muted); font-size: .9rem; }
+        .destination { border-left: 4px solid var(--accent); padding: .75rem 1rem; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+        .destination strong { font-size: 1.1rem; word-break: break-all; }
         ul { padding-left: 1.2rem; }
         .actions { display: flex; gap: .75rem; margin-top: 1.5rem; }
         .actions form { margin: 0; }
@@ -25,6 +27,8 @@
 <body>
 <main>
     <h1>Connect {{ $client->name }}</h1>
+    @php($destination = \App\Support\OAuthRedirect::destination(\App\Support\OAuthRedirect::requested($request, $client)))
+    <p class="destination">Connecting sends access to <strong>{{ $destination['where'] }}</strong>. Go on only if you started this there yourself: "{{ $client->name }}" is the name the client gave itself, and proves nothing.</p>
     <p>{{ $client->name }} asks to use {{ config('app.name') }} as you, {{ $user->email }}: to read the reviews, findings and rules of your teams' repositories and the tickets their pull requests are for, as your team's tracker connections can read them, and to do what you may do there, such as asking the reviewer, judging a finding or starting a review.</p>
 
     @if (count($scopes) > 0)
