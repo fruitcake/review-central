@@ -12,7 +12,6 @@ use App\Services\PullRequestClassifier;
 use App\Services\ReviewCredentials;
 use App\Services\ReviewInstructions;
 use App\Services\ReviewOpening;
-use App\Services\ReviewPublisher;
 use App\Services\ReviewSettings;
 use Illuminate\Support\Facades\File;
 
@@ -72,6 +71,8 @@ class Precheck
         );
 
         $reviewer = $this->reviewer($settings, $available, $trial, $say);
+        // What holds the merge, which the reviewer writes its result by and the second check picks from.
+        $failOn = ReviewSettings::failOn($repository);
 
         // Nothing set is the platform's effort, said out loud: the review then
         // records what it ran at, and a reviewer's own default can change unseen.
@@ -108,7 +109,7 @@ class Precheck
             'lock' => $trial === null ? (string) $build : null,
             'build' => (string) $build,
             'mode' => 'both',
-            'fail_on' => ReviewPublisher::DEFAULT_FAIL_ON,
+            'fail_on' => $failOn,
             'model' => $model,
             'agent' => $reviewer->value,
             'runner' => $runner,
@@ -168,7 +169,7 @@ class Precheck
             'create_tasks' => true,
             // A draft that was not skipped is one to review: a trial, or a /review comment on it.
             'review_drafts' => $trial !== null || ($context['pull_request']['draft'] ?? false) === true,
-            'fail_on' => ReviewPublisher::DEFAULT_FAIL_ON,
+            'fail_on' => $failOn,
             'commit' => $commit,
             'server_url' => rtrim((string) (config('review.container.server_url') ?: config('app.url')), '/'),
             'server_key_available' => true,

@@ -461,6 +461,20 @@ it('writes in the team\'s language and leaves the ticket ungraded when the team 
         && str_contains($request['system'][0]['text'], 'Do not grade the change against the ticket'));
 });
 
+it('judges the answer by the repository\'s threshold, not the platform\'s', function () {
+    Process::fake();
+    fakeHost($this->diff);
+    Http::fake(['api.anthropic.com/v1/messages' => Http::response(streamed($this->report), 200, ['Content-Type' => 'text/event-stream'])]);
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    ReviewSettings::saveFor($this->repository, ['fail_on' => ['default' => 'high']]);
+
+    app(DiffRunner::class)->markRunning($this->repository, 41);
+    app(DiffReview::class)->run($this->repository, 'feature/export', null, 41);
+
+    expect(ReviewRun::query()->sole()->only(['result', 'fail_on']))->toBe(['result' => 'PASSED', 'fail_on' => 'high,security:any,maintainability:never']);
+    Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST' && str_ends_with($request->url(), '/pullrequests/570/request-changes'));
+});
+
 it('runs a pull request at the effort and model its classification picks, from the diff too', function () {
     Process::fake();
     fakeHost($this->diff);

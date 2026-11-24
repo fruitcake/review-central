@@ -13,6 +13,7 @@ use App\Models\ReviewSetting;
 use App\Services\Currency;
 use App\Services\ReviewCredentials;
 use App\Services\ReviewFollowUps;
+use App\Services\ReviewPublisher;
 use App\Services\ReviewSettings;
 use Closure;
 use Filament\Forms\Components\Repeater;
@@ -147,6 +148,7 @@ class ReviewSettingsForm
                     default => 'Off',
                 })
                 ->helperText('Up to five new findings that would block the merge are each checked once more, in a fresh session that did not write them. Each check adds to the review\'s time and cost.'),
+            Fieldset::make('What holds the merge')->columns(3)->schema(self::thresholdFields($defaults)),
             TextInput::make('max_rounds')
                 ->label('Follow-up rounds with new findings')
                 ->integer()
@@ -199,6 +201,47 @@ class ReviewSettingsForm
                 ->live(),
             Text::make('Before its review, a small model reads a pull request\'s title, description, changed files and migrations, and calls it simple, normal or complex. A simple one runs at the effort and model set here, a normal one a step higher, a complex one two, up to Extra high and smartest. '
                 .'Running at what it picks replaces the effort of every reviewer below, and the model of Claude Code and Codex unless the model is each reviewer\'s own. Once per commit, with the AI provider that writes the notes on whose turn.')
+                ->columnSpanFull(),
+        ];
+    }
+
+    /** A threshold as a person reads it. */
+    public const THRESHOLD_LABELS = [
+        'never' => 'Never',
+        'any' => 'Any severity',
+        'medium' => 'MEDIUM and HIGH',
+        'high' => 'HIGH only',
+    ];
+
+    /**
+     * From which severity a finding holds the merge: for every category, and for
+     * each category on its own. One left empty is the team's, or the platform's.
+     *
+     * @return array<int, Component>
+     */
+    public static function thresholdFields(?ReviewSetting $defaults = null): array
+    {
+        $platform = ReviewSettings::thresholds(ReviewPublisher::DEFAULT_FAIL_ON);
+        $team = ReviewSettings::ownThresholds($defaults?->fail_on);
+
+        // A category that neither the team nor the platform names follows Every category, as set here.
+        $placeholder = fn (string $key): string => match (true) {
+            isset($team[$key]) => 'As the team: '.self::THRESHOLD_LABELS[$team[$key]],
+            isset($platform[$key]) => 'Not set: '.self::THRESHOLD_LABELS[$platform[$key]],
+            default => 'As every category',
+        };
+
+        $select = fn (string $key, string $label): Select => Select::make("fail_on.{$key}")
+            ->label($label)
+            ->options(self::THRESHOLD_LABELS)
+            ->placeholder($placeholder($key));
+
+        return [
+            $select('default', 'Every category'),
+            ...array_map(fn (string $category): Select => $select($category, ucfirst($category)), ReviewPublisher::CATEGORIES),
+            Text::make('A finding holds the merge from this severity up: on Bitbucket it gets a task, on GitHub the review requests changes, and the commit\'s status is red. '
+                .'A category left empty follows Every category, except where the platform sets it apart: security on any severity, tests on HIGH only, maintainability never. '
+                .'Below confidence 8, already there before the change, or past the third follow-up and below HIGH, a finding never holds the merge.')
                 ->columnSpanFull(),
         ];
     }
@@ -579,7 +622,7 @@ class ReviewSettingsForm
     public static function state(?ReviewSetting $setting): array
     {
         return $setting === null ? [] : collect($setting->attributesToArray())
-            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'ocr', 'scan', 'floor_guard', 'max_rounds', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model', 'findings_check'])
+            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'ocr', 'scan', 'floor_guard', 'max_rounds', 'fail_on', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model', 'findings_check'])
             ->all();
     }
 }

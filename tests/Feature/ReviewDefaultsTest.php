@@ -341,3 +341,26 @@ it('shows the effort and model the classification picks per pull request as not 
         ->assertFormFieldDisabled('claude_effort')
         ->assertFormFieldEnabled('claude_model');
 });
+
+it('holds the merge from the severity set per category, the repository\'s over the team\'s over the platform\'s', function () {
+    livewire(ReviewDefaults::class)
+        ->fillForm(['fail_on' => ['default' => 'high']])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    // Only what was set is kept; the rest inherits.
+    expect(ReviewSettings::defaults($this->tenant)->refresh()->fail_on)->toBe(['default' => 'high'])
+        // The platform still sets security, tests and maintainability apart.
+        ->and(ReviewSettings::failOn($this->repository->fresh()))->toBe('high,security:any,maintainability:never');
+
+    ReviewSettings::saveFor($this->repository, ['fail_on' => ['default' => null, 'security' => 'never', 'tests' => 'any', 'correctness' => 'nonsense']]);
+
+    expect($this->repository->fresh()->reviewSetting->fail_on)->toBe(['security' => 'never', 'tests' => 'any'])
+        ->and(ReviewSettings::failOn($this->repository->fresh()))->toBe('high,security:never,maintainability:never,tests:any');
+
+    // Nothing of its own left: no row, and the team's threshold again.
+    ReviewSettings::saveFor($this->repository, ['fail_on' => ['security' => null, 'tests' => null]]);
+
+    expect($this->repository->fresh()->reviewSetting)->toBeNull()
+        ->and(ReviewSettings::failOn($this->repository->fresh()))->toBe('high,security:any,maintainability:never');
+});

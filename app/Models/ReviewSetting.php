@@ -39,6 +39,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $strategy_effort the effort a simple pull request runs at; normal and complex ones a step and two higher
  * @property string|null $strategy_model the model tier a simple pull request runs at: cheapest, default or smartest
  * @property int|null $max_rounds Follow-up rounds that may add findings; null inherits, five where nothing sets it
+ * @property array<string, string>|null $fail_on The severity from which a finding holds the merge: under `default` for every category, and per category over it. A key left out inherits; see ReviewSettings::failOn()
  * @property string|null $findings_check weekly or monthly: how often the open findings of merged pull requests are checked; the team's alone
  * @property int|null $follow_ups Reviews a container job carries on with after its own; null inherits.
  * @property CarbonInterface|null $created_at
@@ -58,6 +59,7 @@ class ReviewSetting extends Model
             'providers' => 'array',
             'follow_ups' => 'integer',
             'max_rounds' => 'integer',
+            'fail_on' => 'array',
             'claude_effort' => ReviewEffort::class,
             'codex_effort' => ReviewEffort::class,
             'ocr_effort' => ReviewEffort::class,

@@ -53,6 +53,19 @@ Under **Review defaults → By pull request** a team can have each pull request 
 
 The model works the same along *cheapest*, *default* (the default start) and *smartest*, the Laravel AI SDK's tiers. What it picks replaces every reviewer's effort (Pi's in a trial too), and Claude Code's and Codex's model; OpenCodeReview keeps its model. A review from the diff alone runs at it the same way. A trial that names its own model or effort runs at those. When the classification fails, the review runs at what is set and the log says why. A repository can set all three for itself under **Review settings**. The summary at the top of Review defaults says what each complexity runs at.
 
+### What holds the merge
+
+A finding holds the merge from a severity on, per category: on Bitbucket it gets a task, on GitHub the review requests changes, and the commit's status is red. **What holds the merge** under Review defaults sets it for the team, and a repository's own Review settings over that, one category at a time. Left empty, a category is the team's, else the platform's:
+
+| Category | The platform's |
+|---|---|
+| Every category | MEDIUM and HIGH |
+| Security | Any severity |
+| Tests | HIGH only |
+| Maintainability | Never |
+
+A category the platform does not set apart, such as correctness or performance, follows **Every category**. So *HIGH only* there still holds the merge on a security finding of any severity, unless Security is set too. Whatever is set, a finding below confidence 8, one that was there before the change, and, from the third follow-up on, a new one below HIGH never hold the merge. The run's log and its Code Insights report say which threshold it used.
+
 ### Follow-up rounds
 
 A review of a pull request after its first is a follow-up: it re-checks the open findings and looks for new ones only in what changed since. So a review, a fix and another review do not go on for ever, the review server holds every follow-up to three rules, whatever the reviewer itself does:
