@@ -186,7 +186,7 @@ The admin panel opens on **Platform**: every tenant with its connections, reposi
 **Try without posting** on the list of reviews takes the address of a Bitbucket or GitHub pull request and reviews it without posting anything: no comment, no build status, no task. It is for comparing reviewers, models, efforts and instruction drafts on the same work, and the runs appear under the view *Trials*.
 
 - The pull request may be merged already. It is then reviewed as it went in, against the destination branch as it was before the merge. One that was merged by fast-forward is refused, and one merged by rebase is reviewed on its last commit only: neither leaves a commit that says where the pull request began. A declined one is refused.
-- Its repository need not be set up. It is added with *Review its pull requests* turned off, so nothing but a trial runs on it until someone turns that on. The workspace does need a source control connection, except a public GitHub repository.
+- Its repository need not be set up. It is added with *Review its pull requests* turned off, so nothing but a trial, or a review someone asks for with a `/review` comment, runs on it until someone turns that on. The workspace does need a source control connection, except a public GitHub repository.
 - *Review as though nobody had* leaves out the comments and earlier findings on the pull request, so two runs start from the same place. Off, the run follows up on what is there.
 - It runs on the runner picked in its form, whatever the repository itself uses.
 
