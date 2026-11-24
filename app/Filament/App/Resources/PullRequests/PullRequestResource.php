@@ -348,7 +348,7 @@ class PullRequestResource extends Resource
             ->label('Stop the review')
             ->icon(Heroicon::OutlinedStop)
             ->color('danger')
-            ->visible(fn (): bool => self::reviewing($for) !== null)
+            ->visible(fn (): bool => ($run = self::reviewing($for)) !== null && ReviewStops::stoppable($run))
             ->requiresConfirmation()
             ->modalHeading('Stop this review')
             ->modalDescription(ReviewRunResource::STOP_DESCRIPTION)

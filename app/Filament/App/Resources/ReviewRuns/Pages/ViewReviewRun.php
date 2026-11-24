@@ -90,7 +90,7 @@ class ViewReviewRun extends ViewRecord
                 ->label('Stop')
                 ->icon(Heroicon::OutlinedStop)
                 ->color('danger')
-                ->visible(fn (): bool => in_array($this->record->status, ReviewStops::STOPPABLE, true))
+                ->visible(fn (): bool => ReviewStops::stoppable($this->record))
                 ->requiresConfirmation()
                 ->modalHeading('Stop this review')
                 ->modalDescription(ReviewRunResource::STOP_DESCRIPTION)

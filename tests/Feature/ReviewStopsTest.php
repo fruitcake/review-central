@@ -7,6 +7,7 @@ use App\Models\ReviewRun;
 use App\Models\User;
 use App\Runners\Container\CloudflareSandbox;
 use App\Runners\Container\Sandbox;
+use App\Runners\Security\SecurityReview;
 use App\Services\ReviewStops;
 use Filament\Facades\Filament;
 use Illuminate\Http\Client\Request;
@@ -90,3 +91,15 @@ it('has a Stop button on a review that runs, and none once it is done', function
     'running' => [ReviewRun::STATUS_RUNNING, true],
     'finished' => [ReviewRun::STATUS_FINISHED, false],
 ]);
+
+it('does not offer to stop a security review, whose job does not look for a stop', function () {
+    $repository = Repository::factory()->create();
+    $run = ReviewRun::query()->create([
+        'tenant_id' => $repository->tenant_id, 'repository_id' => $repository->id, 'workspace' => 'acme', 'slug' => 'shop', 'kind' => SecurityReview::KIND,
+        'branch' => 'feature/export', 'commit' => str_repeat('a', 40), 'build_number' => 41, 'status' => ReviewRun::STATUS_RUNNING, 'started_at' => now(),
+    ]);
+
+    expect(ReviewStops::stoppable($run))->toBeFalse()
+        ->and(app(ReviewStops::class)->stop($run, 'Robin Reviewer'))->toBeFalse()
+        ->and(app(ReviewStops::class)->requested($repository, 41))->toBeNull();
+});

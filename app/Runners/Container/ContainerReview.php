@@ -332,6 +332,12 @@ class ContainerReview
                 return false;
             }
 
+            // Stopped after the reviewer was done, while its files came back:
+            // nothing is filed either.
+            if ($this->stops->requested($repository, $build) !== null) {
+                throw new ReviewStopped('The review was stopped after its reviewer finished.');
+            }
+
             if ($resumes && $home !== null) {
                 $this->sessions->resumed($home);
             }

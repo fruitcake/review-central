@@ -8,6 +8,7 @@ use App\Enums\BuildState;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Runners\RunConclusion;
+use App\Runners\Security\SecurityReview;
 use Illuminate\Support\Facades\Cache;
 
 /**
@@ -32,7 +33,7 @@ class ReviewStops
      */
     public function stop(ReviewRun $run, string $by): bool
     {
-        if (! in_array($run->status, self::STOPPABLE, true)) {
+        if (! self::stoppable($run)) {
             return false;
         }
 
@@ -48,13 +49,34 @@ class ReviewStops
     }
 
     /**
-     * Who stopped this review, while it is one to stop; null when nobody did.
+     * Whether this review can be stopped: one that waits or runs, of a kind whose
+     * job looks for a stop. A branch's security review does not.
+     */
+    public static function stoppable(ReviewRun $run): bool
+    {
+        return in_array($run->status, self::STOPPABLE, true) && $run->kind !== SecurityReview::KIND;
+    }
+
+    /**
+     * Who stopped this review; null when nobody did. Told by the cache while it
+     * runs, and by the run itself once it is closed as stopped, so a job that
+     * starts long after a stop still finds it.
      */
     public function requested(Repository $repository, int $build): ?string
     {
         $by = Cache::get(self::key((int) $repository->getKey(), $build));
 
-        return is_string($by) ? $by : null;
+        if (is_string($by)) {
+            return $by;
+        }
+
+        $summary = ReviewRun::query()
+            ->where('repository_id', $repository->getKey())
+            ->where('build_number', $build)
+            ->where('status', ReviewRun::STATUS_STOPPED)
+            ->value('summary');
+
+        return is_string($summary) ? (preg_match('/^Stopped by (.+)\.$/', $summary, $match) === 1 ? $match[1] : 'someone') : null;
     }
 
     /**
