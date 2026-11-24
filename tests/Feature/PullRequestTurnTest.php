@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\ConnectionKind;
+use App\Enums\TicketStyle;
 use App\Filament\App\Resources\PullRequests\Pages\ListPullRequests;
 use App\Filament\App\Resources\PullRequests\PullRequestResource;
 use App\Jobs\DescribePullRequest;
@@ -10,9 +11,12 @@ use App\Models\Connection;
 use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\ReviewRun;
+use App\Models\TicketSource;
 use App\Models\User;
 use App\Services\PullRequestTurn;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
+use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
@@ -228,4 +232,36 @@ it('has the AI say whose turn it is, for the state it was written for', function
     // Once Vinayak approved, the note is of an older state, and the rules speak.
     deliverTurn(event: 'pullrequest:approved', extra: ['approval' => ['date' => now()->toIso8601String(), 'user' => vinayak()]])->assertOk();
     expect(PullRequestTurn::of($record->refresh())->note($record))->toBeNull();
+});
+
+it('shows the ticket the title names before any review read it, and reads it when asked', function () {
+    deliverTurn()->assertOk();
+    $record = OpenPullRequest::query()->sole();
+    $jira = Connection::factory()->jira()->create(['tenant_id' => $this->repository->tenant_id]);
+    TicketSource::query()->create(['tenant_id' => $this->repository->tenant_id, 'connection_id' => $jira->id, 'name' => 'Jira', 'style' => TicketStyle::Key, 'prefixes' => ['MEDS'], 'position' => 1]);
+    $this->actingAs(User::factory()->create(['is_admin' => true]));
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+    Filament::setTenant($this->repository->tenant);
+    // The setup's catch-all would answer the tracker first.
+    Http::swap(new HttpFactory(app('events')));
+    Http::fake([
+        'acme.atlassian.net/rest/api/2/issue/MEDS-5007/comment*' => Http::response(['comments' => [], 'total' => 0]),
+        'acme.atlassian.net/rest/api/2/issue/MEDS-5007*' => Http::response(['key' => 'MEDS-5007', 'fields' => ['summary' => 'Fix the export', 'description' => null]]),
+    ]);
+
+    // Named by the title, not read: opening the details asks nothing of the tracker.
+    expect(view('filament.app.pull-request', PullRequestResource::details($record))->render())
+        ->toContain('MEDS-5007')
+        ->toContain('not read yet');
+    Http::assertNothingSent();
+
+    // The button in the details reads it.
+    livewire(ListPullRequests::class)
+        ->callAction([TestAction::make('details')->table($record), TestAction::make('readTicket')])
+        ->assertNotified('MEDS-5007 is read from Jira');
+
+    expect(view('filament.app.pull-request', PullRequestResource::details($record))->render())
+        ->toContain('href="https://acme.atlassian.net/browse/MEDS-5007"')
+        ->toContain('Fix the export')
+        ->not->toContain('not read yet');
 });
