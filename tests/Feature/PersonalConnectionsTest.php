@@ -109,7 +109,7 @@ it('shows the account on the profile, says when it cannot write, and lets the us
     Filament::setCurrentPanel(Filament::getPanel('app'));
     Filament::setTenant($this->tenant);
 
-    livewire(EditProfile::class)->assertSee('Not connected.');
+    livewire(EditProfile::class)->assertSee('Not connected');
 
     ($this->connect)('account');
 
@@ -118,13 +118,13 @@ it('shows the account on the profile, says when it cannot write, and lets the us
     // A consumer that also lets it write: commenting is part of that.
     ($this->connect)('pullrequest:write, account');
 
-    livewire(EditProfile::class)->assertSee('Connected as sam-b.');
+    livewire(EditProfile::class)->assertSee('Connected as sam-b');
 
     ($this->connect)();
 
     livewire(EditProfile::class)
-        ->assertSee('Connected as sam-b.')
-        ->callAction(TestAction::make('disconnectBitbucket')->schemaComponent('bitbucket_actions'))
+        ->assertSee('Connected as sam-b')
+        ->callAction(TestAction::make('disconnectBitbucket')->schemaComponent('bitbucket_account'))
         ->assertNotified('Bitbucket is disconnected');
 
     expect(PersonalConnection::query()->count())->toBe(0)
@@ -134,14 +134,14 @@ it('shows the account on the profile, says when it cannot write, and lets the us
     UserIdentity::query()->create(['user_id' => $this->user->id, 'provider' => 'bitbucket', 'provider_id' => '{sam-uuid}']);
 
     livewire(EditProfile::class)
-        ->assertSee('It signs you in, but is not connected to reply as you.')
-        ->callAction(TestAction::make('disconnectBitbucket')->schemaComponent('bitbucket_actions'));
+        ->assertSee('Signs you in. Connect it to reply as you.')
+        ->callAction(TestAction::make('disconnectBitbucket')->schemaComponent('bitbucket_account'));
 
     expect(UserIdentity::query()->count())->toBe(0);
 
     config(['services.bitbucket.client_id' => null]);
 
-    livewire(EditProfile::class)->assertDontSee('Your Bitbucket account');
+    livewire(EditProfile::class)->assertDontSee('Bitbucket lets it comment on every pull request you can.');
 });
 
 it('connects nothing for a session from before the password changed', function () {
@@ -241,11 +241,10 @@ describe('on GitHub, through the GitHub App', function () {
             ->and($this->user->refresh()->source_accounts)->toBe([]);
 
         livewire(EditProfile::class)
-            ->assertSee('Your GitHub account')
-            ->assertSee('Connected as sam-gh.')
-            ->assertSee('GitHub: sam-gh')
+            ->assertSee('reviewed through the GitHub App')
+            ->assertSee('Connected as sam-gh')
             ->assertSee('Other accounts on the hosts')
-            ->callAction(TestAction::make('disconnectGithub')->schemaComponent('github_actions'))
+            ->callAction(TestAction::make('disconnectGithub')->schemaComponent('github_account'))
             ->assertNotified('GitHub is disconnected');
 
         expect(PersonalConnection::query()->count())->toBe(0)
@@ -257,7 +256,7 @@ describe('on GitHub, through the GitHub App', function () {
         // Without the GitHub App, there is nothing to connect.
         config(['services.github_app.private_key' => null]);
 
-        livewire(EditProfile::class)->assertDontSee('Your GitHub account');
+        livewire(EditProfile::class)->assertDontSee('reviewed through the GitHub App');
         $this->get('/connections/github')->assertNotFound();
     });
 

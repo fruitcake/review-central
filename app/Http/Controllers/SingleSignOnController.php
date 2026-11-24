@@ -14,6 +14,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Crypt;
 use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\AbstractProvider;
 use Laravel\Socialite\Two\User as SocialiteUser;
@@ -22,6 +23,9 @@ use Throwable;
 
 class SingleSignOnController extends Controller
 {
+    /** In the session while a code is out: the account's token, encrypted, to connect it once the code links it. */
+    public const PENDING_CONNECTION = 'sign_in_connection';
+
     /**
      * Off to the provider, to sign in there.
      */
@@ -61,7 +65,26 @@ class SingleSignOnController extends Controller
                     $token = $account instanceof SocialiteUser ? (string) $account->token : '';
                     $codes->start($request->session(), $provider, $account, $connections->verifiedEmails($provider, $token, $account->getEmail()));
 
+                    // Connected as well once the code links it, without asking the host again.
+                    if ($account instanceof SocialiteUser) {
+                        $request->session()->put(self::PENDING_CONNECTION, Crypt::encrypt([
+                            'provider' => $provider,
+                            'raw' => $account->getRaw(),
+                            'id' => (string) $account->getId(),
+                            'nickname' => $account->getNickname(),
+                            'name' => $account->getName(),
+                            'token' => $account->token,
+                            'refresh_token' => $account->refreshToken,
+                            // When it runs out, not how long it lasts: the code may be typed minutes later.
+                            'expires_at' => $account->expiresIn === null ? null : now()->addSeconds((int) $account->expiresIn)->getTimestamp(),
+                        ]));
+                    }
+
                     return redirect()->route('sign-in.code');
+                }
+
+                if ($account instanceof SocialiteUser) {
+                    $this->connect($connections, $user, $provider, $account, $account->expiresIn === null ? null : (int) $account->expiresIn);
                 }
             } else {
                 $user = $signOn->user($provider, $account);
@@ -92,19 +115,59 @@ class SingleSignOnController extends Controller
     /**
      * The code typed in: signed in, or told why not.
      */
-    public function checkCode(Request $request, SignInCodes $codes): RedirectResponse
+    public function checkCode(Request $request, SignInCodes $codes, SingleSignOn $signOn, PersonalConnections $connections): RedirectResponse
     {
         $request->validate(['code' => ['required', 'string', 'max:20']]);
 
         try {
             $user = $codes->finish($request->session(), (string) $request->input('code'));
         } catch (SignInRefused $exception) {
-            return $codes->pendingEmail($request->session()) === null
-                ? redirect()->to((string) Filament::getPanel('app')->getLoginUrl())->with('sign_in_refused', $exception->getMessage())
-                : back()->withErrors(['code' => $exception->getMessage()]);
+            if ($codes->pendingEmail($request->session()) === null) {
+                $request->session()->forget(self::PENDING_CONNECTION);
+
+                return redirect()->to((string) Filament::getPanel('app')->getLoginUrl())->with('sign_in_refused', $exception->getMessage());
+            }
+
+            return back()->withErrors(['code' => $exception->getMessage()]);
+        }
+
+        $pending = rescue(fn (): mixed => Crypt::decrypt((string) $request->session()->pull(self::PENDING_CONNECTION)), null, false);
+
+        // Only the account the code just linked to this user.
+        if (is_array($pending) && $signOn->known($pending['provider'], $pending['id'])?->is($user) === true) {
+            $account = (new SocialiteUser)->setRaw($pending['raw'])
+                ->map(['id' => $pending['id'], 'nickname' => $pending['nickname'], 'name' => $pending['name']])
+                ->setToken($pending['token'])
+                ->setRefreshToken($pending['refresh_token']);
+            $expiresIn = is_int($pending['expires_at']) ? max(0, $pending['expires_at'] - now()->getTimestamp()) : null;
+            $this->connect($connections, $user, $pending['provider'], $account, $expiresIn);
         }
 
         return $this->signIn($request, $user);
+    }
+
+    /**
+     * Keeps the token the sign-in brought, so the account writes as the user as
+     * well, as connecting it on the profile would. A failure there leaves the
+     * sign-in as it is.
+     *
+     * @param  int|null  $expiresIn  the seconds it still lasts
+     */
+    protected function connect(PersonalConnections $connections, User $user, string $provider, SocialiteUser $account, ?int $expiresIn): void
+    {
+        if (blank($account->token)) {
+            return;
+        }
+
+        rescue(fn () => $connections->connect(
+            $user,
+            $provider,
+            $account,
+            $account->token,
+            $account->refreshToken,
+            $expiresIn,
+            $provider === PersonalConnections::BITBUCKET ? $connections->grantedScopes($account->token) : [],
+        ));
     }
 
     protected function signIn(Request $request, User $user): RedirectResponse
