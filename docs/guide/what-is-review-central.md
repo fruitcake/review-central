@@ -25,7 +25,7 @@ It was made for Bitbucket Cloud. On GitHub, AI review is a few clicks away: Copi
    - an approval or a request for changes.
 5. On the next push the reviewer reads its own earlier findings and the replies to them, marks what was fixed and resolves those threads.
 
-A `/review` comment, or marking a draft ready, starts a review without a push; a tenant can limit who may comment `/review`. A comment that starts with `@review` asks the reviewer a question, which it answers in a reply.
+A `/review` comment, marking a draft ready, or starting the review in the panel or over MCP starts a review without a push. A `/review` comment and a review started by hand review a draft too. A tenant can limit who may comment `/review`. A comment that starts with `@review` asks the reviewer a question, which it answers in a reply.
 
 ### When a person has to decide
 

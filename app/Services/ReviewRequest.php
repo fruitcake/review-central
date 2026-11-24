@@ -52,6 +52,9 @@ class ReviewRequest
 {
     public const COMMAND = '/review';
 
+    /** How long a review started by hand still has its draft reviewed, when its run has not got that far. */
+    public const ASKED_DAYS = 2;
+
     /**
      * How long a second event for the same head of a pull request counts as the
      * same push.
@@ -529,7 +532,7 @@ class ReviewRequest
      * Starts the review on the branch of an open pull request, on the runner the
      * repository chose.
      *
-     * @param  bool  $strict  throw when the repository's runner is not set up, for a person who asked in the panel
+     * @param  bool  $strict  a person asked for it: throw when the repository's runner is not set up, and review a draft
      *
      * @throws RuntimeException when $strict and the runner is not set up
      * @throws Throwable when the runner could not start it
@@ -548,12 +551,36 @@ class ReviewRequest
             throw new RuntimeException("{$repository->fullName()} reviews on {$runner->label()}, which is not set up on this installation. {$runner->setupHint()} Or pick another runner under \"Runs on\".");
         }
 
+        // A person asked for this review by name, so a draft is reviewed, as on a
+        // /review comment. Kept by branch, which is all a run starts with: the pull
+        // request may not be listed here yet. Noted before the run starts, which may
+        // be at once.
+        if ($strict) {
+            Cache::put(self::askedKey($repository, $branch), now()->toIso8601String(), now()->addDays(self::ASKED_DAYS));
+        }
+
         // Not pinned to a commit: the delivery only carries an abbreviated hash, and
         // the branch as it is now is what the person asked to have reviewed.
         $repository->runner()->start($repository, $branch);
 
         // Started, by a person or by itself: none of its pull requests waits any more.
         OpenPullRequest::query()->where('repository_id', $repository->getKey())->where('branch', $branch)->update(['awaiting_approval' => false]);
+    }
+
+    /**
+     * When someone last started the review of a branch by hand, if they did in the
+     * last ASKED_DAYS.
+     */
+    public static function askedAt(Repository $repository, string $branch): ?string
+    {
+        $askedAt = Cache::get(self::askedKey($repository, $branch));
+
+        return is_string($askedAt) ? $askedAt : null;
+    }
+
+    protected static function askedKey(Repository $repository, string $branch): string
+    {
+        return "review-asked:{$repository->getKey()}:".hash('sha256', $branch);
     }
 
     /**
