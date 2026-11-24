@@ -30,7 +30,7 @@ use Laravel\Passport\HasApiTokens;
  * @property CarbonInterface|null $email_verified_at
  * @property string $password
  * @property bool $is_admin
- * @property array<int, string>|null $source_accounts Who they are on the hosts: a nickname, login or account ID each
+ * @property array<int, string>|null $source_accounts Who they are on hosts they connected no account of: a nickname, login or account ID each
  * @property string|null $remember_token
  * @property CarbonInterface|null $created_at
  * @property CarbonInterface|null $updated_at
@@ -63,14 +63,16 @@ class User extends Authenticatable implements FilamentUser, HasDefaultTenant, Ha
     }
 
     /**
-     * Whether a person on a host is this user: by an account they listed as theirs,
-     * or, while they listed none, by their name as the host shows it.
+     * Whether a person on a host is this user: by an account they connected or
+     * listed as theirs, or, while they have none, by their name as the host
+     * shows it.
      *
      * @param  array{name?: string|null, account_id?: string|null, nickname?: string|null}  $person
      */
     public function isOnHost(array $person): bool
     {
-        $accounts = collect($this->source_accounts ?? [])->map(fn (mixed $account): string => mb_strtolower(trim((string) $account)))->filter();
+        $connected = $this->personalConnections->flatMap(fn (PersonalConnection $connection): array => [$connection->account_id, $connection->nickname]);
+        $accounts = collect($this->source_accounts ?? [])->merge($connected)->map(fn (mixed $account): string => mb_strtolower(trim((string) $account)))->filter();
 
         if ($accounts->isNotEmpty()) {
             return $accounts->intersect(array_filter([
@@ -92,6 +94,16 @@ class User extends Authenticatable implements FilamentUser, HasDefaultTenant, Ha
         return Str::length($initials) > 1
             ? Str::substr($initials, 0, 1).Str::substr($initials, -1)
             : $initials;
+    }
+
+    /**
+     * Their own accounts at the hosts, connected to write as them.
+     *
+     * @return HasMany<PersonalConnection, $this>
+     */
+    public function personalConnections(): HasMany
+    {
+        return $this->hasMany(PersonalConnection::class);
     }
 
     /**

@@ -11,6 +11,7 @@ use App\Services\PersonalConnections;
 use App\SourceControl\ReadOnlyClient;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
+use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Http;
@@ -50,7 +51,7 @@ beforeEach(function () {
     };
 });
 
-it('keeps the Bitbucket account a user connects, for them alone, and names it among their accounts', function () {
+it('keeps the Bitbucket account a user connects, for them alone, and knows them by it on pull requests', function () {
     $this->actingAs($this->user);
 
     ($this->connect)()->assertRedirect(url('app/acme/profile'));
@@ -59,14 +60,21 @@ it('keeps the Bitbucket account a user connects, for them alone, and names it am
         'user_id' => $this->user->id, 'host' => 'bitbucket', 'account_id' => '557058:sam', 'nickname' => 'sam-b',
         'access_token' => 'sam-token', 'refresh_token' => 'sam-refresh', 'scopes' => ['pullrequest', 'account'],
     ])
-        ->and($this->user->refresh()->source_accounts)->toBe(['sam-gh', '557058:sam', 'sam-b'])
+        ->and($this->user->refresh()->source_accounts)->toBe(['sam-gh'])
+        ->and($this->user->isOnHost(['account_id' => '557058:SAM']))->toBeTrue()
+        ->and($this->user->isOnHost(['nickname' => 'sam-b']))->toBeTrue()
         ->and(PersonalConnection::query()->sole()->getRawOriginal('access_token'))->not->toContain('sam-token');
 
     // Connecting again replaces it.
     ($this->connect)('account');
 
-    expect(PersonalConnection::query()->sole()->scopes)->toBe(['account'])
-        ->and($this->user->refresh()->source_accounts)->toBe(['sam-gh', '557058:sam', 'sam-b']);
+    expect(PersonalConnection::query()->sole()->scopes)->toBe(['account']);
+
+    // Disconnected, it no longer tells; what the user listed still does.
+    app(PersonalConnections::class)->disconnect($this->user, 'bitbucket');
+
+    expect($this->user->refresh()->isOnHost(['nickname' => 'sam-b']))->toBeFalse()
+        ->and($this->user->isOnHost(['nickname' => 'sam-gh']))->toBeTrue();
 });
 
 it('goes back to the profile in the tenant Connect was clicked in, where the user is in it', function () {
@@ -229,11 +237,14 @@ describe('on GitHub, through the GitHub App', function () {
             'host' => 'github', 'account_id' => '5150', 'nickname' => 'sam-gh', 'access_token' => 'ghu-token', 'refresh_token' => 'ghr-refresh', 'scopes' => [],
         ])
             ->and(UserIdentity::query()->sole()->only(['provider', 'provider_id']))->toBe(['provider' => 'github', 'provider_id' => '5150'])
-            ->and($this->user->refresh()->source_accounts)->toBe(['sam-gh', '5150']);
+            // Listed by hand before, it counts by itself now.
+            ->and($this->user->refresh()->source_accounts)->toBe([]);
 
         livewire(EditProfile::class)
             ->assertSee('Your GitHub account')
             ->assertSee('Connected as sam-gh.')
+            ->assertSee('GitHub: sam-gh')
+            ->assertSee('Other accounts on the hosts')
             ->callAction(TestAction::make('disconnectGithub')->schemaComponent('github_actions'))
             ->assertNotified('GitHub is disconnected');
 
@@ -298,4 +309,31 @@ describe('on GitHub, through the GitHub App', function () {
 
         expect(app(PersonalConnections::class)->problem($this->user, 'github'))->toBe('GitHub no longer accepts your connection: connect your account again on your profile.');
     });
+});
+
+it('takes the accounts connecting copied into the listed ones off them, and nothing a user typed', function () {
+    $this->user->forceFill(['source_accounts' => ['sam-gh', '557058:sam', 'Sam-B']])->save();
+    $other = User::factory()->create(['source_accounts' => ['sam-b']]);
+    PersonalConnection::query()->create(['user_id' => $this->user->id, 'host' => 'bitbucket', 'account_id' => '557058:sam', 'nickname' => 'sam-b', 'access_token' => 'sam-token']);
+
+    (require database_path('migrations/2026_11_24_090755_take_connected_accounts_off_source_accounts.php'))->up();
+
+    expect($this->user->refresh()->source_accounts)->toBe(['sam-gh'])
+        ->and($other->refresh()->source_accounts)->toBe(['sam-b']);
+});
+
+it('reads every confirmed address of a Bitbucket account, the primary one first, and the named one where Bitbucket lists none', function () {
+    // In place of the fake for /2.0/user every test here starts with, which would answer this too.
+    Http::swap(new HttpFactory);
+    Http::fake(['api.bitbucket.org/2.0/user/emails*' => Http::sequence()
+        ->push(['values' => [
+            ['type' => 'email', 'email' => 'sam@work.test', 'is_primary' => false, 'is_confirmed' => true],
+            ['type' => 'email', 'email' => 'sam@old.test', 'is_primary' => false, 'is_confirmed' => false],
+            ['type' => 'email', 'email' => 'Sam@Home.test', 'is_primary' => true, 'is_confirmed' => true],
+        ]])
+        ->push(null, 500)]);
+    $connections = app(PersonalConnections::class);
+
+    expect($connections->verifiedEmails('bitbucket', 'sam-token', null))->toBe(['sam@home.test', 'sam@work.test'])
+        ->and($connections->verifiedEmails('bitbucket', 'sam-token', 'sam@home.test'))->toBe(['sam@home.test']);
 });

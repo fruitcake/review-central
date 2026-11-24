@@ -35,30 +35,25 @@ class SignInCodes
     public function __construct(protected SingleSignOn $signOn) {}
 
     /**
-     * Mails a code to the account's address, and keeps what it is for in the
-     * session.
+     * Mails a code to the one of the account's addresses it would sign in
+     * with, and keeps what it is for in the session. Of the account's confirmed
+     * addresses, the first that has an account here; else the first a tenant
+     * lets in, for a new one.
      *
-     * @throws SignInRefused when the account has no confirmed address, or the address would neither sign in nor join a tenant
+     * @param  array<int, string>  $emails  the account's confirmed addresses, the primary one first
+     *
+     * @throws SignInRefused when the account has no confirmed address, or none would sign in or join a tenant
      */
-    public function start(Session $session, string $provider, ProviderUser $account): string
+    public function start(Session $session, string $provider, ProviderUser $account, array $emails): string
     {
-        $email = Str::lower(trim((string) $account->getEmail()));
+        $emails = array_values(array_unique(array_filter(array_map(fn (string $email): string => Str::lower(trim($email)), $emails))));
         $id = (string) $account->getId();
 
-        if ($id === '' || $email === '') {
-            throw new SignInRefused('Your account there has no confirmed primary email address, so it cannot be used to sign in here.');
+        if ($id === '' || $emails === []) {
+            throw new SignInRefused('Your account there has no confirmed email address, so it cannot be used to sign in here.');
         }
 
-        $user = User::query()->whereRaw('lower(email) = ?', [$email])->first();
-
-        if ($user === null && $this->signOn->tenantsForDomain(Str::after($email, '@'))->isEmpty()) {
-            throw new SignInRefused("There is no account for {$email}. Ask for an invitation, or ask your organisation's administrator to let its people sign in.");
-        }
-
-        if ($user !== null && $user->identities()->where('provider', $provider)->exists()) {
-            throw new SignInRefused("The account for {$email} is already linked to another account there. Sign in with that one, or with your password.");
-        }
-
+        $email = $this->addressFor($provider, $emails);
         $code = (string) random_int(100000, 999999);
 
         $session->put(self::SESSION, [
@@ -74,6 +69,47 @@ class SignInCodes
         Notification::route('mail', $email)->notify(new SignInCode($code, $account->getNickname() ?? $account->getName() ?? $email, SingleSignOn::providers()[$provider] ?? $provider));
 
         return $email;
+    }
+
+    /**
+     * The address to send the code to.
+     *
+     * @param  array<int, string>  $emails
+     *
+     * @throws SignInRefused when none would sign in or join a tenant
+     */
+    protected function addressFor(string $provider, array $emails): string
+    {
+        $linked = null;
+
+        foreach ($emails as $email) {
+            $user = User::query()->whereRaw('lower(email) = ?', [$email])->first();
+
+            if ($user === null) {
+                continue;
+            }
+
+            // Its account has another one there: that one signs it in, not this.
+            if ($user->identities()->where('provider', $provider)->exists()) {
+                $linked ??= $email;
+
+                continue;
+            }
+
+            return $email;
+        }
+
+        foreach ($emails as $email) {
+            if ($this->signOn->tenantsForDomain(Str::after($email, '@'))->isNotEmpty()) {
+                return $email;
+            }
+        }
+
+        if ($linked !== null) {
+            throw new SignInRefused("The account for {$linked} is already linked to another account there. Sign in with that one, or with your password.");
+        }
+
+        throw new SignInRefused('There is no account for '.implode(' or ', $emails).'. Ask for an invitation, or ask your organisation\'s administrator to let its people sign in.');
     }
 
     /**
