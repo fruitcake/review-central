@@ -129,8 +129,9 @@ class ReviewOpening
         // goes ahead, as does a trial, which is not the pull request's review.
         $pullRequestId = $context['pull_request']['id'] ?? null;
 
-        if (! $context['skip'] && ! $forced && ! ($input['custom'] ?? false) && ! ($context['review_requested'] ?? false)
-            && is_numeric($pullRequestId) && $this->budget->isSpent($repository, (int) $pullRequestId)) {
+        if (! $context['skip'] && ! $forced && ! ($input['custom'] ?? false)
+            && is_numeric($pullRequestId) && ! $this->budget->requestStands($repository, (int) $pullRequestId, $context['review_requested_at'] ?? null)
+            && $this->budget->isSpent($repository, (int) $pullRequestId)) {
             $context['skip'] = true;
             $context['reason'] = 'over-budget';
 

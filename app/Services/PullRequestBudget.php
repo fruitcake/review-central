@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Repository;
+use App\Models\ReviewRun;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Throwable;
 
@@ -52,6 +54,22 @@ class PullRequestBudget
         $budget = $this->budget($repository);
 
         return $budget !== null && $this->spent($repository, $pullRequestId) >= $budget;
+    }
+
+    /**
+     * Whether a `/review` comment asked at this time still asks for a review: no
+     * review of the pull request has finished that started after it. Read from the
+     * runs, not from the review's markers on the pull request, which a connection
+     * that keeps its reviews here never posts.
+     */
+    public function requestStands(Repository $repository, int $pullRequestId, ?string $requestedAt): bool
+    {
+        return $requestedAt !== null && ! $repository->reviewRuns()
+            ->where('pull_request_id', $pullRequestId)
+            ->where('custom', false)
+            ->whereIn('status', [ReviewRun::STATUS_FINISHED, ReviewRun::STATUS_UNPUBLISHED])
+            ->where('started_at', '>=', Carbon::parse($requestedAt)->utc())
+            ->exists();
     }
 
     /**
