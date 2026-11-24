@@ -248,7 +248,7 @@ it('shows the ticket the title names before any review read it, and reads it whe
     Http::swap(new HttpFactory(app('events')));
     Http::fake([
         'acme.atlassian.net/rest/api/2/issue/DEV-5007/comment*' => Http::response(['comments' => [], 'total' => 0]),
-        'acme.atlassian.net/rest/api/2/issue/DEV-5007*' => Http::response(['key' => 'DEV-5007', 'fields' => ['summary' => 'Fix the export', 'description' => null]]),
+        'acme.atlassian.net/rest/api/2/issue/DEV-5007*' => Http::response(['key' => 'DEV-5007', 'fields' => ['summary' => 'Fix the export', 'description' => '**Bold** <script>alert(1)</script> [link](javascript:alert(1))']]),
     ]);
 
     // Named by the title, not read: opening the details asks nothing of the tracker.
@@ -265,6 +265,10 @@ it('shows the ticket the title names before any review read it, and reads it whe
     expect(view('filament.app.pull-request', PullRequestResource::details($record))->render())
         ->toContain('href="https://acme.atlassian.net/browse/DEV-5007"')
         ->toContain('Fix the export')
+        // Its markdown, without the tracker's HTML or a link that is not a web address.
+        ->toContain('<strong>Bold</strong>')
+        ->not->toContain('<script>')
+        ->not->toContain('javascript:')
         ->not->toContain('not read yet');
 
     // A source of the repository's own, set up since, reads that reference elsewhere.

@@ -199,6 +199,15 @@
     .rc-prose code { padding: 1px 5px; }
     .rc-prose ul { list-style: disc; padding-left: 20px; }
     .rc-prose ol { list-style: decimal; padding-left: 20px; }
+    /* A ticket's text, as its tracker wrote it: set apart, and scrolled when it is long. */
+    .rc-ticket-text { margin-top: 8px; padding: 14px 16px; border: 1px solid var(--rc-border); background: var(--rc-ground); max-height: 420px; overflow-y: auto; overflow-wrap: anywhere; }
+    .rc-ticket-text h1, .rc-ticket-text h2, .rc-ticket-text h3 { margin: 4px 0 0; font-weight: 700; color: var(--rc-ink); }
+    .rc-ticket-text h1 { font-size: 17px; }
+    .rc-ticket-text h2 { font-size: 15px; }
+    .rc-ticket-text h3 { font-size: 14px; }
+    .rc-ticket-text a { color: var(--rc-ink); text-decoration: underline; text-decoration-color: var(--rc-accent); }
+    .rc-ticket-text pre { padding: 10px 12px; background: var(--rc-soft); overflow-x: auto; }
+    .rc-ticket-text blockquote { border-left: 3px solid var(--rc-border); padding-left: 10px; color: var(--rc-ink-soft); }
     .rc-code { padding: 12px 14px; overflow-x: auto; white-space: pre; margin: 0; }
     .rc-question { padding: 12px 0; border-top: 1px solid var(--rc-soft); }
     .rc-ask { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 12px; }

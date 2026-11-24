@@ -12,6 +12,7 @@ use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Models\User;
 use App\Services\Currency;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Illuminate\Http\Client\Factory as HttpFactory;
@@ -171,6 +172,26 @@ it('starts a waiting pull request\'s review from the overview', function () {
 
     Queue::assertPushed(RunContainerReview::class, fn (RunContainerReview $job): bool => $job->branch === 'feature/export');
     expect($record->refresh()->awaiting_approval)->toBeFalse();
+});
+
+it('starts the review from a pull request\'s details as well', function () {
+    $this->repository->update(['reviews_from' => ReviewsFrom::Trusted]);
+    deliverPullRequest()->assertOk();
+
+    $user = User::factory()->create();
+    $user->tenants()->attach($this->repository->tenant);
+    $this->actingAs($user);
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+    Filament::setTenant($this->repository->tenant);
+    Filament::bootCurrentPanel();
+
+    $record = OpenPullRequest::query()->sole();
+
+    livewire(ListPullRequests::class)
+        ->callAction([TestAction::make('details')->table($record), TestAction::make('startFromDetails')])
+        ->assertNotified('The review is started');
+
+    Queue::assertPushed(RunContainerReview::class, fn (RunContainerReview $job): bool => $job->branch === 'feature/export');
 });
 
 it('lists only the open tenant\'s pull requests', function () {
