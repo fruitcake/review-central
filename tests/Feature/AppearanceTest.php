@@ -59,6 +59,19 @@ it('lets an administrator give the installation its own name, logo and colour, a
         ->and(app(PlatformSettings::class)->appName())->toBe('Acme Review');
 });
 
+it('draws the favicon in the installation\'s colour while no logo is set', function () {
+    app(PlatformSettings::class)->save([PlatformSettings::COLOUR => '#4f46e5']);
+
+    $favicon = app(PlatformSettings::class)->favicon();
+
+    expect($favicon)->toStartWith('data:image/svg+xml;base64,')
+        ->and(base64_decode(substr($favicon, strlen('data:image/svg+xml;base64,'))))
+        ->toContain('fill="#4f46e5"')
+        ->toContain('stroke="#ffffff"');
+
+    $this->get('/app/acme')->assertOk()->assertSee($favicon, false)->assertDontSee('favicon.svg');
+});
+
 it('keeps a tenant\'s own colours over the installation\'s', function () {
     app(PlatformSettings::class)->save([PlatformSettings::COLOUR => '#4f46e5']);
     $this->tenant->update(['theme_colors' => ['accent' => '#c8d35b']]);

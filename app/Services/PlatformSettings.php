@@ -171,6 +171,30 @@ class PlatformSettings
         return is_string($colour) && Themes::valid($colour) ? strtolower($colour) : null;
     }
 
+    /**
+     * The page icon: the logo, else the mark in the installation's colour, else
+     * the mark as it ships.
+     */
+    public function favicon(): string
+    {
+        $logo = $this->logo();
+
+        if ($logo !== null) {
+            return $logo;
+        }
+
+        if ($this->colour() === null) {
+            return asset('favicon.svg');
+        }
+
+        $colours = Themes::for(null);
+
+        return 'data:image/svg+xml;base64,'.base64_encode(view('favicon', [
+            'fill' => $colours['accent'],
+            'stroke' => $colours['on-accent'],
+        ])->render());
+    }
+
     public function credit(): bool
     {
         return (bool) $this->get(self::CREDIT);
