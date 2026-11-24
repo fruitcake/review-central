@@ -14,6 +14,7 @@ use App\Runners\Diff\DiffReview;
 use App\Runners\Diff\ReportSchema;
 use App\Runners\DiffRunner;
 use App\Services\ReviewLock;
+use App\Services\ReviewRequest;
 use App\Services\ReviewSettings;
 use App\Services\ReviewTrial;
 use Illuminate\Http\Client\ConnectionException;
@@ -302,6 +303,17 @@ it('gives each provider the report\'s schema in the form its API takes', functio
         ->and($finding($strict)['properties']['line']['type'])->toBe(['integer', 'null'])
         ->and($finding($strict)['properties']['introduced'])->toBe(['type' => ['boolean', 'null'], 'enum' => [false, null]])
         ->and(ReportSchema::withoutNulls(['a' => null, 'b' => [['c' => null, 'd' => 1], ['e' => 2]]]))->toBe(['b' => [['d' => 1], ['e' => 2]]]);
+});
+
+it('hands back the review it queued when someone starts one, for a link to it', function () {
+    Queue::fake();
+    fakeHost($this->diff);
+    config(['review.diff.enabled' => true]);
+
+    $run = app(ReviewRequest::class)->start($this->repository, 'feature/export', strict: true);
+
+    expect($run?->is(ReviewRun::query()->sole()))->toBeTrue()
+        ->and($run->status)->toBe(ReviewRun::STATUS_QUEUED);
 });
 
 it('closes a queued review as skipped when its pull request was closed before a worker got to it', function () {

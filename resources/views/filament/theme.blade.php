@@ -200,7 +200,8 @@
     .rc-prose ul { list-style: disc; padding-left: 20px; }
     .rc-prose ol { list-style: decimal; padding-left: 20px; }
     /* A ticket's text, as its tracker wrote it: set apart, and scrolled when it is long. */
-    .rc-ticket-text { margin-top: 8px; padding: 14px 16px; border: 1px solid var(--rc-border); background: var(--rc-ground); max-height: 420px; overflow-y: auto; overflow-wrap: anywhere; }
+    .rc-ticket-text { padding: 14px 16px; border: 1px solid var(--rc-border); background: var(--rc-ground); max-height: 420px; overflow-y: auto; overflow-wrap: anywhere; }
+    #rc-ticket .rc-muted { font-size: 13px; font-weight: 400; }
     .rc-ticket-text h1, .rc-ticket-text h2, .rc-ticket-text h3 { margin: 4px 0 0; font-weight: 700; color: var(--rc-ink); }
     .rc-ticket-text h1 { font-size: 17px; }
     .rc-ticket-text h2 { font-size: 15px; }

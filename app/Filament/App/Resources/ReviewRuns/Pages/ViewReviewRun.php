@@ -135,9 +135,7 @@ class ViewReviewRun extends ViewRecord
 
                     try {
                         if ($run->pull_request_id === null || ($data['post'] ?? false)) {
-                            $reviews->start($run->repository, $run->branch, strict: true);
-
-                            Notification::make()->title('The review is started')->success()->send();
+                            ReviewRunResource::started($reviews->start($run->repository, $run->branch, strict: true));
 
                             return;
                         }

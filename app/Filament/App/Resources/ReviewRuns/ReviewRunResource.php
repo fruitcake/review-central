@@ -22,6 +22,7 @@ use Filament\Actions\BulkAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Fieldset;
@@ -228,6 +229,21 @@ class ReviewRunResource extends Resource
             ReviewProvider::CodexCli->value => ReviewSettingsForm::openAiModels(),
             default => array_diff_key(ReviewSettingsForm::claudeModels() + ReviewSettingsForm::openAiModels(), array_flip([...ReviewSettings::TIERS, ...ReviewSettingsForm::CLAUDE_ALIASES])),
         };
+    }
+
+    /**
+     * Says a review was started, with a link to it as it waits in the queue.
+     */
+    public static function started(?ReviewRun $run, ?string $body = null): void
+    {
+        Notification::make()
+            ->title('The review is started')
+            ->body($body)
+            ->success()
+            ->actions($run === null ? [] : [
+                Action::make('open')->label('Open the review')->url(self::getUrl('view', ['record' => $run])),
+            ])
+            ->send();
     }
 
     /**
