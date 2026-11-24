@@ -232,6 +232,13 @@ return [
         // Empty here, so the size under Settings can fill it; standard-1 when
         // neither picks one.
         'instance' => env('REVIEW_CLOUDFLARE_INSTANCE'),
+        // How long a sandbox stays for the next review of the same branch, which
+        // then fetches the new commit instead of starting and cloning: after a
+        // review that asked for changes (changes), after every one (always), or
+        // never (off); and for how many minutes. Empty here, so Settings can fill
+        // them; after changes, for 15 minutes, when neither does.
+        'warm' => env('REVIEW_CLOUDFLARE_WARM'),
+        'warm_minutes' => env('REVIEW_CLOUDFLARE_WARM_MINUTES'),
         // Installs PHP, Composer and the reviewers' CLIs in a fresh sandbox on
         // Cloudflare's own image; the Worker keeps a snapshot of that, which later
         // reviews start from. Off when the Worker was deployed with an image

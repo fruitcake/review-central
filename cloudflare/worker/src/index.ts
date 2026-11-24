@@ -8,7 +8,7 @@
  * sandbox is destroyed.
  *
  *   POST   /runs/{name}   start a sandbox, run the script, stream its output
- *   DELETE /runs/{name}   destroy a sandbox that was left behind
+ *   DELETE /runs/{name}   destroy a sandbox that was left behind, or one kept warm
  *   GET    /health        whether the Worker is there and has its settings
  *   PUT    /files/{key}   put a file in the bucket     } for local development,
  *   GET    /files/{key}   read one                    } where the bucket is a stand-in
@@ -40,7 +40,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
  * after one is told apart. tests/Feature/CloudflareWorkerVersionTest.php fails
  * on a change that leaves it as it was.
  */
-const WORKER_VERSION = "2026-11-24.4";
+const WORKER_VERSION = "2026-11-24.6";
 
 interface Env {
   REVIEW_SANDBOX: DurableObjectNamespace<ReviewSandbox>;
@@ -87,6 +87,15 @@ interface RunSpec {
    * over it; null when the input holds the checkout. See CLONE.
    */
   clone?: CloneSpec | null;
+  /**
+   * Keeps the sandbox for this long after the run, for the next review of the same
+   * branch to start in. Asked under a name of the branch's own; a run that finds it
+   * still there clears what the reviewer could have changed (WARM_RESET) and fetches
+   * the new commit instead of starting and cloning. Only with a clone.
+   */
+  warm?: { seconds: number } | null;
+  /** What names this attempt, so the caller can stop it again by name, and no newer one. */
+  attempt?: string | null;
 }
 
 /** What the sandbox clones, as review-central's Checkout::forSandbox() says it. */
@@ -125,19 +134,39 @@ interface GitGatewayProps {
  * credential lent for the clone may not outlast it. Where the review writes
  * what the reviewer reads is made the review's own, whatever the pull request
  * committed there, as review-central's Precheck::take() does on the worker.
+ *
+ * In a warm sandbox the same script runs over a .git that WARM_RESET left only
+ * the objects of: git init makes the rest again, the commit the last review ended
+ * on tells the fetch what is there already, and the checkout and clean put the
+ * working tree back to the commit, vendor/ aside.
  */
 const CLONE = `set -e
 url=$1 ref=$2 name=$3 commit=$4 destination=$5 base=$6 previous=$7
-git -c init.defaultBranch=main init -q .
+git -c init.defaultBranch=main init -q --template= .
 git remote add origin "$url"
 git config remote.origin.promisor true
 git config remote.origin.partialclonefilter blob:none
+git config gc.auto 0
+if [ -n "$previous" ] && git cat-file -e "$previous^{commit}" 2> /dev/null; then
+  git update-ref refs/review/previous "$previous"
+fi
 git fetch -q --filter=blob:none --no-tags origin "+$ref:refs/remotes/origin/$name"
 if [ -n "$destination" ] && [ "$destination" != "$name" ]; then
   git fetch -q --filter=blob:none --no-tags origin "+refs/heads/$destination:refs/remotes/origin/$destination"
 fi
 git cat-file -e "$commit^{commit}" 2> /dev/null || git fetch -q --filter=blob:none --no-tags origin "$commit"
-git checkout -q --detach "$commit"
+# vendor/ of the last review stays only where Composer manages it: the commit
+# has a composer.json, and neither it nor the one before tracks files there.
+keep=""
+if [ -d vendor ] && [ ! -L vendor ] && [ -n "$previous" ] && git cat-file -e "$commit:composer.json" 2> /dev/null \
+  && git cat-file -e "$previous^{commit}" 2> /dev/null \
+  && [ -z "$(git ls-tree -r --name-only "$commit" -- vendor | head -n 1)" ] \
+  && [ -z "$(git ls-tree -r --name-only "$previous" -- vendor | head -n 1)" ]; then
+  keep=1
+fi
+[ -n "$keep" ] || rm -rf vendor
+git checkout -q -f --detach "$commit"
+if [ -n "$keep" ]; then git clean -q -ffdx -e /vendor; else git clean -q -ffdx; fi
 if [ -n "$base" ]; then
   git update-ref "refs/remotes/origin/$destination" "$base"
 fi
@@ -149,6 +178,81 @@ if [ -n "$previous" ]; then
 fi
 rm -rf -- review-context.json review-ticket.md .review-instructions
 echo "Cloned $(git rev-parse HEAD)."`;
+
+/** Touched by root just before the review's script runs: what changed after it is the reviewer's doing. */
+const REVIEWER_STARTED = "/var/lib/review/reviewer-started";
+
+/**
+ * How a command runs as the reviewer. Under the durable_object scheduling policy
+ * exec's `user` sets the owner of new files and no more: every process keeps
+ * root's capabilities and can become root again. setpriv takes them away for good
+ * (an empty bounding set, and no new privileges), so file permissions hold for
+ * the reviewer and it cannot change what root owns. Used only where PROBE showed
+ * it works; a sandbox where it does not is never kept for another review.
+ */
+const UNPRIVILEGED = ["setpriv", "--reuid=1000", "--regid=1000", "--clear-groups", "--inh-caps=-all", "--ambient-caps=-all", "--bounding-set=-all", "--no-new-privs"];
+
+/** Run through UNPRIVILEGED: succeeds only with no capabilities left, none to get back, and a root-owned file it cannot write. */
+const PROBE = `grep -Eq '^CapEff:[[:space:]]*0+$' /proc/self/status && grep -Eq '^CapBnd:[[:space:]]*0+$' /proc/self/status && grep -Eq '^NoNewPrivs:[[:space:]]*1$' /proc/self/status && ! ( : >> /etc/hostname ) 2> /dev/null`;
+
+/** Kills every process of the reviewer, as root, and fails when one is left. */
+const KILL_REVIEWER = `for attempt in $(seq 1 50); do
+  pkill -KILL -u 1000 2> /dev/null || true
+  pgrep -u 1000 > /dev/null || break
+  sleep 0.1
+done
+! pgrep -u 1000 > /dev/null`;
+
+/**
+ * What a warm sandbox is cleared of before the next review starts in it, as root.
+ * The reviewer ran without capabilities (UNPRIVILEGED), so it could change only
+ * what user 1000 may write, and none of that is trusted:
+ * - its processes are killed (again: they were when the last review ended);
+ * - of .git only the object store is kept, less every file in it whose ctime is
+ *   newer than the mark: that is what the reviewer wrote or changed, and a ctime
+ *   cannot be set back. Git fetches a blob that went again when it is read.
+ *   Config, hooks, refs and the index are made again by CLONE, and its clean
+ *   takes the rest of the working tree but vendor/;
+ * - its home goes (the session comes back in the input), and everything it owns
+ *   anywhere else but /work. What root owns stays: the tools, and the vendor/
+ *   cache of the destination branch.
+ * vendor/ stays, for Composer to bring in line with the new lock: reviews are of
+ * a team's own pull requests, whose authors decide what is in it anyway. Composer
+ * does not restore a file the reviewer edited there, so that is the trade. It is
+ * never kept as the cache for other pull requests.
+ * Fails when anything is not as a run of ours left it; the review then starts in
+ * a fresh sandbox.
+ */
+const WARM_RESET = `set -e
+${KILL_REVIEWER}
+[ -f ${REVIEWER_STARTED} ] && [ -d /work/.git/objects ] && [ ! -L /work ] && [ ! -L /work/.git ] && [ ! -L /work/.git/objects ]
+find /work/.git/objects -mindepth 1 \\( -type l -o \\( ! -type d -cnewer ${REVIEWER_STARTED} \\) \\) -exec rm -f {} +
+rm -rf /work/.git/objects/info
+find /work/.git -mindepth 1 -maxdepth 1 ! -name objects -exec rm -rf {} +
+if [ -L /work/vendor ] || { [ -e /work/vendor ] && [ ! -d /work/vendor ]; }; then rm -f /work/vendor; fi
+find / -xdev \\( -path /proc -o -path /sys -o -path /dev -o -path /work -o -path /home/reviewer \\) -prune -o -user 1000 -print0 | xargs -0r rm -rf --
+rm -rf /home/reviewer
+mkdir -p /home/reviewer
+chown 1000:1000 /home/reviewer
+echo "Cleared what the last review could have changed."`;
+
+/** What a warm sandbox must have been started for, to be of use to the next run. */
+interface WarmState {
+  setupVersion: string | null;
+  instance: Instance;
+  image: string;
+  url: string;
+  /**
+   * A hash of the keys and the repository's credential it was started with, whose
+   * interceptions last as long as the sandbox and cannot be taken back: a run
+   * that brings others gets a fresh sandbox, so no key outlives its run.
+   */
+  credentials: string;
+}
+
+/** The longest a sandbox is kept warm, and the shortest that is worth it. */
+const WARM_MOST = 3600;
+const WARM_LEAST = 60;
 
 /** A ref, branch or remote-tracking name the clone is given: as review-central's Checkout::guard() lets one through. */
 const GIT_NAME = /^(?!-)(?!.*\.\.)[^\s\x00-\x1f:^~?*\[\\]{1,1024}$/;
@@ -295,10 +399,11 @@ export default {
 
     const sandbox = env.REVIEW_SANDBOX.getByName(run[1]);
 
+    // With ?idle=1, only a sandbox that runs nothing, or runs the attempt named
+    // in ?attempt: a warm one is the branch's, and a newer review of it may be
+    // running there by now.
     if (request.method === "DELETE") {
-      await sandbox.destroy();
-
-      return json({ destroyed: true });
+      return json({ destroyed: url.searchParams.get("idle") === "1" ? await sandbox.cool(url.searchParams.get("attempt")) : (await sandbox.destroy(), true) });
     }
 
     if (request.method !== "POST") {
@@ -418,6 +523,15 @@ export class ReviewSandbox extends DurableObject<Env> {
    * A piece of output may end anywhere, so it is appended, not read as a line.
    */
   async run(spec: RunSpec): Promise<Response> {
+    // A warm sandbox serves one run at a time; the caller starts another of its own.
+    if (this.busy) {
+      return json({ error: "This sandbox is running a review." }, 409);
+    }
+
+    this.busy = true;
+    this.attempt = spec.attempt ?? null;
+    await this.ctx.storage.deleteAlarm();
+
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
     const writer = writable.getWriter();
     const encoder = new TextEncoder();
@@ -448,11 +562,26 @@ export class ReviewSandbox extends DurableObject<Env> {
 
     this.ctx.waitUntil(
       this.review(spec, send, () => open)
-        .catch((error: unknown) => send("error", error instanceof Error ? error.message : String(error)))
-        .finally(async () => {
+        .catch(async (error: unknown) => {
+          await send("error", error instanceof Error ? error.message : String(error));
+
+          return false;
+        })
+        .then(async (warmable) => {
           clearInterval(alive);
-          // Whatever happened, the sandbox does not outlive its review.
-          await this.destroy();
+
+          // Kept for the next review of the branch only after a run that went as it
+          // should, in a sandbox that kept the reviewer from changing what root
+          // owns; otherwise, and without warm, it does not outlive its review.
+          if (warmable && spec.warm && open) {
+            await this.keepWarm(spec.warm.seconds).catch(() => this.destroy());
+          } else {
+            await this.destroy();
+          }
+        })
+        .finally(async () => {
+          this.busy = false;
+          this.attempt = null;
           await writer.close().catch(() => undefined);
         }),
     );
@@ -460,6 +589,42 @@ export class ReviewSandbox extends DurableObject<Env> {
     return new Response(readable, {
       headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
     });
+  }
+
+  /** Whether a run is going here, and the attempt it is. */
+  private busy = false;
+
+  private attempt: string | null = null;
+
+  /**
+   * Leaves the sandbox running for the next review, and has it destroyed when
+   * none came: by the alarm, and by the runtime after the same time with nothing
+   * asked of it, should the alarm not fire.
+   */
+  private async keepWarm(seconds: number): Promise<void> {
+    // Nothing the reviewer started goes on while the sandbox waits, calling a
+    // provider through the keys' interception or changing files.
+    await this.must(["sh", "-c", KILL_REVIEWER], "stop the reviewer's processes");
+    await this.ctx.container!.setInactivityTimeout((seconds + 120) * 1000);
+    await this.ctx.storage.setAlarm(Date.now() + seconds * 1000);
+  }
+
+  /** Destroys the sandbox unless a run other than this attempt is going in it; says whether it did. */
+  async cool(attempt: string | null = null): Promise<boolean> {
+    if (this.busy && (attempt === null || attempt !== this.attempt)) {
+      return false;
+    }
+
+    await this.destroy();
+
+    return true;
+  }
+
+  /** The time a warm sandbox was kept for is up. */
+  async alarm(): Promise<void> {
+    if (!this.busy) {
+      await this.destroy();
+    }
   }
 
   /** The install of a setup in progress here, which a second caller waits for instead of starting another. */
@@ -548,12 +713,38 @@ export class ReviewSandbox extends DurableObject<Env> {
   async destroy(): Promise<void> {
     const container = this.ctx.container;
 
+    // What it was started for goes with it: the next run starts afresh.
+    await this.ctx.storage.delete("warm").catch(() => undefined);
+    await this.ctx.storage.deleteAlarm().catch(() => undefined);
+
     if (container?.running) {
       await container.destroy().catch(() => undefined);
     }
   }
 
-  private async review(spec: RunSpec, send: (event: string, data: unknown) => Promise<void>, wanted: () => boolean): Promise<void> {
+  /**
+   * Whether the sandbox still running here was started for what this run needs:
+   * the same tools, size, image and repository. Then it can be cleared and used.
+   */
+  private async warmFor(spec: RunSpec, image: string): Promise<boolean> {
+    if (!spec.warm || !spec.clone || !this.ctx.container!.running) {
+      return false;
+    }
+
+    const state = await this.ctx.storage.get<WarmState>("warm");
+
+    return (
+      state !== undefined &&
+      state.setupVersion === spec.setupVersion &&
+      state.instance === spec.instance &&
+      state.image === image &&
+      state.url === spec.clone.url &&
+      state.credentials === (await credentialsHash(spec))
+    );
+  }
+
+  /** Resolves true when the run went as it should, whatever the script's exit code: then a warm sandbox may be kept. */
+  private async review(spec: RunSpec, send: (event: string, data: unknown) => Promise<void>, wanted: () => boolean): Promise<boolean> {
     const container = this.ctx.container!;
     // An image wrangler.jsonc builds, one named in the settings, or Cloudflare's own.
     const image = container.images.reviewer ?? this.env.IMAGE ?? MANAGED_IMAGE;
@@ -561,11 +752,30 @@ export class ReviewSandbox extends DurableObject<Env> {
     const always = { entrypoint: ["sleep", "infinity"], enableInternet: true, instance: spec.instance };
     const snapshotKey = spec.setup !== null && spec.setupVersion !== null ? `review/snapshots/${spec.setupVersion}.json` : null;
 
-    // One left by a run that never ended is not this review's to continue.
-    await this.destroy();
-
     const started = Date.now();
     await send("note", "##[phase] start");
+
+    // The sandbox the last review of this branch left, cleared of what that
+    // reviewer could have changed. It was started with the same keys and
+    // credential (warmFor), whose interceptions are still in place.
+    let warm = false;
+
+    if (await this.warmFor(spec, image)) {
+      try {
+        await this.must(["sh", "-c", WARM_RESET], "clear the warm sandbox");
+        warm = true;
+        await send("note", "The sandbox of the last review of this branch was still warm: cleared, and used again.");
+      } catch (error) {
+        await send("note", `The warm sandbox could not be used again (${error instanceof Error ? error.message.slice(0, 300) : String(error)}); starting a fresh one.`);
+      }
+    }
+
+    if (warm) {
+      return this.inSandbox(spec, send, wanted, started, true, false);
+    }
+
+    // One left by a run that never ended, or a warm one of no use, is not this review's to continue.
+    await this.destroy();
 
     // The reviewer installs the repository's packages and calls its AI provider,
     // so it has the internet. It gets no credential of the repository's host: a
@@ -617,6 +827,21 @@ export class ReviewSandbox extends DurableObject<Env> {
       await send("note", `Sandbox started (${spec.instance}, ${image}).`);
     }
 
+    // What it was started for, so the next run of the branch can tell it is of use.
+    if (spec.warm && spec.clone) {
+      await this.ctx.storage.put("warm", { setupVersion: spec.setupVersion, instance: spec.instance, image, url: spec.clone.url, credentials: await credentialsHash(spec) } satisfies WarmState);
+    }
+
+    return this.inSandbox(spec, send, wanted, started, false, prepared);
+  }
+
+  /**
+   * The run in a sandbox that is there: a fresh one, or a warm one that was
+   * cleared. Without a snapshot, a fresh one installs the tools first.
+   */
+  private async inSandbox(spec: RunSpec, send: (event: string, data: unknown) => Promise<void>, wanted: () => boolean, started: number, warm: boolean, prepared: boolean): Promise<boolean> {
+    const container = this.ctx.container!;
+
     await container.setInactivityTimeout(Math.min(spec.timeout + 900, LONGEST) * 1000);
 
     // What it uses, for as long as the review runs: never in the way of it.
@@ -647,18 +872,29 @@ export class ReviewSandbox extends DurableObject<Env> {
 
     // No snapshot to be had, and a setup to run: installed here, for this review
     // alone, as a last resort.
-    if (!prepared && spec.setup !== null) {
+    if (!warm && !prepared && spec.setup !== null) {
       const installed = await streamed(["sh", "-c", spec.setup], { env: { DEBIAN_FRONTEND: "noninteractive", HOME: "/root" } });
 
       if (installed !== 0) {
         await send("exit", { exitCode: installed, seconds: Math.round((Date.now() - started) / 1000), kept: false });
 
-        return;
+        return false;
       }
     }
 
     const gateway = spec.clone?.authorization ? new URL(spec.clone.url).hostname : null;
     const intercepted = spec.credentials.length > 0 || gateway !== null;
+
+    // Whether the reviewer can be kept from what root owns here (UNPRIVILEGED):
+    // only then is the sandbox kept for another review. Without warm, the reviewer
+    // runs as it always has.
+    const unprivileged = spec.warm ? await this.succeeds([...UNPRIVILEGED, "sh", "-c", PROBE]) : false;
+    const asReviewer = (command: string[]): string[] => (unprivileged ? [...UNPRIVILEGED, ...command] : command);
+    const reviewer: ContainerExecOptions = unprivileged ? {} : { user: REVIEWER };
+
+    if (spec.warm && !unprivileged) {
+      await send("note", "The reviewer cannot be kept from changing the sandbox's tools here, so the sandbox is not kept for the next review.");
+    }
 
     // The certificate the keys' hosts and the repository's are answered with from
     // here, which every client in the sandbox has to trust: the system's, and
@@ -676,7 +912,8 @@ export class ReviewSandbox extends DurableObject<Env> {
 
     // The sandbox clones the repository itself; what is unpacked next goes over it.
     if (spec.clone) {
-      await send("note", "##[phase] clone");
+      // In a warm sandbox the same script fetches what is new over what is there.
+      await send("note", warm ? "##[phase] fetch" : "##[phase] clone");
 
       if (gateway !== null) {
         await send("note", `The repository's credential stays in the Worker: ${gateway} reached through it, which adds it to reading this repository only.`);
@@ -685,7 +922,7 @@ export class ReviewSandbox extends DurableObject<Env> {
       await this.must(["sh", "-c", `mkdir -p /work /home/reviewer && chown ${REVIEWER} /work /home/reviewer`], "make the work directory");
       const { url, ref, name, commit, destination, base, since } = spec.clone;
       // A host that stops answering does not hold the sandbox for the review's whole time.
-      const cloned = await streamed(["timeout", "--signal=TERM", "--kill-after=30", String(CLONE_SECONDS), "sh", "-c", CLONE, "clone", url, ref, name, commit, destination ?? "", base ?? "", since ?? ""], {
+      const cloned = await streamed(asReviewer(["timeout", "--signal=TERM", "--kill-after=30", String(CLONE_SECONDS), "sh", "-c", CLONE, "clone", url, ref, name, commit, destination ?? "", base ?? "", since ?? ""]), {
         cwd: "/work",
         // As review-central's own git: no LFS download, no local repository as a remote.
         env: {
@@ -697,7 +934,7 @@ export class ReviewSandbox extends DurableObject<Env> {
           GIT_CONFIG_VALUE_0: "never",
           ...(gateway !== null ? { GIT_SSL_CAINFO: SYSTEM_CA_BUNDLE } : {}),
         },
-        user: REVIEWER,
+        ...reviewer,
       });
 
       // No review ran: an error, as a checkout on the worker that failed is, not
@@ -730,30 +967,50 @@ export class ReviewSandbox extends DurableObject<Env> {
 
     const cache = spec.cache && CACHE_KEY.test(spec.cache.key) && CACHE_FILE.test(spec.cache.file) ? spec.cache : null;
     let restored = false;
+    // The vendor/ the last review of the branch installed, which Composer brings
+    // in line with this commit's lock (WARM_RESET says why it stays).
+    const keptVendor = warm && (await this.succeeds(["sh", "-c", "[ -d /work/vendor ] && [ ! -L /work/vendor ]"]));
 
-    if (cache !== null) {
+    if (keptVendor) {
+      await send("note", "vendor/ of the last review of this branch is still there; Composer brings it in line with this commit.");
+    } else if (cache !== null) {
       await send("note", "##[phase] vendor");
-      restored = await this.restoreCache(cache).catch(async (error: unknown) => {
-        await send("note", `Could not fetch vendor/ from the bucket, so Composer installs it: ${error instanceof Error ? error.message : String(error)}`);
 
-        return false;
-      });
+      // A warm sandbox still has the destination branch's vendor/ that root put
+      // there, which the reviewer could not change: no need to fetch it again.
+      if (warm && (await this.succeeds(["sh", "-c", '[ -f "$0" ] && [ ! -L "$0" ] && [ "$(stat -c %u "$0")" = 0 ]', cache.file]))) {
+        restored = true;
+        await send("note", "The destination branch's vendor/ is still in the sandbox.");
+      } else {
+        restored = await this.restoreCache(cache).catch(async (error: unknown) => {
+          await send("note", `Could not fetch vendor/ from the bucket, so Composer installs it: ${error instanceof Error ? error.message : String(error)}`);
 
-      if (restored) {
-        await send("note", "Fetched vendor/ for this composer.lock from the bucket.");
+          return false;
+        });
+
+        if (restored) {
+          await send("note", "Fetched vendor/ for this composer.lock from the bucket.");
+        }
       }
     }
 
+    // From here on, what changes is the reviewer's doing: WARM_RESET reads this mark.
+    if (spec.warm) {
+      await this.must(["sh", "-c", `mkdir -p "$(dirname ${REVIEWER_STARTED})" && touch ${REVIEWER_STARTED}`], "mark the reviewer's start");
+    }
+
     const exitCode = await streamed(
-      ["timeout", "--signal=TERM", "--kill-after=30", String(spec.timeout), "sh", "-c", spec.script],
+      asReviewer(["timeout", "--signal=TERM", "--kill-after=30", String(spec.timeout), "sh", "-c", spec.script]),
       {
         cwd: "/work",
         env: {
           ...spec.env,
           ...(intercepted ? { NODE_EXTRA_CA_CERTS: INTERCEPT_CA, SSL_CERT_FILE: SYSTEM_CA_BUNDLE } : {}),
+          // prepare-review.sh then keeps vendor/ as it is, and never stores it for others.
+          ...(keptVendor ? { REVIEW_WARM_VENDOR: "true" } : {}),
           HOME: "/home/reviewer",
         },
-        user: REVIEWER,
+        ...reviewer,
       },
     );
     let kept = false;
@@ -771,7 +1028,9 @@ export class ReviewSandbox extends DurableObject<Env> {
 
     // A vendor/ of the destination branch the script kept beside the one it was
     // given. Never in the way of the review: without it the next one installs again.
-    if (cache !== null && wanted()) {
+    // Never from a warm sandbox: the reviewer before could write there, and this
+    // one goes to the reviews of other pull requests.
+    if (cache !== null && !warm && wanted()) {
       await this.storeCache(cache)
         .then((stored) => (stored ? send("note", "Kept the destination branch's vendor/ in the bucket for the next review of this repository.") : undefined))
         .catch((error: unknown) => send("note", `Could not keep vendor/ in the bucket: ${error instanceof Error ? error.message : String(error)}`));
@@ -780,7 +1039,22 @@ export class ReviewSandbox extends DurableObject<Env> {
     sampler?.kill();
     await sampling;
 
-    await send("exit", { exitCode, seconds: Math.round((Date.now() - started) / 1000), kept, metrics: thinned(metrics) });
+    const keptWarm = spec.warm !== null && spec.warm !== undefined && unprivileged && wanted();
+
+    if (keptWarm) {
+      await send("note", `The sandbox stays warm for ${Math.round(spec.warm!.seconds / 60)} minutes, for a next review of this branch.`);
+    }
+
+    await send("exit", { exitCode, seconds: Math.round((Date.now() - started) / 1000), kept, warm, keptWarm, metrics: thinned(metrics) });
+
+    return keptWarm;
+  }
+
+  /** Whether a command, as root, ends well. */
+  private async succeeds(command: string[]): Promise<boolean> {
+    const process = await this.ctx.container!.exec(command, { stdout: "ignore", stderr: "ignore" });
+
+    return (await process.exitCode) === 0;
   }
 
   /**
@@ -833,7 +1107,10 @@ export class ReviewSandbox extends DurableObject<Env> {
    * bucket has one. The directory is there either way, for Composer's own cache.
    */
   private async restoreCache(cache: { key: string; file: string }): Promise<boolean> {
-    await this.must(["sh", "-c", `mkdir -p /cache/composer && chown ${REVIEWER} /cache/composer`], "make the cache directory");
+    // Root's, and sticky: the reviewer writes Composer's cache and the new archive
+    // there, but cannot change or replace the archive root put in place, which a
+    // warm sandbox hands the next review.
+    await this.must(["sh", "-c", 'mkdir -p /cache/composer && chown 0:0 /cache/composer && chmod 1777 /cache/composer && rm -f "$0"', cache.file], "make the cache directory");
 
     const object = await this.env.BUCKET.get(cache.key);
 
@@ -841,7 +1118,7 @@ export class ReviewSandbox extends DurableObject<Env> {
       return false;
     }
 
-    await this.must(["sh", "-c", `cat > "$0" && chown ${REVIEWER} "$0"`, cache.file], "put vendor/ in place", object.body);
+    await this.must(["sh", "-c", 'cat > "$0" && chmod 0644 "$0"', cache.file], "put vendor/ in place", object.body);
 
     return true;
   }
@@ -1043,6 +1320,12 @@ function readSpec(body: unknown): RunSpec | string {
     return clone;
   }
 
+  const warmSeconds = typeof spec.warm === "object" && spec.warm !== null ? Number((spec.warm as Record<string, unknown>).seconds) : null;
+
+  if (warmSeconds !== null && (!Number.isInteger(warmSeconds) || warmSeconds < WARM_LEAST || warmSeconds > WARM_MOST || clone === null)) {
+    return `warm keeps a sandbox that clones for ${WARM_LEAST} to ${WARM_MOST} seconds, or is left out.`;
+  }
+
   return {
     input: spec.input,
     output: spec.output,
@@ -1056,6 +1339,8 @@ function readSpec(body: unknown): RunSpec | string {
     instance,
     cache: cache === null ? null : { key: cache.key as string, file: cache.file as string },
     clone,
+    warm: warmSeconds === null ? null : { seconds: warmSeconds },
+    attempt: typeof spec.attempt === "string" && /^[A-Za-z0-9._-]{1,100}$/.test(spec.attempt) ? spec.attempt : null,
   };
 }
 
@@ -1112,6 +1397,14 @@ function readClone(value: unknown, credentials: Credential[]): CloneSpec | null 
     base: (clone.base as string | null | undefined) ?? null,
     since: (clone.since as string | null | undefined) ?? null,
   };
+}
+
+/** A hash of the keys and the repository's credential a run brings, for a warm sandbox to compare with what it was started with. */
+async function credentialsHash(spec: RunSpec): Promise<string> {
+  const given = JSON.stringify([spec.credentials.map((credential) => [credential.host, credential.placeholder, credential.value]), spec.clone?.authorization ?? null]);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(given));
+
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 /**

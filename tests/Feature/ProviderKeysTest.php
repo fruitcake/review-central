@@ -49,3 +49,15 @@ it('refuses a key for a gateway on another port than the Worker takes', function
     expect(ProviderKeys::proxied(['ANTHROPIC_API_KEY' => 'sk-ant-one-123456', 'ANTHROPIC_BASE_URL' => 'https://gateway.example.com:443/v1'])['credentials'][0]['host'])
         ->toBe('gateway.example.com');
 });
+
+it('gives a warm sandbox the same placeholder for the same key, so the Worker can tell the keys did not change', function () {
+    $placeholder = fn (string $key, ?string $warm): string => ProviderKeys::proxied(['ANTHROPIC_API_KEY' => $key], $warm)['environment']['ANTHROPIC_API_KEY'];
+
+    expect($placeholder('sk-ant-one', 'warm-7-abc'))->toBe($placeholder('sk-ant-one', 'warm-7-abc'))
+        ->toStartWith('sk-ant-placeholder-')
+        ->not->toContain('one')
+        ->not->toBe($placeholder('sk-ant-two', 'warm-7-abc'))
+        ->not->toBe($placeholder('sk-ant-one', 'warm-8-abc'))
+        // Without a warm sandbox, a new one each run.
+        ->and($placeholder('sk-ant-one', null))->not->toBe($placeholder('sk-ant-one', null));
+});

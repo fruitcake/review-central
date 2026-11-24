@@ -366,6 +366,47 @@ it('talks to the Worker on this machine where none is deployed, and sends the fi
     expect(CloudflareSandbox::local())->toBeFalse();
 });
 
+it('keeps a sandbox warm under the branch\'s name, and starts a fresh one of its own when that one is busy', function (bool $busy) {
+    $asked = [];
+    Process::fake(function ($process) {
+        if (((array) $process->command)[0] === 'gzip') {
+            File::put(end($process->command).'.gz', 'packed');
+        }
+
+        return Process::result();
+    });
+    Http::fake(['sandbox.example.com/*' => function (Request $request) use (&$asked, $busy) {
+        $asked[] = [$request->method(), str_replace('https://sandbox.example.com/', '', $request->url()), $request->method() === 'POST' ? ($request['warm'] ?? null) : null];
+
+        return $busy && str_contains($request->url(), '/runs/warm-')
+            ? Http::response(['error' => 'This sandbox is running a review.'], 409)
+            : Http::response(sandboxEvents([['exit', ['exitCode' => 0, 'seconds' => 10, 'kept' => false, 'keptWarm' => str_contains($request->url(), '/runs/warm-')]]]), 200, ['Content-Type' => 'text/event-stream']);
+    }]);
+    $clone = ['url' => 'https://bitbucket.org/acme/shop.git', 'authorization' => null, 'ref' => 'refs/heads/feature', 'name' => 'feature', 'commit' => str_repeat('a', 40), 'destination' => 'main', 'base' => null, 'since' => null];
+
+    $sandbox = app(CloudflareSandbox::class);
+    $sandbox->keepWarm('warm-7-abc', 900);
+    $sandbox->run('review-7-41-review', 'true', $this->work, [], trusted: false, timeout: 1800, clone: $clone);
+
+    expect($asked[0])->toBe(['POST', 'runs/warm-7-abc', ['seconds' => 900]])
+        ->and($sandbox->keptWarm)->toBe(! $busy);
+
+    if ($busy) {
+        // A sandbox of this run's own, not kept, and let go after it as always.
+        expect($asked[1][0])->toBe('POST')->and($asked[1][1])->toStartWith('runs/review-7-41-review-')->and($asked[1][2])->toBeNull()
+            ->and($asked[2])->toBe(['DELETE', $asked[1][1], null]);
+    } else {
+        // Left for the next review: nothing tells it to go.
+        expect($asked)->toHaveCount(1);
+    }
+
+    // The next run is kept warm only when it is asked again.
+    $asked = [];
+    $sandbox->run('review-7-42-review', 'true', $this->work, [], trusted: false, timeout: 1800, clone: $clone);
+
+    expect($asked[0][1])->toStartWith('runs/review-7-42-review-')->and($asked[0][2])->toBeNull();
+})->with(['free' => false, 'busy' => true]);
+
 it('has the Worker clone the repository and checks that it did before the step runs', function () {
     $asked = null;
     Process::fake(function ($process) {
@@ -422,4 +463,42 @@ it('keeps one vendor/ per repository, of its destination branch, under the repos
     File::delete("{$this->work}/composer.json");
 
     expect(CloudflareSandbox::vendorCache(storage_path('app/review/cache/7'), $this->work))->toBeNull();
+});
+
+it('keeps a sandbox after a review that asked for changes, for 15 minutes, unless the settings say otherwise', function () {
+    config(['review.cloudflare.warm' => null, 'review.cloudflare.warm_minutes' => null]);
+
+    expect(CloudflareSandbox::warmth())->toBe(['mode' => CloudflareSandbox::WARM_AFTER_CHANGES, 'seconds' => 900]);
+
+    app(PlatformSettings::class)->save([PlatformSettings::CLOUDFLARE_WARM => CloudflareSandbox::WARM_ALWAYS, PlatformSettings::CLOUDFLARE_WARM_MINUTES => '500']);
+    app(PlatformSettings::class)->applyCloudflare();
+
+    // No longer than the Worker keeps one.
+    expect(CloudflareSandbox::warmth())->toBe(['mode' => CloudflareSandbox::WARM_ALWAYS, 'seconds' => 3600]);
+});
+
+it('lets a warm sandbox go when its own run broke off, naming the attempt so no newer run is ended', function () {
+    $asked = [];
+    Process::fake(function ($process) {
+        if (((array) $process->command)[0] === 'gzip') {
+            File::put(end($process->command).'.gz', 'packed');
+        }
+
+        return Process::result();
+    });
+    Http::fake(['sandbox.example.com/*' => function (Request $request) use (&$asked) {
+        $asked[] = [$request->method(), str_replace('https://sandbox.example.com/', '', $request->url()), $request->method() === 'POST' ? $request['attempt'] : null];
+
+        // The stream ends before the step does.
+        return Http::response(sandboxEvents([['output', 'Reviewing']]), 200, ['Content-Type' => 'text/event-stream']);
+    }]);
+    $clone = ['url' => 'https://bitbucket.org/acme/shop.git', 'authorization' => null, 'ref' => 'refs/heads/feature', 'name' => 'feature', 'commit' => str_repeat('a', 40), 'destination' => 'main', 'base' => null, 'since' => null];
+
+    $sandbox = app(CloudflareSandbox::class);
+    $sandbox->keepWarm('warm-7-abc', 900);
+
+    expect(fn () => $sandbox->run('review-7-41-review', 'true', $this->work, [], trusted: false, timeout: 1800, clone: $clone))->toThrow(RuntimeException::class);
+
+    expect($asked[0][2])->toStartWith('review-7-41-review-')
+        ->and($asked[1])->toBe(['DELETE', "runs/warm-7-abc?idle=1&attempt={$asked[0][2]}", null]);
 });

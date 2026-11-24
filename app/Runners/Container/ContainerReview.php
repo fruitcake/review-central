@@ -170,6 +170,9 @@ class ContainerReview
         $reviewing = false;
         // What the reviewer's step was seen to use, once it ran.
         $used = null;
+        // The name of the sandbox kept for the branch, and when it is wanted.
+        $warm = null;
+        $warmth = ['mode' => CloudflareSandbox::WARM_OFF, 'seconds' => 0];
 
         try {
             // What a sandbox that clones for itself is to clone. The worker then
@@ -262,6 +265,15 @@ class ContainerReview
             // it. From a fresh clone it resumes the session kept for the branch.
             $resumes = $round > 0 || ($home !== null && $trial === null && $this->sessions->resumes($home));
 
+            // A sandbox that clones is kept for the next review of the branch, which
+            // then fetches instead of starting and cloning. Never for a trial.
+            $warmth = CloudflareSandbox::warmth();
+
+            if ($clone !== null && $trial === null && $this->sandbox instanceof CloudflareSandbox && $warmth['mode'] !== CloudflareSandbox::WARM_OFF) {
+                $warm = CloudflareSandbox::warmName((int) $repository->getKey(), $branch);
+                $this->sandbox->keepWarm($warm, $warmth['seconds']);
+            }
+
             $reviewed = $this->step(
                 'review',
                 $repository,
@@ -339,12 +351,38 @@ class ContainerReview
             // Never in the way of the review: a run without them only has none.
             rescue(fn () => $this->metrics->store($repository, $build, $used), null, false);
 
+            // By the review as it was filed, before the run is concluded.
+            if ($warm !== null) {
+                $this->coolUnlessWanted($repository, $build, $warm, $warmth['mode']);
+            }
+
             if ($commit !== null) {
                 $this->finish($repository, $branch, $commit, $build, $reviewing, $trial !== null);
             }
 
             $this->runner->markEnded($repository, $build);
         }
+    }
+
+    /**
+     * Lets the sandbox kept for the branch go, unless the next review is likely
+     * to want it: after every review, or only after one that asked for changes,
+     * which the author pushes a fix for within minutes more often than not.
+     */
+    protected function coolUnlessWanted(Repository $repository, int $build, string $warm, string $mode): void
+    {
+        if (! $this->sandbox instanceof CloudflareSandbox || ! $this->sandbox->keptWarm) {
+            return;
+        }
+
+        $result = ReviewRun::query()->where('repository_id', $repository->getKey())->where('build_number', $build)->value('result');
+
+        if ($mode === CloudflareSandbox::WARM_ALWAYS || strtoupper((string) $result) === 'FAILED') {
+            return;
+        }
+
+        $this->sandbox->cool($warm);
+        $this->log->writer((int) $repository->getKey(), $build)?->note('The sandbox was let go: the review asked for no changes.');
     }
 
     /**
