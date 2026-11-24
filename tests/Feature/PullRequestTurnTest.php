@@ -13,6 +13,8 @@ use App\Models\ReviewRun;
 use App\Models\User;
 use App\Services\PullRequestTurn;
 use Filament\Facades\Filament;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
@@ -228,4 +230,44 @@ it('has the AI say whose turn it is, for the state it was written for', function
     // Once Vinayak approved, the note is of an older state, and the rules speak.
     deliverTurn(event: 'pullrequest:approved', extra: ['approval' => ['date' => now()->toIso8601String(), 'user' => vinayak()]])->assertOk();
     expect(PullRequestTurn::of($record->refresh())->note($record))->toBeNull();
+});
+
+it('reads each row and "With me" from the pull request\'s newest review, in one query for them all', function () {
+    deliverTurn()->assertOk();
+    OpenPullRequest::query()->forceCreate(['repository_id' => $this->repository->id, 'pull_request_id' => 8, 'title' => 'Someone else\'s', 'author' => 'Nora']);
+    $review = fn (string $status, ?string $result) => ReviewRun::query()->forceCreate([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'MEDS-5007', 'pull_request_id' => 7, 'commit' => str_repeat('b', 40), 'status' => $status, 'result' => $result, 'started_at' => now(),
+    ]);
+
+    // A review that was still running, and the newer one that approved.
+    $review(ReviewRun::STATUS_RUNNING, null);
+    $this->travel(1)->minute();
+    $review(ReviewRun::STATUS_FINISHED, 'PASSED');
+
+    $user = User::factory()->create(['name' => 'Barry', 'source_accounts' => ['Vinayak']]);
+    $user->tenants()->attach($this->repository->tenant);
+    $this->actingAs($user);
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+    Filament::setTenant($this->repository->tenant);
+    Filament::bootCurrentPanel();
+
+    // Queries that read runs themselves, not the list's own query with its subqueries.
+    $runQueries = 0;
+    DB::listen(function (QueryExecuted $query) use (&$runQueries): void {
+        $runQueries += preg_match('/^select (\* from "review_runs"|"review_runs"\.)/', $query->sql);
+    });
+
+    $list = livewire(ListPullRequests::class)
+        ->assertCanSeeTableRecords(OpenPullRequest::query()->get())
+        ->assertSee('Waiting for a review from Vinayak Arasid')
+        ->assertSee('Approved')
+        ->assertDontSee('AI review running')
+        ->assertDontSee('Reviewing…');
+
+    // One for the "With me" badge, one for the rows.
+    expect($runQueries)->toBe(2);
+
+    $list->set('activeTab', 'mine')
+        ->assertCanSeeTableRecords([OpenPullRequest::query()->where('pull_request_id', 7)->sole()]);
 });
