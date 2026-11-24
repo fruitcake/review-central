@@ -15,6 +15,7 @@ use App\SourceControl\SourceControl;
 use App\Support\SecretFilter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use Laravel\Socialite\Contracts\User as ProviderUser;
 use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\AbstractProvider;
@@ -128,8 +129,8 @@ class PersonalConnections
 
     /**
      * Keeps the account the user signed in as at the host, in place of any they
-     * had there, and names it among their accounts on the hosts, which tells
-     * whose turn a pull request is.
+     * had there. It tells whose turn a pull request is by itself, so it is taken
+     * off the accounts they listed.
      *
      * @param  array<int, string>  $scopes  what Bitbucket granted; none on GitHub, whose app has permissions instead
      */
@@ -151,7 +152,10 @@ class PersonalConnections
             ],
         );
 
-        $user->forceFill(['source_accounts' => array_values(array_unique([...$user->source_accounts ?? [], ...array_filter([$accountId, $nickname])]))])->save();
+        // Counted by itself now: listed as well, it would stay after disconnecting.
+        $own = array_map('mb_strtolower', array_filter([$accountId, $nickname]));
+        $user->forceFill(['source_accounts' => array_values(array_filter($user->source_accounts ?? [], fn (string $account): bool => ! in_array(mb_strtolower(trim($account)), $own, true)))])->save();
+        $user->unsetRelation('personalConnections');
 
         return $connection;
     }
@@ -167,6 +171,37 @@ class PersonalConnections
         $header = rescue(fn (): string => Http::withToken($accessToken)->timeout(10)->get('https://api.bitbucket.org/2.0/user', ['fields' => 'uuid'])->header('X-OAuth-Scopes'), '', false);
 
         return array_values(array_filter(array_map('trim', explode(',', $header))));
+    }
+
+    /**
+     * The account's confirmed addresses, the primary one first. An account may
+     * have several, and the one its person has here need not be the primary;
+     * where the host lists none, the primary one the provider named, if any.
+     *
+     * @return array<int, string> lower case
+     */
+    public function verifiedEmails(string $host, string $accessToken, ?string $primary): array
+    {
+        $listed = $accessToken === '' ? [] : rescue(fn (): array => match ($host) {
+            self::GITHUB => collect((array) Http::withToken($accessToken)->acceptJson()->timeout(10)->get('https://api.github.com/user/emails', ['per_page' => 100])->throw()->json())
+                ->filter(fn (mixed $email): bool => is_array($email) && ($email['verified'] ?? false) === true && is_string($email['email'] ?? null))
+                ->sortByDesc(fn (array $email): bool => ($email['primary'] ?? false) === true)
+                ->pluck('email')
+                ->all(),
+            self::BITBUCKET => collect((array) Http::withToken($accessToken)->timeout(10)->get('https://api.bitbucket.org/2.0/user/emails', ['pagelen' => 100])->throw()->json('values'))
+                ->filter(fn (mixed $email): bool => is_array($email) && ($email['is_confirmed'] ?? false) === true && is_string($email['email'] ?? null))
+                ->sortByDesc(fn (array $email): bool => ($email['is_primary'] ?? false) === true)
+                ->pluck('email')
+                ->all(),
+            default => [],
+        }, [], false);
+
+        return collect([$primary, ...$listed])
+            ->filter(fn (mixed $email): bool => is_string($email) && str_contains($email, '@'))
+            ->map(fn (string $email): string => Str::lower(trim($email)))
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**
@@ -192,6 +227,7 @@ class PersonalConnections
 
         $connection?->delete();
         $user->identities()->where('provider', $host)->delete();
+        $user->unsetRelation('personalConnections');
     }
 
     /**

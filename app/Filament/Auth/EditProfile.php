@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Auth;
 
+use App\Models\PersonalConnection;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\PersonalConnections;
@@ -84,11 +85,17 @@ class EditProfile extends BaseEditProfile
             ->components([
                 $this->getNameFormComponent(),
                 $this->getEmailFormComponent(),
-                TagsInput::make('source_accounts')
+                TextEntry::make('connected_accounts')
                     ->label('Your accounts on the hosts')
+                    ->state(fn (): array => self::connectedAccounts())
+                    ->badge()
+                    ->visible(fn (): bool => self::connectedAccounts() !== [])
+                    ->helperText('Connected below: they tell which pull requests are yours by themselves.'),
+                TagsInput::make('source_accounts')
+                    ->label(fn (): string => self::connectedAccounts() === [] ? 'Your accounts on the hosts' : 'Other accounts on the hosts')
                     ->placeholder('A nickname, login or account ID')
                     ->nestedRecursiveRules(['string', 'max:120'])
-                    ->helperText('Your Bitbucket nickname or account ID and your GitHub login, as the pull requests name you: "With me" under Pull requests lists the ones whose turn is yours. Without any, your name here is matched to the name the host shows.'),
+                    ->helperText('Your nickname or login on a host whose account you did not connect, as its pull requests name you: "With me" under Pull requests lists the ones whose turn is yours. They only tell which pull requests are yours, and give no access. Without any account, your name here is matched to the name the host shows.'),
                 $this->getPasswordFormComponent(),
                 $this->getPasswordConfirmationFormComponent(),
                 $this->getCurrentPasswordFormComponent(),
@@ -96,6 +103,24 @@ class EditProfile extends BaseEditProfile
                 self::personalSection(PersonalConnections::GITHUB),
                 self::assistantsSection(),
             ]);
+    }
+
+    /**
+     * The accounts the user connected, as "Bitbucket: nickname".
+     *
+     * @return array<int, string>
+     */
+    private static function connectedAccounts(): array
+    {
+        $user = Filament::auth()->user();
+
+        if (! $user instanceof User) {
+            return [];
+        }
+
+        return $user->personalConnections()->orderBy('host')->get()
+            ->map(fn (PersonalConnection $connection): string => (PersonalConnections::HOSTS[$connection->host] ?? $connection->host).': '.($connection->nickname ?? $connection->account_id))
+            ->all();
     }
 
     /**

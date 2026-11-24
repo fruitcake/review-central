@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\SignInRefused;
 use App\Http\Controllers\PersonalConnectionController;
 use App\Models\Tenant;
 use App\Models\User;
@@ -9,6 +10,7 @@ use App\Services\PersonalConnections;
 use App\Services\SignInCodes;
 use App\Services\SingleSignOn;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Testing\TestResponse;
 use Laravel\Socialite\Facades\Socialite;
@@ -360,4 +362,64 @@ it('hands a sign-in at Bitbucket to nothing that comes back from GitHub', functi
     $this->withSession([PersonalConnectionController::SIGN_IN => 'bitbucket'])
         ->get('/connections/github/callback?code=abc&state=xyz')
         ->assertRedirect(route('filament.app.auth.login'));
+});
+
+it('signs in with any confirmed address of the account, not only its primary one', function () {
+    Notification::fake();
+    config(['services.github_app' => ['id' => '4242', 'slug' => 'review-central', 'client_id' => 'Iv1.client', 'client_secret' => 'client-secret', 'private_key' => 'a key', 'webhook_secret' => null]]);
+    Http::fake(['api.github.com/user/emails*' => fn () => Http::response($this->githubEmails)]);
+    $provider = Mockery::mock(GithubProvider::class);
+    $provider->shouldReceive('redirectUrl')->andReturnSelf();
+    $provider->shouldReceive('redirect')->andReturn(new RedirectResponse('https://github.com/login/oauth/authorize'));
+    $provider->shouldReceive('user')->andReturnUsing(fn (): GitHubUser => (new GitHubUser)->setRaw(['id' => 5150])->map(['id' => 5150, 'nickname' => 'nora-gh', 'name' => 'Nora New', 'email' => 'nora@private.test'])->setToken('ghu-token'));
+    Socialite::shouldReceive('buildProvider')->andReturn($provider);
+    $signIn = function (): TestResponse {
+        $this->get('/sign-in/github');
+        $this->get('/connections/github/callback?code=abc&state=xyz');
+
+        return $this->get('/sign-in/github/callback?code=abc&state=xyz');
+    };
+    $this->githubEmails = [
+        ['email' => 'nora@private.test', 'primary' => true, 'verified' => true],
+        ['email' => 'nora@unconfirmed.test', 'primary' => false, 'verified' => false],
+        ['email' => 'Nora@Example.org', 'primary' => false, 'verified' => true],
+    ];
+
+    // Not the primary address, and not one GitHub has not confirmed: the one a tenant lets in.
+    Tenant::factory()->create(['sign_in_domains' => ['example.org', 'unconfirmed.test']]);
+
+    $signIn()->assertRedirect(route('sign-in.code'));
+    $this->get(route('sign-in.code'))->assertSee('We sent a code to nora@example.org');
+
+    // One with an account here goes first.
+    $user = User::factory()->create(['email' => 'nora@private.test']);
+    Notification::fake();
+
+    $signIn()->assertRedirect(route('sign-in.code'));
+    $this->post(route('sign-in.code.check'), ['code' => mailedCode('nora@private.test')])->assertRedirect(route('home'));
+    $this->assertAuthenticatedAs($user);
+
+    // An address GitHub has not confirmed signs nobody in, whatever account it has here.
+    auth()->logout();
+    UserIdentity::query()->delete();
+    $user->update(['email' => 'nora@unconfirmed.test']);
+    $this->githubEmails = [['email' => 'nora@unconfirmed.test', 'primary' => false, 'verified' => false]];
+    Notification::fake();
+
+    $signIn()->assertRedirect('/app/login')->assertSessionHas('sign_in_refused');
+    Notification::assertNothingSent();
+});
+
+it('passes over an address whose account has another one linked, for the next address a tenant lets in', function () {
+    Notification::fake();
+    Tenant::factory()->create(['sign_in_domains' => ['work.test']]);
+    $linked = User::factory()->create(['email' => 'a@work.test']);
+    UserIdentity::query()->create(['user_id' => $linked->id, 'provider' => 'bitbucket', 'provider_id' => '{other-uuid}']);
+    $account = (new BitbucketUser)->setRaw(['uuid' => '{nora-uuid}'])->map(['id' => '{nora-uuid}', 'nickname' => 'nora-b', 'name' => 'Nora New']);
+
+    expect(app(SignInCodes::class)->start(session()->driver(), 'bitbucket', $account, ['a@work.test', 'b@work.test']))->toBe('b@work.test');
+
+    // With no other address, it says why.
+    expect(fn () => app(SignInCodes::class)->start(session()->driver(), 'bitbucket', $account, ['a@work.test']))
+        ->toThrow(SignInRefused::class, 'The account for a@work.test is already linked to another account there.');
 });

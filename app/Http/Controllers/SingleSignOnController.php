@@ -16,6 +16,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\AbstractProvider;
+use Laravel\Socialite\Two\User as SocialiteUser;
 use Symfony\Component\HttpFoundation\RedirectResponse as SymfonyRedirect;
 use Throwable;
 
@@ -41,7 +42,7 @@ class SingleSignOnController extends Controller
      * Back from the provider: signed in here as the user that account is, or
      * told on the sign-in page why not.
      */
-    public function callback(Request $request, string $provider, SingleSignOn $signOn, SignInCodes $codes): RedirectResponse
+    public function callback(Request $request, string $provider, SingleSignOn $signOn, SignInCodes $codes, PersonalConnections $connections): RedirectResponse
     {
         $login = (string) Filament::getPanel('app')->getLoginUrl();
 
@@ -57,7 +58,8 @@ class SingleSignOnController extends Controller
                 $user = $signOn->known($provider, (string) $account->getId());
 
                 if ($user === null) {
-                    $codes->start($request->session(), $provider, $account);
+                    $token = $account instanceof SocialiteUser ? (string) $account->token : '';
+                    $codes->start($request->session(), $provider, $account, $connections->verifiedEmails($provider, $token, $account->getEmail()));
 
                     return redirect()->route('sign-in.code');
                 }
