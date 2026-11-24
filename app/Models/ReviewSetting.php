@@ -41,6 +41,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int|null $max_rounds Follow-up rounds that may add findings; null inherits, five where nothing sets it
  * @property array<string, string>|null $fail_on The severity from which a finding holds the merge: under `default` for every category, and per category over it. A key left out inherits; see ReviewSettings::failOn()
  * @property string|null $findings_check weekly or monthly: how often the open findings of merged pull requests are checked; the team's alone
+ * @property string|null $pull_request_budget What the reviews of one pull request may cost, in the tenant's currency; null inherits, none where nothing sets it. A decimal, read as a string
  * @property int|null $follow_ups Reviews a container job carries on with after its own; null inherits.
  * @property CarbonInterface|null $created_at
  * @property CarbonInterface|null $updated_at
@@ -60,6 +61,7 @@ class ReviewSetting extends Model
             'follow_ups' => 'integer',
             'max_rounds' => 'integer',
             'fail_on' => 'array',
+            'pull_request_budget' => 'decimal:2',
             'claude_effort' => ReviewEffort::class,
             'codex_effort' => ReviewEffort::class,
             'ocr_effort' => ReviewEffort::class,

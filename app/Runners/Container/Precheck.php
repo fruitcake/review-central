@@ -152,6 +152,7 @@ class Precheck
                 'no-open-pull-request' => "No open pull request for {$branch}; nothing to review.",
                 'superseded' => "Another commit was pushed meanwhile, so {$commit} is no longer the pull request's head; its own review covers this one.",
                 'in-progress' => 'Another review of this pull request is running.',
+                'over-budget' => 'The reviews of this pull request have cost its budget; a push no longer starts one. A /review comment still does.',
                 default => 'Not reviewed: '.($context['reason'] ?? 'no reason given').'.',
             });
 

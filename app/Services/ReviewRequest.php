@@ -70,6 +70,18 @@ class ReviewRequest
 
     public function __construct(protected PullRequestTracking $tracking) {}
 
+    /**
+     * Whether this account's `/review` comment starts a review here: the team lets
+     * it comment the command, and where only the trusted accounts' pull requests are
+     * reviewed by themselves, it is one of them. handleComment() applies the same
+     * two rules, each with its own refusal.
+     */
+    public static function mayStartByComment(Repository $repository, ?string $accountId, ?string $nickname): bool
+    {
+        return $repository->tenant->allowsReviewCommandFrom($accountId, $nickname)
+            && ($repository->reviews_from !== ReviewsFrom::Trusted || $repository->tenant->trusts($accountId, $nickname));
+    }
+
     public static function isRequest(string $comment): bool
     {
         return preg_match('~^'.preg_quote(self::COMMAND, '~').'(?:\s|$)~', ltrim($comment)) === 1;

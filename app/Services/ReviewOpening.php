@@ -19,7 +19,7 @@ use Throwable;
  */
 class ReviewOpening
 {
-    public function __construct(protected TicketResolver $tickets) {}
+    public function __construct(protected TicketResolver $tickets, protected PullRequestBudget $budget) {}
 
     /**
      * @param  array<string, mixed>  $input  the pull request, commit, build and reviewer the run is for
@@ -122,6 +122,22 @@ class ReviewOpening
         if (! $forced && $context['reason'] === 'already-reviewed' && ($context['new_activity'] ?? false)) {
             $context['skip'] = false;
             $context['reason'] = null;
+        }
+
+        // Its reviews have cost the pull request's budget: a push starts no more of
+        // them. A `/review` comment since the last review asks for one by name, and
+        // goes ahead, as does a trial, which is not the pull request's review.
+        $pullRequestId = $context['pull_request']['id'] ?? null;
+
+        if (! $context['skip'] && ! $forced && ! ($input['custom'] ?? false)
+            && is_numeric($pullRequestId) && ! $this->budget->requestStands($repository, (int) $pullRequestId, $context['review_requested_at'] ?? null)
+            && $this->budget->isSpent($repository, (int) $pullRequestId)) {
+            $context['skip'] = true;
+            $context['reason'] = 'over-budget';
+
+            if (! ($input['probe'] ?? false)) {
+                $this->budget->tell($repository, (int) $pullRequestId);
+            }
         }
 
         // The lock is keyed on the branch the pull request comes from, taken from

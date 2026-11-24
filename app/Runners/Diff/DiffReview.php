@@ -131,6 +131,7 @@ class DiffReview
                     'in-progress' => 'another review of this pull request is running; this one waits for it.',
                     'draft' => 'the pull request is a draft.',
                     'already-reviewed', 'unchanged' => 'this commit was reviewed and nothing was said since.',
+                    'over-budget' => 'the reviews of this pull request have cost its budget; a /review comment still starts one.',
                     default => (string) ($context['body']['reason'] ?? 'the server said to skip it').'.',
                 });
 

@@ -2,10 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Enums\ReviewCommandAccess;
+use App\Enums\ReviewsFrom;
 use App\Models\Repository;
+use App\Models\ReviewRun;
 use App\Runners\ContainerRunner;
 use App\Services\ReviewLock;
 use App\Services\ReviewPublisher;
+use App\Services\ReviewSettings;
 use App\Tickets\TicketResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\RequestException;
@@ -68,6 +72,75 @@ class ReviewOpeningTest extends TestCase
             'user' => ['display_name' => $author],
             'inline' => $inline,
         ];
+    }
+
+    public function test_a_push_starts_no_review_once_the_pull_requests_reviews_have_cost_its_budget(): void
+    {
+        ReviewSettings::saveDefaults($this->repository->tenant, ['pull_request_budget' => 2]);
+        ReviewRun::query()->where('commit', str_repeat('a', 40))->update(['cost' => 1.5, 'sandbox_cost' => 0.5]);
+        $this->fakeBitbucket();
+
+        // A probe says so and posts nothing; the run that would review tells the pull request, once.
+        $this->openReview(['pull_request_id' => 570, 'commit' => str_repeat('9', 40), 'probe' => true])
+            ->assertJsonPath('skip', true)
+            ->assertJsonPath('reason', 'over-budget');
+        $this->openReview(['pull_request_id' => 570, 'commit' => str_repeat('9', 40), 'build' => '41'])
+            ->assertJsonPath('reason', 'over-budget');
+        $this->openReview(['pull_request_id' => 570, 'commit' => str_repeat('9', 40), 'build' => '42'])
+            ->assertJsonPath('reason', 'over-budget');
+
+        $told = collect(Http::recorded())->filter(fn (array $pair): bool => $pair[0]->method() === 'POST' && str_ends_with($pair[0]->url(), '/pullrequests/570/comments'));
+
+        $this->assertCount(1, $told);
+        $this->assertStringContainsString('have cost $2.00 of its $2.00 budget', $told->first()[0]['content']['raw']);
+        $this->assertStringContainsString(ReviewPublisher::REPLY_MARKER, $told->first()[0]['content']['raw']);
+        $this->assertSame(0, ReviewRun::query()->where('build_number', 41)->count());
+    }
+
+    public function test_a_review_comment_still_starts_a_review_over_the_budget(): void
+    {
+        ReviewSettings::saveDefaults($this->repository->tenant, ['pull_request_budget' => 1]);
+        ReviewRun::query()->where('commit', str_repeat('a', 40))->update(['cost' => 3]);
+        $this->fakeBitbucket([$this->comment(1, '/review', now()->toIso8601String())]);
+
+        $this->openReview(['pull_request_id' => 570, 'commit' => str_repeat('9', 40)])
+            ->assertJsonPath('skip', false);
+    }
+
+    public function test_a_review_comment_a_review_has_since_answered_starts_no_more_over_the_budget(): void
+    {
+        ReviewSettings::saveDefaults($this->repository->tenant, ['pull_request_budget' => 1]);
+        ReviewRun::query()->where('commit', str_repeat('a', 40))->update(['cost' => 3]);
+        // Kept here, the review that answered it put no marker on the pull request.
+        $this->fakeBitbucket([$this->comment(1, '/review', now()->subHours(2)->toIso8601String())]);
+        $this->reviewed($this->repository, 570, str_repeat('8', 40));
+        ReviewRun::query()->where('commit', str_repeat('8', 40))->update(['started_at' => now()->subHour()]);
+
+        $this->openReview(['pull_request_id' => 570, 'commit' => str_repeat('9', 40)])
+            ->assertJsonPath('reason', 'over-budget');
+    }
+
+    public function test_a_review_comment_from_someone_the_repository_does_not_trust_does_not_lift_the_budget(): void
+    {
+        $this->repository->update(['reviews_from' => ReviewsFrom::Trusted]);
+        $this->repository->tenant->update(['review_command' => ReviewCommandAccess::Anyone, 'review_command_accounts' => ['nora']]);
+        ReviewSettings::saveDefaults($this->repository->tenant, ['pull_request_budget' => 1]);
+        ReviewRun::query()->where('commit', str_repeat('a', 40))->update(['cost' => 3]);
+        $this->fakeBitbucket([$this->comment(1, '/review', now()->toIso8601String(), 'Outsider')]);
+
+        $this->openReview(['pull_request_id' => 570, 'commit' => str_repeat('9', 40)])
+            ->assertJsonPath('reason', 'over-budget');
+    }
+
+    public function test_trials_and_other_pull_requests_do_not_count_against_the_budget(): void
+    {
+        ReviewSettings::saveFor($this->repository, ['pull_request_budget' => 1]);
+        ReviewRun::query()->where('commit', str_repeat('a', 40))->update(['cost' => 3, 'custom' => true]);
+        ReviewRun::query()->where('commit', str_repeat('b', 40))->update(['cost' => 3, 'pull_request_id' => 571]);
+        $this->fakeBitbucket();
+
+        $this->openReview(['pull_request_id' => 570, 'commit' => str_repeat('9', 40)])
+            ->assertJsonPath('skip', false);
     }
 
     public function test_it_skips_a_draft(): void
