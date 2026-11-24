@@ -30,7 +30,7 @@ Reports of how it went, good or bad, are welcome as [GitHub issues](https://gith
 
 The usual way: review-central deploys it itself, from the machine that runs its reviews' queue (Node 20 or later).
 
-1. In the Cloudflare dashboard, [create an API token](https://dash.cloudflare.com/profile/api-tokens) for the account with **Workers Scripts**, **Containers** and **Workers R2 Storage**: Edit, and **Account Settings**: Read. For the bucket's own keys: R2 → Manage API tokens → Create API token, with Object Read & Write on the bucket.
+1. In the Cloudflare dashboard, [create an API token](https://dash.cloudflare.com/profile/api-tokens) for the account with **Workers Scripts**, **Containers** and **Workers R2 Storage**: Edit, and **Account Settings**: Read. For the bucket's own keys: R2 → Manage API Tokens → Create Account API token, with Object Read & Write on the bucket.
 2. Under **Admin → Settings → Cloudflare sandboxes**, set the account ID, that token, and the bucket's keys. The Worker's name and the bucket's default to `review-central-sandbox` and `review-central`.
 3. On **Admin → Setup**, press **Deploy the Worker**. On the reviews' queue it installs Wrangler, makes the bucket when it is not there, deploys the Worker with those names, and gives it a token it makes. The Worker's address and that token are kept under Settings; the setup page shows how the deploy went, with what Wrangler printed.
 
@@ -53,7 +53,7 @@ npx wrangler login
 npx wrangler r2 bucket create review-central
 ```
 
-Then an API token for review-central to reach it: in the Cloudflare dashboard, **R2 → Manage API tokens → Create API token**, with **Object Read & Write** on this bucket only. It shows an access key id, a secret access key and the S3 endpoint (`https://<account id>.r2.cloudflarestorage.com`). Keep all three for step 3.
+Then an API token for review-central to reach it: in the Cloudflare dashboard, **R2 → Manage API Tokens → Create Account API token**, with **Object Read & Write** on this bucket only. It shows an access key id, a secret access key and the S3 endpoint (`https://<account id>.r2.cloudflarestorage.com`). Keep all three for step 3.
 
 Add two lifecycle rules:
 

@@ -57,15 +57,61 @@ Cloudflare's Sandbox SDK and its snapshots are in beta at Cloudflare. Reports of
 
 The reviewer can also run in a [Cloudflare sandbox](https://developers.cloudflare.com/sandbox/): the job stays on this server, and the pull request's code runs on Cloudflare's side, in a container of its own for every review. It needs no Docker on the server and scales with the number of reviews: a worker on this server only waits for its sandbox.
 
+### Before you start
+
+- A Cloudflare account on the **Workers Paid** plan. Sandboxes run as containers, and the free plan has none.
+- Node 20 or later on the machine that runs the reviews' queue (`queue:work --queue=reviews`, or Horizon). The Worker is deployed from there with Wrangler.
+
 ### Setting it up
 
-All of it can be done from the admin panel:
+Everything is done from the admin panel. It takes about ten minutes, most of it waiting.
 
-1. Under **Admin → Settings → Cloudflare sandboxes**, set the account ID, an API token for the account, and the bucket's access keys. **How to get this** next to the token and the bucket's keys says where they are made and which permissions it needs. The Worker's name and the bucket's default to `review-central-sandbox` and `review-central`. **Test** checks the token and the bucket the way a review uses them, and says what a refused token lacks. What `.env` sets goes before what is saved here, and the field says so.
-2. On **Admin → Setup**, **Deploy the Worker** installs Wrangler on the reviews' queue, makes the bucket when it is not there, and deploys the Worker under that name with a token of its own. Its address and token are kept under Settings. From a shell, `php artisan review:deploy-worker` does the same.
-3. **Prepare the sandbox** has the Worker install PHP, Composer and the reviewers' tools once and keep a snapshot, so the first review does not wait for that. The snapshot belongs to one version of the setup script and of the reviewers' CLIs: pressing it again does nothing until one of them changes. Each hour the scheduler asks npm for the newest Claude Code and Codex (`review:refresh-sandbox`); for a new release it has a snapshot made, and reviews install that release once the snapshot is there, so none waits for an install. Until then a review updates its CLI in its own step, which costs half a minute and says so in its log.
+**1. Make an API token in Cloudflare.**
+Go to [API tokens](https://dash.cloudflare.com/profile/api-tokens) → **Create Token** → **Create Custom Token**. Under **Account Resources** pick your account, and give it these permissions, all at account level:
 
-Deploying by hand, and running the Worker locally with `npx wrangler dev` to try it, is described in [`cloudflare/README.md`](https://github.com/fruitcake/review-central/blob/main/cloudflare/README.md). **Admin → Setup** shows whether the Worker answers and is up to date.
+| Permission | What it is for |
+|---|---|
+| Workers Scripts: Edit | deploys the Worker |
+| Containers: Edit | deploys the sandbox's container with it |
+| Workers R2 Storage: Edit | makes the bucket, and binds it to the Worker |
+| Account Settings: Read | lets Wrangler read the account it deploys to |
+
+The token is only used to deploy. Reviews never see it.
+
+**2. Fill in the account and the token.**
+Under **Admin → Settings → Cloudflare sandboxes**, fill in the **account ID** (32 characters, on the account's overview in the dashboard, under **API**) and the **API token**. Leave the Worker's name (`review-central-sandbox`) and the bucket's (`review-central`) as they are unless you need other names. Save, and press **Test**: it says whether Cloudflare accepts the token.
+
+**3. Deploy the Worker.**
+On **Admin → Setup**, press **Deploy the Worker**. On the reviews' queue it installs Wrangler, makes the bucket and deploys the Worker with a token of its own. The first deploy takes a few minutes; refresh the page to see how it went. When it worked, the Worker's address and token are saved under Settings for you. If the token lacks a permission, the page says which.
+
+From a shell, `php artisan review:deploy-worker` does the same.
+
+You can also make the bucket yourself first, under **R2 Object Storage → Create bucket**, with the same name. The deploy then uses that bucket.
+
+**4. Make keys for the bucket.**
+The bucket exists now, and **R2 Object Storage** in the dashboard lists it. Open [R2 API tokens](https://dash.cloudflare.com/?to=/:account/r2/api-tokens) (in the dashboard: **Manage API Tokens** under **Account Details** on R2's overview) and choose **Create Account API token**. Give it **Object Read & Write**, and under **Specify bucket(s)** only `review-central` (or the name you picked).
+
+An account token keeps working when people leave, but only a Super Administrator can make one. A **User API token** works as well, with the same permission, but stops working when its user leaves the Cloudflare account. A token with only **Admin Read only** cannot write to the bucket, so reviews fail with it. Cloudflare then shows an **Access Key ID** (32 characters) and a **Secret Access Key** (64 characters), once. Paste those two under **Admin → Settings → Cloudflare sandboxes**, not the token value shown above them. Save and press **Test** again: it should now report the token, the bucket and the Worker as working.
+
+**5. Prepare the sandbox.**
+On **Admin → Setup**, press **Prepare the sandbox**. The Worker installs PHP, Composer and the reviewers' tools once and keeps a snapshot of that, so the first review does not have to wait for it. This takes a few minutes.
+
+**6. Use it.**
+Once the Worker is set up, a Cloudflare sandbox is the platform's runner unless **Admin → Settings** picks another, or `REVIEW_DEFAULT_RUNNER` names one. A repository can pick its own under **Runs on**. **Admin → Setup** shows whether the Worker answers and is up to date.
+
+::: tip
+The **How to get this** link next to the token and the bucket's keys in Settings shows steps 1 and 4 inside the app. A value set in `.env` (`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `R2_*`, `REVIEW_CLOUDFLARE_*`) goes before what is saved in Settings, and the field says so.
+:::
+
+### Keeping the tools current
+
+The snapshot belongs to one version of the setup script and of the reviewers' CLIs. Pressing **Prepare the sandbox** again does nothing until one of them changes. Every hour the scheduler asks npm for the newest Claude Code and Codex (`review:refresh-sandbox`). For a new release it has a new snapshot made, and reviews switch to that release once the snapshot is there, so no review waits for an install. Until then a review updates its CLI in a step of its own, which costs about half a minute and says so in its log.
+
+After an update of Review Central that changes the Worker, **Admin → Setup** says the Worker is out of date: press **Deploy the Worker** again.
+
+### By hand, or locally
+
+Deploying without the admin panel, and running the Worker on your own machine with `npx wrangler dev` to try it, is described in [`cloudflare/README.md`](https://github.com/fruitcake/review-central/blob/main/cloudflare/README.md).
 
 ### What the sandbox holds
 
