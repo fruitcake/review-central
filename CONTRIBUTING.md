@@ -40,6 +40,7 @@ Tests run on SQLite in memory and need no services: HTTP calls to source control
 
 - Add or update tests for what you change. A bug fix comes with a test that fails without it.
 - Follow the style of the code around it. Comments explain why something is done, not what the next line does.
+- This repository is public. Use made-up data in tests, docs, commit messages and pull requests: names such as "Alex Author" and "Robin Reviewer", ticket references such as `DEV-123`, `LARAVEL-123` or `BACKEND-123`, `acme/shop` and `example.com`. Never real people's names, a client's ticket references or project names, or anything taken from a screenshot or live data.
 - Keep a pull request to one change, with a title and description that say what it does and why.
 - Update the docs in `docs/` when you change setup, configuration or behaviour someone relies on.
 - New environment variables go in the [configuration reference](docs/guide/configuration.md), and in `.env.example` with a comment when a feature needs them set.

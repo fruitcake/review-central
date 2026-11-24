@@ -66,6 +66,12 @@
                 @else
                     {{ $ticket['reference'] }}
                 @endif
+                @if (filled($ticket['source'] ?? null)) <span class="rc-muted">· {{ $ticket['source'] }}</span> @endif
+                @if (filled($ticket['error'] ?? null))
+                    <span class="rc-tone-danger">{{ $ticket['error'] }}</span>
+                @elseif (($ticket['url'] ?? null) === null && ($ticket['markdown'] ?? null) === null)
+                    <span class="rc-muted">· not read yet</span>
+                @endif
             </dd>
         @endif
         @if ($record->head_since)
@@ -77,6 +83,14 @@
         <section class="rc-prose" aria-label="Summary">
             <p>{{ $note['summary'] }}</p>
         </section>
+    @endif
+
+    @if (filled($ticket['markdown'] ?? null))
+        {{-- As text: it is what someone wrote in the tracker. --}}
+        <details class="rc-turn-history">
+            <summary><strong>Ticket {{ $ticket['reference'] }}</strong>@if (filled($ticket['read_at'] ?? null)) <span class="rc-muted">read {{ LocalTime::of(\Illuminate\Support\Carbon::parse($ticket['read_at']))->format('j M H:i') }}</span>@endif</summary>
+            <p style="white-space: pre-wrap">{{ \Illuminate\Support\Str::limit($ticket['markdown'], 6000) }}</p>
+        </details>
     @endif
 
     @if ($run !== null && filled($run->summary))

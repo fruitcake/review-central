@@ -67,6 +67,19 @@ class TicketResolver
     }
 
     /**
+     * The reference the title names and the source that reads it, without asking
+     * that source: for showing which ticket a pull request is for.
+     *
+     * @return array{reference: string, source: string, source_id: int}|null
+     */
+    public function referenceIn(Repository $repository, ?string $title): ?array
+    {
+        $match = $this->match($this->sources($repository), $title);
+
+        return $match === null ? null : ['reference' => $match[1], 'source' => (string) $match[0]->name, 'source_id' => (int) $match[0]->getKey()];
+    }
+
+    /**
      * The ticket a reference names, as a title would carry it: `PROJ-123`, `#1234`
      * or `1234`. Null when no source of this repository reads it.
      *

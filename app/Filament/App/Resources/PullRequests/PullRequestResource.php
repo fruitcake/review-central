@@ -16,6 +16,7 @@ use App\Services\Currency;
 use App\Services\MergeState;
 use App\Services\PullRequestTurn;
 use App\Services\ReviewRequest;
+use App\Services\TicketLookup;
 use BackedEnum;
 use Closure;
 use Filament\Actions\Action;
@@ -155,6 +156,25 @@ class PullRequestResource extends Resource
                     ->modalHeading(fn (OpenPullRequest $record): string => $record->title ?? 'Untitled')
                     ->modalDescription(fn (OpenPullRequest $record): string => $record->repository->slug.' #'.$record->pull_request_id)
                     ->modalContent(fn (OpenPullRequest $record): View => view('filament.app.pull-request', self::details($record)))
+                    ->extraModalFooterActions(fn (OpenPullRequest $record): array => [
+                        Action::make('readTicket')
+                            // Read from its source here, before any review did, or again since.
+                            ->label(fn (): string => (self::ticketOf($record)['url'] ?? null) === null ? 'Read the ticket' : 'Refresh the ticket')
+                            ->icon(Heroicon::OutlinedArrowPath)
+                            ->color('gray')
+                            ->visible(fn (): bool => self::ticketOf($record) !== null)
+                            ->action(function () use ($record): void {
+                                $ticket = app(TicketLookup::class)->readForDetails($record);
+
+                                if ($ticket === null || $ticket['error'] !== null) {
+                                    Notification::make()->title('The ticket could not be read')->body($ticket['error'] ?? 'The title names no ticket a source of this repository reads.')->danger()->send();
+
+                                    return;
+                                }
+
+                                Notification::make()->title("{$ticket['reference']} is read from {$ticket['source']}")->success()->send();
+                            }),
+                    ])
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Close'),
                 Action::make('start')
@@ -265,10 +285,26 @@ class PullRequestResource extends Resource
             'run' => $run,
             'standing' => self::standing($record),
             'history' => $history,
-            // As the newest review read it: the ticket is read when a review runs, not here.
-            'ticket' => $runs->reverse()->map(fn (ReviewRun $sibling): mixed => $sibling->context['ticket'] ?? null)->first(fn (mixed $ticket): bool => is_array($ticket) && filled($ticket['reference'] ?? null)),
+            // As it was last read for these details, or as the newest review read it,
+            // or only as the title names it until someone has it read.
+            'ticket' => app(TicketLookup::class)->forDetails(
+                $record,
+                $runs->reverse()->map(fn (ReviewRun $sibling): mixed => $sibling->context['ticket'] ?? null)->first(fn (mixed $ticket): bool => is_array($ticket) && filled($ticket['reference'] ?? null)),
+            ),
             'url' => rescue(fn (): string => $record->repository->sourceControl()->pullRequestUrl($record->pull_request_id), null, false),
         ];
+    }
+
+    /**
+     * The ticket the details show, without the rest of them: for the button that reads it.
+     *
+     * @return array{reference: string, source: string, url: string|null, markdown: string|null, error: string|null, read_at: string|null}|null
+     */
+    private static function ticketOf(OpenPullRequest $record): ?array
+    {
+        $reviewed = $record->latestRun()?->context['ticket'] ?? null;
+
+        return app(TicketLookup::class)->forDetails($record, is_array($reviewed) ? $reviewed : null);
     }
 
     /**

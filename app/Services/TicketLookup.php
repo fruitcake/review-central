@@ -8,9 +8,11 @@ use App\Exceptions\ActionRefused;
 use App\Exceptions\AttachmentRefused;
 use App\Exceptions\RepositoryNotFound;
 use App\Exceptions\TicketNotFound;
+use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Tickets\AttachmentFile;
 use App\Tickets\TicketResolver;
+use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 /**
@@ -19,6 +21,9 @@ use Throwable;
  */
 class TicketLookup
 {
+    /** How long a ticket read for a pull request's details is kept. */
+    public const DETAILS_DAYS = 7;
+
     public function __construct(protected TicketResolver $tickets) {}
 
     /**
@@ -101,6 +106,87 @@ class TicketLookup
             'pull_request_id' => $id,
             'title' => $title,
         ];
+    }
+
+    /**
+     * The ticket a pull request's details show: as it was last read from there,
+     * else as its newest review read it, else only the reference its title names,
+     * which is not read until someone asks.
+     *
+     * @param  array<string, mixed>|null  $reviewed  the ticket the newest review read
+     * @return array{reference: string, source: string, url: string|null, markdown: string|null, error: string|null, read_at: string|null}|null
+     */
+    public function forDetails(OpenPullRequest $record, ?array $reviewed): ?array
+    {
+        $named = $this->tickets->referenceIn($record->repository, $record->title);
+        $read = Cache::get(self::detailsKey($record));
+
+        // Only while the title still names that ticket, for the same source: a renamed
+        // pull request may be for another, and a source set up since may read it elsewhere.
+        if (is_array($read) && filled($read['reference'] ?? null) && $named !== null && ($read['named'] ?? null) === [$named['reference'], $named['source_id']]) {
+            return self::shown($read, is_string($read['read_at'] ?? null) ? $read['read_at'] : null);
+        }
+
+        if ($reviewed !== null && filled($reviewed['reference'] ?? null)) {
+            return self::shown($reviewed, null);
+        }
+
+        return $named === null ? null : ['reference' => $named['reference'], 'source' => $named['source'], 'url' => null, 'markdown' => null, 'error' => null, 'read_at' => null];
+    }
+
+    /**
+     * Reads the ticket the pull request's title names from its source now, and
+     * keeps it for its details.
+     *
+     * @return array{reference: string, source: string, url: string|null, markdown: string|null, error: string|null, read_at: string|null}|null null when the title names no ticket a source reads
+     */
+    public function readForDetails(OpenPullRequest $record): ?array
+    {
+        $named = $this->tickets->referenceIn($record->repository, $record->title);
+        $ticket = $named === null ? null : $this->tickets->forTitle($record->repository, $record->title);
+
+        if ($named === null || $ticket === null) {
+            Cache::forget(self::detailsKey($record));
+
+            return null;
+        }
+
+        $read = [
+            'reference' => $ticket['reference'],
+            'source' => $ticket['source'],
+            'url' => $ticket['url'],
+            'markdown' => $ticket['markdown'],
+            'error' => $ticket['error'],
+            'read_at' => now()->toIso8601String(),
+        ];
+
+        // With the reference the title named, which the details hold it against.
+        Cache::put(self::detailsKey($record), [...$read, 'named' => [$named['reference'], $named['source_id']]], now()->addDays(self::DETAILS_DAYS));
+
+        return $read;
+    }
+
+    /**
+     * @param  array<mixed>  $ticket  as it was kept, by a review or for the details
+     * @return array{reference: string, source: string, url: string|null, markdown: string|null, error: string|null, read_at: string|null}
+     */
+    protected static function shown(array $ticket, ?string $readAt): array
+    {
+        $text = fn (string $key): ?string => is_string($ticket[$key] ?? null) ? $ticket[$key] : null;
+
+        return [
+            'reference' => (string) $text('reference'),
+            'source' => (string) $text('source'),
+            'url' => $text('url'),
+            'markdown' => $text('markdown'),
+            'error' => $text('error'),
+            'read_at' => $readAt,
+        ];
+    }
+
+    protected static function detailsKey(OpenPullRequest $record): string
+    {
+        return "pull-request-ticket:{$record->repository_id}:{$record->pull_request_id}";
     }
 
     /**
