@@ -188,7 +188,8 @@ it('starts a review by comment only for the accounts the tenant lets, and says s
         && ($request['parent'] ?? null) === ['id' => 81]
         && str_contains($request['content']['raw'], 'Only the accounts this team has listed'));
 
-    // The listed account, by its nickname.
+    // The listed account, by its nickname, also where reviews do not start by themselves.
+    $this->repository->update(['reviews_enabled' => false]);
     $send(['display_name' => 'Dana Demo', 'nickname' => 'Dana-Demo', 'account_id' => '557058:dana'], 82);
 
     Queue::assertPushed(RunContainerReview::class, 1);

@@ -120,7 +120,9 @@ class ReviewRequest
             return;
         }
 
-        if ($event->type === WebhookEvent::COMMENT_CREATED && $this->runsTheReview($repository)) {
+        // A comment is someone asking, by name: a `/review` or a question is answered
+        // also where reviews do not start by themselves, as the panel's Review is.
+        if ($event->type === WebhookEvent::COMMENT_CREATED) {
             $this->handleComment($repository, $event);
         }
     }
@@ -597,7 +599,8 @@ class ReviewRequest
 
     protected function runsTheReview(Repository $repository): bool
     {
-        // Added to try a review on, or turned off: only a person starts one.
+        // Added to try a review on, or turned off: only a person starts one, in the
+        // panel or by comment.
         return $repository->reviews_enabled;
     }
 

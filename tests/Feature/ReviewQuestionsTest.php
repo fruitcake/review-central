@@ -235,14 +235,14 @@ it('tells the asker why a question cannot be answered here, and stops answering 
     Http::assertSent(fn (Request $request): bool => ($request['parent']['id'] ?? null) === 20 && str_contains($request['content']['raw'], 'Ask again later'));
 });
 
-it('takes no question on a repository whose pull requests are not reviewed', function () {
+it('answers a question on a repository whose pull requests are not reviewed by themselves', function () {
     Queue::fake();
     $this->repository->update(['reviews_enabled' => false]);
 
     comment('@review how does this work?')->assertOk();
 
-    expect(ReviewQuestion::query()->count())->toBe(0);
-    Queue::assertNothingPushed();
+    expect(ReviewQuestion::query()->count())->toBe(1);
+    Queue::assertPushed(AnswerReviewQuestion::class, 1);
 });
 
 it('lists the questions asked on a pull request on its review\'s page, with what each cost', function () {

@@ -76,7 +76,7 @@ class RepositoryReadiness
     protected function enabled(Repository $repository): array
     {
         return match (true) {
-            ! $repository->reviews_enabled => ['label' => 'Reviews', 'note' => 'Off: nothing starts a review by itself; a person starts each one from Pull requests.', 'state' => self::UNKNOWN],
+            ! $repository->reviews_enabled => ['label' => 'Reviews', 'note' => 'Off: nothing starts a review by itself; a person starts each one, from Pull requests or with a /review comment, and @review questions are still answered.', 'state' => self::UNKNOWN],
             $repository->reviews_from === ReviewsFrom::Trusted => ['label' => 'Reviews', 'note' => 'On, for the trusted accounts\' pull requests; the others wait under Pull requests.', 'state' => self::OK],
             default => ['label' => 'Reviews', 'note' => 'On, for the pull requests that may be reviewed, whoever opened them.', 'state' => self::OK],
         };

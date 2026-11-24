@@ -199,11 +199,6 @@ class ReviewQuestions
             return;
         }
 
-        // Added to try a review on, or turned off: the reviewer is not its to ask.
-        if (! $repository->reviews_enabled) {
-            return;
-        }
-
         $addressing = $this->addressing($repository, $event);
 
         // Under one of the review's findings: the finding is what it is about, and a
