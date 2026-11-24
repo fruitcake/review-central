@@ -110,7 +110,7 @@ class EditProfile extends BaseEditProfile
     /**
      * The user's own accounts at Bitbucket and GitHub, one line each: whether it
      * is connected, and the buttons. Only the hosts the installation is
-     * registered at: a Bitbucket consumer, a GitHub App.
+     * registered at: a Bitbucket OAuth client, a GitHub App.
      */
     private static function accountsSection(): Section
     {

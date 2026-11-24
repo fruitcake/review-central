@@ -34,7 +34,7 @@ class SingleSignOnController extends Controller
         $driver = $this->driver($provider);
 
         if (in_array($provider, SingleSignOn::BY_CODE, true)) {
-            // Back through the one callback the consumer or app has for people,
+            // Back through the one callback the OAuth client or app has for people,
             // which sends a sign-in on here.
             $request->session()->put(PersonalConnectionController::SIGN_IN, $provider);
         }
@@ -182,7 +182,7 @@ class SingleSignOnController extends Controller
     {
         abort_unless(array_key_exists($provider, SingleSignOn::providers()), 404);
 
-        // Bitbucket's consumer and the GitHub App have one callback for people,
+        // Bitbucket's OAuth client and the GitHub App have one callback for people,
         // which connecting an account uses too.
         $driver = in_array($provider, SingleSignOn::BY_CODE, true) ? PersonalConnections::provider($provider) : Socialite::driver($provider);
 

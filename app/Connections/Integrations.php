@@ -41,7 +41,7 @@ final class Integrations
             'client_secret' => ['label' => 'Client secret', 'secret' => true, 'env' => 'services.google.client_secret'],
         ]],
         'bitbucket' => ['label' => 'Bitbucket: act as yourself', 'single' => true, 'tenants_add' => false, 'service' => 'Bitbucket', 'fields' => [
-            'client_id' => ['label' => 'Key', 'secret' => false, 'env' => 'services.bitbucket.client_id'],
+            'client_id' => ['label' => 'Client ID', 'secret' => false, 'env' => 'services.bitbucket.client_id'],
             'client_secret' => ['label' => 'Secret', 'secret' => true, 'env' => 'services.bitbucket.client_secret'],
         ]],
         'asana' => ['label' => 'Asana: connect by signing in', 'single' => false, 'tenants_add' => true, 'service' => 'Asana', 'fields' => [

@@ -37,7 +37,7 @@ return [
         'redirect' => '/sign-in/google/callback',
     ],
 
-    // Acting on Bitbucket as yourself: an OAuth consumer of a Bitbucket workspace,
+    // Acting on Bitbucket as yourself: an OAuth client of a Bitbucket workspace,
     // with <APP_URL>/connections/bitbucket/callback as its callback URL. Without
     // both values the profile offers no Bitbucket account to connect.
     'bitbucket' => [

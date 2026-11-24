@@ -115,7 +115,7 @@ it('shows the account on the profile, says when it cannot write, and lets the us
 
     livewire(EditProfile::class)->assertSee('connected without the right to comment on pull requests');
 
-    // A consumer that also lets it write: commenting is part of that.
+    // An OAuth client that also lets it write: commenting is part of that.
     ($this->connect)('pullrequest:write, account');
 
     livewire(EditProfile::class)->assertSee('Connected as sam-b');
