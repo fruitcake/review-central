@@ -146,11 +146,13 @@ class ReviewContext
         // from someone the tenant lets start a review by comment. Once that review
         // has run the comment is older than it, and the draft is left alone again.
         $authors = collect($comments)->mapWithKeys(fn (array $comment): array => [(string) ($comment['id'] ?? '') => $comment['user'] ?? []]);
-        $requested = collect($conversation)
-            ->contains(fn (array $comment): bool => $comment['after_last_review'] && ! $comment['is_review'] && ReviewRequest::isRequest($comment['text'])
-                && $repository->tenant->allowsReviewCommandFrom($authors[(string) $comment['id']]['account_id'] ?? null, $authors[(string) $comment['id']]['nickname'] ?? null));
-        // Kept for the opening, where it also starts a review over the pull request's budget.
-        $context['review_requested'] = $requested;
+        $requests = collect($conversation)
+            ->filter(fn (array $comment): bool => $comment['after_last_review'] && ! $comment['is_review'] && ReviewRequest::isRequest($comment['text'])
+                && ReviewRequest::mayStartByComment($repository, $authors[(string) $comment['id']]['account_id'] ?? null, $authors[(string) $comment['id']]['nickname'] ?? null));
+        $requested = $requests->isNotEmpty();
+        // When the newest was asked, for the opening: it also starts a review over the
+        // pull request's budget, once, which it tells by the runs since.
+        $context['review_requested_at'] = $requests->max('created_on');
 
         if ($context['pull_request']['draft'] && ! $reviewDrafts && ! $requested) {
             $context['skip'] = true;

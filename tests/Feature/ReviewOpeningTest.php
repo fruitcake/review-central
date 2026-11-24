@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Enums\ReviewCommandAccess;
+use App\Enums\ReviewsFrom;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Runners\ContainerRunner;
@@ -99,10 +101,35 @@ class ReviewOpeningTest extends TestCase
     {
         ReviewSettings::saveDefaults($this->repository->tenant, ['pull_request_budget' => 1]);
         ReviewRun::query()->where('commit', str_repeat('a', 40))->update(['cost' => 3]);
-        $this->fakeBitbucket([$this->comment(1, '/review', '2026-09-21T09:00:00+00:00')]);
+        $this->fakeBitbucket([$this->comment(1, '/review', now()->toIso8601String())]);
 
         $this->openReview(['pull_request_id' => 570, 'commit' => str_repeat('9', 40)])
             ->assertJsonPath('skip', false);
+    }
+
+    public function test_a_review_comment_a_review_has_since_answered_starts_no_more_over_the_budget(): void
+    {
+        ReviewSettings::saveDefaults($this->repository->tenant, ['pull_request_budget' => 1]);
+        ReviewRun::query()->where('commit', str_repeat('a', 40))->update(['cost' => 3]);
+        // Kept here, the review that answered it put no marker on the pull request.
+        $this->fakeBitbucket([$this->comment(1, '/review', now()->subHours(2)->toIso8601String())]);
+        $this->reviewed($this->repository, 570, str_repeat('8', 40));
+        ReviewRun::query()->where('commit', str_repeat('8', 40))->update(['started_at' => now()->subHour()]);
+
+        $this->openReview(['pull_request_id' => 570, 'commit' => str_repeat('9', 40)])
+            ->assertJsonPath('reason', 'over-budget');
+    }
+
+    public function test_a_review_comment_from_someone_the_repository_does_not_trust_does_not_lift_the_budget(): void
+    {
+        $this->repository->update(['reviews_from' => ReviewsFrom::Trusted]);
+        $this->repository->tenant->update(['review_command' => ReviewCommandAccess::Anyone, 'review_command_accounts' => ['nora']]);
+        ReviewSettings::saveDefaults($this->repository->tenant, ['pull_request_budget' => 1]);
+        ReviewRun::query()->where('commit', str_repeat('a', 40))->update(['cost' => 3]);
+        $this->fakeBitbucket([$this->comment(1, '/review', now()->toIso8601String(), 'Outsider')]);
+
+        $this->openReview(['pull_request_id' => 570, 'commit' => str_repeat('9', 40)])
+            ->assertJsonPath('reason', 'over-budget');
     }
 
     public function test_trials_and_other_pull_requests_do_not_count_against_the_budget(): void
