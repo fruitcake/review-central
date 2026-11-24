@@ -84,7 +84,7 @@ class SingleSignOnController extends Controller
                 }
 
                 if ($account instanceof SocialiteUser) {
-                    $this->connect($connections, $user, $provider, $account);
+                    $this->connect($connections, $user, $provider, $account, $account->expiresIn === null ? null : (int) $account->expiresIn);
                 }
             } else {
                 $user = $signOn->user($provider, $account);
@@ -138,9 +138,9 @@ class SingleSignOnController extends Controller
             $account = (new SocialiteUser)->setRaw($pending['raw'])
                 ->map(['id' => $pending['id'], 'nickname' => $pending['nickname'], 'name' => $pending['name']])
                 ->setToken($pending['token'])
-                ->setRefreshToken($pending['refresh_token'])
-                ->setExpiresIn($pending['expires_at'] === null ? null : max(0, $pending['expires_at'] - now()->getTimestamp()));
-            $this->connect($connections, $user, $pending['provider'], $account);
+                ->setRefreshToken($pending['refresh_token']);
+            $expiresIn = is_int($pending['expires_at']) ? max(0, $pending['expires_at'] - now()->getTimestamp()) : null;
+            $this->connect($connections, $user, $pending['provider'], $account, $expiresIn);
         }
 
         return $this->signIn($request, $user);
@@ -150,8 +150,10 @@ class SingleSignOnController extends Controller
      * Keeps the token the sign-in brought, so the account writes as the user as
      * well, as connecting it on the profile would. A failure there leaves the
      * sign-in as it is.
+     *
+     * @param  int|null  $expiresIn  the seconds it still lasts
      */
-    protected function connect(PersonalConnections $connections, User $user, string $provider, SocialiteUser $account): void
+    protected function connect(PersonalConnections $connections, User $user, string $provider, SocialiteUser $account, ?int $expiresIn): void
     {
         if (blank($account->token)) {
             return;
@@ -163,7 +165,7 @@ class SingleSignOnController extends Controller
             $account,
             $account->token,
             $account->refreshToken,
-            $account->expiresIn === null ? null : (int) $account->expiresIn,
+            $expiresIn,
             $provider === PersonalConnections::BITBUCKET ? $connections->grantedScopes($account->token) : [],
         ));
     }
