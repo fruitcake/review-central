@@ -105,7 +105,7 @@ class PullRequestResource extends Resource
         return $table
             // Each row's newest review, how many it had and what they cost, in the list's own query.
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('repository.integration')->addSelect([
-                'latest_review' => self::runsOf()->select('uuid')->latest('started_at')->limit(1),
+                'latest_review' => self::runsOf()->select('uuid')->latest('started_at')->latest('id')->limit(1),
                 'reviews_count' => self::runsOf()->whereNotIn('status', self::NOT_A_REVIEW)->selectRaw('count(*)'),
                 'reviews_cost' => self::runsOf()->selectRaw('sum(cost)'),
             ])->afterQuery(function (SupportCollection $records): void {

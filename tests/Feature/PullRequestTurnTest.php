@@ -271,3 +271,21 @@ it('reads each row and "With me" from the pull request\'s newest review, in one 
     $list->set('activeTab', 'mine')
         ->assertCanSeeTableRecords([OpenPullRequest::query()->where('pull_request_id', 7)->sole()]);
 });
+
+it('takes the review created last of two that started in the same second, in the list as in the details', function () {
+    deliverTurn()->assertOk();
+    $record = OpenPullRequest::query()->where('pull_request_id', 7)->sole();
+    $review = fn (int $id, string $status, ?string $result) => ReviewRun::query()->forceCreate([
+        'id' => $id, 'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'MEDS-5007', 'pull_request_id' => 7, 'commit' => str_repeat('b', 40), 'status' => $status, 'result' => $result, 'started_at' => now()->startOfSecond(),
+    ]);
+
+    // Saved out of id order.
+    $last = $review(100, ReviewRun::STATUS_FINISHED, 'PASSED');
+    $review(50, ReviewRun::STATUS_RUNNING, null);
+
+    $listed = (new ReflectionMethod(PullRequestResource::class, 'latestRuns'))->invoke(null, [$record->id]);
+
+    expect($record->latestRun()->id)->toBe($last->id)
+        ->and($listed->first()->id)->toBe($last->id);
+});
