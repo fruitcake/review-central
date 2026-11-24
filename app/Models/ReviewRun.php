@@ -146,6 +146,12 @@ class ReviewRun extends Model
     public const STATUS_UNPUBLISHED = 'unpublished';
 
     /**
+     * Stopped by someone before it finished: the reviewer was cut off, and nothing
+     * was posted. Its summary says who stopped it.
+     */
+    public const STATUS_STOPPED = 'stopped';
+
+    /**
      * How long a run may stay `running` before the sweep gives up on it. The review
      * step's own max-time is 30 minutes, so an hour is comfortably past anything
      * that could still be working.

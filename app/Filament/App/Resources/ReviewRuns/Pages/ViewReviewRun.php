@@ -31,6 +31,7 @@ use App\Services\ReviewCredentials;
 use App\Services\ReviewPublisher;
 use App\Services\ReviewQuestions;
 use App\Services\ReviewRequest;
+use App\Services\ReviewStops;
 use App\Services\ReviewTrial;
 use Closure;
 use Filament\Actions\Action;
@@ -85,6 +86,19 @@ class ViewReviewRun extends ViewRecord
     {
         return [
             ReviewRunResource::dismissAction(),
+            Action::make('stop')
+                ->label('Stop')
+                ->icon(Heroicon::OutlinedStop)
+                ->color('danger')
+                ->visible(fn (): bool => in_array($this->record->status, ReviewStops::STOPPABLE, true))
+                ->requiresConfirmation()
+                ->modalHeading('Stop this review')
+                ->modalDescription(ReviewRunResource::STOP_DESCRIPTION)
+                ->modalSubmitActionLabel('Stop')
+                ->action(function (ReviewStops $stops): void {
+                    ReviewRunResource::stopped($this->record, $stops);
+                    $this->record->refresh();
+                }),
             Action::make('compare')
                 ->label('Compare with')
                 ->icon(Heroicon::OutlinedScale)

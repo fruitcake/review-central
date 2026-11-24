@@ -50,6 +50,7 @@ class RunConclusion
             $run?->status === ReviewRun::STATUS_FINISHED && $run->result === 'FAILED' => [BuildState::Failed, $run->openFindings().' finding(s) to look at'],
             $run?->status === ReviewRun::STATUS_FINISHED && $run->needsManualReview() => [BuildState::Successful, 'No findings that block; not approved, a person has to check '.count($run->manual_review ?? []).' point(s)'],
             $run?->status === ReviewRun::STATUS_FINISHED => [BuildState::Successful, 'No findings that block'],
+            $run?->status === ReviewRun::STATUS_STOPPED => [BuildState::Stopped, rtrim((string) $run->summary, '.') ?: 'Stopped'],
             default => [BuildState::Stopped, 'The review did not finish'],
         };
 

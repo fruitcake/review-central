@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Runners\Container;
 
+use App\Exceptions\ReviewStopped;
 use App\Llm\ProviderKeys;
 use App\Services\PlatformSettings;
 use Closure;
@@ -462,9 +463,24 @@ class CloudflareSandbox extends Sandbox
     {
         $pending = '';
         $event = 'message';
+        $look = microtime(true);
 
         while (! $body->eof()) {
             $pending .= $body->read(8192);
+
+            // Someone stopped the review. Hanging up tells the Worker, which stops
+            // the step and the sandbox; the caller lets the sandbox go as well.
+            // The Worker sends a line every few seconds, so this is looked at
+            // while the reviewer is quiet too.
+            if ($this->stopWhen !== null && microtime(true) >= $look) {
+                if (($this->stopWhen)()) {
+                    $body->close();
+
+                    throw new ReviewStopped('The step was stopped.');
+                }
+
+                $look = microtime(true) + self::STOP_CHECK_SECONDS;
+            }
 
             while (($end = strpos($pending, "\n")) !== false) {
                 $line = rtrim(substr($pending, 0, $end), "\r");
