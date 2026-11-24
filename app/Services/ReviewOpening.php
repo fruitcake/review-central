@@ -288,7 +288,7 @@ class ReviewOpening
      * Opens the record for this run, or reuses the one a retried step already made.
      *
      * @param  array<string, mixed>  $context
-     * @param  array{agent?: string|null, provider?: string|null, effort?: string|null, advisor?: string|null, modules?: array<string, bool>|null, custom?: bool|null}  $reviewer
+     * @param  array{agent?: string|null, provider?: string|null, effort?: string|null, advisor?: string|null, modules?: array<string, bool>|null, custom?: bool|null, fail_on?: string|null}  $reviewer
      */
     protected function openRun(Repository $repository, array $context, string $branch, string $commit, string $build, string $inputHash, array $reviewer, ?string $instructionsVersion): void
     {
@@ -317,6 +317,9 @@ class ReviewOpening
                 'modules' => $reviewer['modules'] ?? null,
                 'custom' => (bool) ($reviewer['custom'] ?? false),
                 'instructions_version' => $instructionsVersion,
+                // The threshold the reviewer was told, which the report is filed under
+                // even when the setting changed while the review ran.
+                'fail_on' => isset($reviewer['fail_on']) ? ReviewPublisher::failOnSpec($reviewer['fail_on']) : null,
                 'started_at' => now(),
             ],
         );

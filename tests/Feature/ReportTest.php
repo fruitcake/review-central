@@ -88,6 +88,20 @@ it('passes a MEDIUM finding where the team holds the merge on HIGH only, and rec
         ->and(($this->log)())->toContain('Nothing blocks the merge: 1 open finding(s), none at the threshold.');
 });
 
+it('files under the threshold the reviewer was told, when the setting changed while it ran', function () {
+    ReviewRun::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'feature/export', 'commit' => $this->sha, 'build_number' => 41, 'pull_request_id' => 570,
+        'status' => ReviewRun::STATUS_RUNNING, 'started_at' => now(), 'fail_on' => 'high',
+    ]);
+    ReviewSettings::saveDefaults($this->repository->tenant, ['fail_on' => ['default' => 'any']]);
+    ($this->leave)(['result' => 'PASSED', 'summary' => '1 medium.', 'findings' => [$this->finding]]);
+
+    ($this->report)();
+
+    expect(ReviewRun::query()->sole()->only(['result', 'fail_on']))->toBe(['result' => 'PASSED', 'fail_on' => 'high']);
+});
+
 it('publishes nothing when what the reviewer left is no report', function (Closure $leave, string $said) {
     $leave->call($this);
 
