@@ -303,6 +303,39 @@ it('counts for the badge after the response, not in the page\'s own request', fu
         ->and(Setup::getNavigationBadge())->toBe((string) $wrong);
 });
 
+it('polls the Setup page from the last result, and asks the Worker again when asked or after five minutes', function () {
+    $this->actingAs(User::factory()->create(['is_admin' => true]));
+    Filament::setCurrentPanel(Filament::getPanel('admin'));
+    config([
+        'review.cloudflare.url' => 'https://sandbox.example.com', 'review.cloudflare.token' => 'worker-token',
+        'filesystems.disks.r2.key' => null, 'filesystems.disks.r2.secret' => null, 'filesystems.disks.r2.bucket' => null, 'filesystems.disks.r2.endpoint' => null,
+    ]);
+    Http::fake(['sandbox.example.com/health*' => Http::response(['ok' => true, 'bucket' => true])]);
+    $asked = fn (): int => count(Http::recorded());
+
+    $page = livewire(Setup::class)->call('check')->assertSee('Cloudflare');
+    $afterCheck = $asked();
+
+    $page->call('$refresh')->assertSee('Cloudflare');
+
+    expect($asked())->toBe($afterCheck);
+
+    $page->callAction('checkAgain');
+
+    expect($asked())->toBeGreaterThan($afterCheck);
+
+    $afterAgain = $asked();
+    $this->travel(6)->minutes();
+    $page->call('$refresh');
+
+    // Not in the poll's own request: after the response has gone out.
+    expect($asked())->toBe($afterAgain);
+
+    app(DeferredCallbackCollection::class)->invoke();
+
+    expect($asked())->toBeGreaterThan($afterAgain);
+});
+
 it('hides the badge when the cache cannot be reached, instead of failing the page', function () {
     Cache::shouldReceive('get')->andThrow(new RuntimeException('Connection refused'));
 
