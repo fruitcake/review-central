@@ -75,7 +75,8 @@ class SingleSignOnController extends Controller
                             'name' => $account->getName(),
                             'token' => $account->token,
                             'refresh_token' => $account->refreshToken,
-                            'expires_in' => $account->expiresIn,
+                            // When it runs out, not how long it lasts: the code may be typed minutes later.
+                            'expires_at' => $account->expiresIn === null ? null : now()->addSeconds((int) $account->expiresIn)->getTimestamp(),
                         ]));
                     }
 
@@ -138,7 +139,7 @@ class SingleSignOnController extends Controller
                 ->map(['id' => $pending['id'], 'nickname' => $pending['nickname'], 'name' => $pending['name']])
                 ->setToken($pending['token'])
                 ->setRefreshToken($pending['refresh_token'])
-                ->setExpiresIn($pending['expires_in']);
+                ->setExpiresIn($pending['expires_at'] === null ? null : max(0, $pending['expires_at'] - now()->getTimestamp()));
             $this->connect($connections, $user, $pending['provider'], $account);
         }
 

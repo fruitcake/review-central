@@ -338,8 +338,12 @@ it('signs in with GitHub through the GitHub App: a code the first time, by itsel
     $this->get(route('sign-in.code'))->assertSee('your GitHub account signs you in by itself')->assertSee('sign in with GitHub again');
     Notification::assertSentOnDemand(SignInCode::class, fn (SignInCode $notification): bool => $notification->provider === 'GitHub' && $notification->account === 'nora-gh');
 
+    // Typed ten minutes later: the token runs out when GitHub said, not ten minutes after.
+    $issued = now();
+    $this->travel(10)->minutes();
     $this->post(route('sign-in.code.check'), ['code' => mailedCode('nora@example.com')])->assertRedirect(route('home'));
 
+    expect(PersonalConnection::query()->sole()->expires_at->getTimestamp())->toBe($issued->addSeconds(28800)->getTimestamp());
     $this->assertAuthenticatedAs($user);
     // Linked, and connected with the token the sign-in brought, without connecting it again.
     expect(UserIdentity::query()->sole()->only(['provider', 'provider_id']))->toBe(['provider' => 'github', 'provider_id' => '5150'])
