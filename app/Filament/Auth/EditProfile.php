@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Filament\Auth;
 
-use App\Models\PersonalConnection;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\PersonalConnections;
@@ -15,9 +14,9 @@ use Filament\Forms\Components\TagsInput;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Panel;
-use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Filament\Support\Enums\FontWeight;
 use Filament\Support\Facades\FilamentView;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Js;
@@ -85,93 +84,93 @@ class EditProfile extends BaseEditProfile
             ->components([
                 $this->getNameFormComponent(),
                 $this->getEmailFormComponent(),
-                TextEntry::make('connected_accounts')
-                    ->label('Your accounts on the hosts')
-                    ->state(fn (): array => self::connectedAccounts())
-                    ->badge()
-                    ->visible(fn (): bool => self::connectedAccounts() !== [])
-                    ->helperText('Connected below: they tell which pull requests are yours by themselves.'),
+                self::accountsSection(),
                 TagsInput::make('source_accounts')
-                    ->label(fn (): string => self::connectedAccounts() === [] ? 'Your accounts on the hosts' : 'Other accounts on the hosts')
+                    ->label(fn (): string => self::hasConnected() ? 'Other accounts on the hosts' : 'Your accounts on the hosts')
                     ->placeholder('A nickname, login or account ID')
                     ->nestedRecursiveRules(['string', 'max:120'])
                     ->helperText('Your nickname or login on a host whose account you did not connect, as its pull requests name you: "With me" under Pull requests lists the ones whose turn is yours. They only tell which pull requests are yours, and give no access. Without any account, your name here is matched to the name the host shows.'),
                 $this->getPasswordFormComponent(),
                 $this->getPasswordConfirmationFormComponent(),
                 $this->getCurrentPasswordFormComponent(),
-                self::personalSection(PersonalConnections::BITBUCKET),
-                self::personalSection(PersonalConnections::GITHUB),
                 self::assistantsSection(),
             ]);
     }
 
     /**
-     * The accounts the user connected, as "Bitbucket: nickname".
-     *
-     * @return array<int, string>
+     * Whether the user connected an account at any host.
      */
-    private static function connectedAccounts(): array
+    private static function hasConnected(): bool
     {
         $user = Filament::auth()->user();
 
-        if (! $user instanceof User) {
-            return [];
-        }
-
-        return $user->personalConnections()->orderBy('host')->get()
-            ->map(fn (PersonalConnection $connection): string => (PersonalConnections::HOSTS[$connection->host] ?? $connection->host).': '.($connection->nickname ?? $connection->account_id))
-            ->all();
+        return $user instanceof User && $user->personalConnections()->exists();
     }
 
     /**
-     * The user's own account at a host, which what they write on a pull request
-     * through Review Central is written as. Only where the installation is
-     * registered there: a Bitbucket consumer, or a GitHub App.
+     * The user's own accounts at Bitbucket and GitHub, one line each: whether it
+     * is connected, and the buttons. Only the hosts the installation is
+     * registered at: a Bitbucket consumer, a GitHub App.
      */
-    private static function personalSection(string $host): Section
+    private static function accountsSection(): Section
+    {
+        $hosts = array_keys(PersonalConnections::HOSTS);
+
+        return Section::make('Bitbucket and GitHub')
+            ->description('Connect your own account. You then sign in with it, the pull requests that are yours show under "With me", and your replies to findings are written as you instead of by the team\'s connection with your name above them. Review Central uses it for nothing else.')
+            ->visible(fn (): bool => collect($hosts)->contains(fn (string $host): bool => PersonalConnections::available($host)))
+            ->schema(array_map(self::accountEntry(...), $hosts));
+    }
+
+    /**
+     * One host's line: its state, what connecting it does there, and the buttons.
+     */
+    private static function accountEntry(string $host): TextEntry
     {
         $connections = app(PersonalConnections::class);
         $name = PersonalConnections::HOSTS[$host];
         $user = fn (): User => Filament::auth()->user() instanceof User ? Filament::auth()->user() : throw new LogicException('Not signed in.');
 
-        return Section::make("Your {$name} account")
-            ->description(match ($host) {
-                PersonalConnections::GITHUB => 'Connected, your replies to findings on GitHub pull requests are written as you, with the app\'s badge next to your name, and no longer by the app with your name above them. Only on repositories reviewed through the GitHub App; Review Central uses it for nothing else.',
-                default => 'Connected, your replies to findings on Bitbucket pull requests are written as you, and no longer by the team\'s connection with your name above them. Review Central uses it for nothing else, though Bitbucket lets it comment on every pull request you can.',
-            })
+        return TextEntry::make("{$host}_account")
+            ->label($name)
+            ->inlineLabel()
             ->visible(fn (): bool => PersonalConnections::available($host))
-            ->schema([
-                TextEntry::make("{$host}_account")
-                    ->hiddenLabel()
-                    ->state(function () use ($connections, $user, $host): string {
-                        $connection = $connections->of($user(), $host);
+            ->state(function () use ($connections, $user, $host): string {
+                $connection = $connections->of($user(), $host);
 
-                        return match (true) {
-                            $connection === null && $connections->signsIn($user(), $host) => 'It signs you in, but is not connected to reply as you.',
-                            $connection === null => 'Not connected.',
-                            ($problem = $connections->problem($user(), $host)) !== null => $problem,
-                            default => 'Connected as '.($connection->nickname ?? $connection->account_id).'.',
-                        };
+                return match (true) {
+                    $connection === null && $connections->signsIn($user(), $host) => 'Signs you in. Connect it to reply as you.',
+                    $connection === null => 'Not connected',
+                    ($problem = $connections->problem($user(), $host)) !== null => $problem,
+                    default => 'Connected as '.($connection->nickname ?? $connection->account_id),
+                };
+            })
+            ->weight(fn (): ?FontWeight => $connections->of($user(), $host) === null ? null : FontWeight::SemiBold)
+            ->belowContent($host === PersonalConnections::GITHUB
+                ? 'Replies show your name with the app\'s badge, on repositories reviewed through the GitHub App.'
+                : 'Bitbucket lets it comment on every pull request you can.')
+            ->afterContent([
+                Action::make('connect'.ucfirst($host))
+                    ->label(fn (): string => $connections->of($user(), $host) === null ? 'Connect' : 'Connect again')
+                    ->icon(Heroicon::OutlinedLink)
+                    ->size('sm')
+                    ->color(fn (): string => $connections->of($user(), $host) === null ? 'primary' : 'gray')
+                    // Back to this profile, in the tenant it is open in.
+                    ->url(fn (): string => route('connections.personal.redirect', array_filter(['host' => $host, 'tenant' => Filament::getTenant()?->getAttribute('slug')]))),
+                Action::make('disconnect'.ucfirst($host))
+                    ->label('Disconnect')
+                    ->size('sm')
+                    ->color('gray')
+                    ->visible(fn (): bool => $connections->of($user(), $host) !== null || $connections->signsIn($user(), $host))
+                    ->requiresConfirmation()
+                    ->modalHeading("Disconnect {$name}?")
+                    ->modalDescription($host === PersonalConnections::GITHUB
+                        ? 'Your replies are written by the app again, with your name above them, and the account no longer signs you in.'
+                        : 'Your replies are written by the team\'s connection again, with your name above them, and the account no longer signs you in.')
+                    ->action(function () use ($connections, $user, $host, $name): void {
+                        $connections->disconnect($user(), $host);
+                        Notification::make()->title("{$name} is disconnected")->success()->send();
                     }),
-                Actions::make([
-                    Action::make('connect'.ucfirst($host))
-                        ->label(fn (): string => $connections->of($user(), $host) === null ? 'Connect' : 'Connect again')
-                        ->icon(Heroicon::OutlinedLink)
-                        // Back to this profile, in the tenant it is open in.
-                        ->url(fn (): string => route('connections.personal.redirect', array_filter(['host' => $host, 'tenant' => Filament::getTenant()?->getAttribute('slug')]))),
-                    Action::make('disconnect'.ucfirst($host))
-                        ->label('Disconnect')
-                        ->color('gray')
-                        ->visible(fn (): bool => $connections->of($user(), $host) !== null || $connections->signsIn($user(), $host))
-                        ->requiresConfirmation()
-                        ->modalDescription($host === PersonalConnections::GITHUB
-                            ? 'Your replies are written by the app again, with your name above them, and the account no longer signs you in.'
-                            : 'Your replies are written by the team\'s connection again, with your name above them, and the account no longer signs you in.')
-                        ->action(function () use ($connections, $user, $host, $name): void {
-                            $connections->disconnect($user(), $host);
-                            Notification::make()->title("{$name} is disconnected")->success()->send();
-                        }),
-                ])->key("{$host}_actions"),
             ]);
     }
 

@@ -2,6 +2,7 @@
 
 use App\Exceptions\SignInRefused;
 use App\Http\Controllers\PersonalConnectionController;
+use App\Models\PersonalConnection;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Models\UserIdentity;
@@ -317,7 +318,9 @@ it('signs in with GitHub through the GitHub App: a code the first time, by itsel
     Notification::fake();
     config(['services.github_app' => ['id' => '4242', 'slug' => 'review-central', 'client_id' => 'Iv1.client', 'client_secret' => 'client-secret', 'private_key' => 'a key', 'webhook_secret' => null]]);
     $user = User::factory()->create(['email' => 'nora@example.com']);
-    $this->githubAccount = (new GitHubUser)->setRaw(['id' => 5150, 'login' => 'nora-gh'])->map(['id' => 5150, 'nickname' => 'nora-gh', 'name' => 'Nora New', 'email' => 'nora@example.com']);
+    Http::fake(['api.github.com/user/emails*' => Http::response([])]);
+    $this->githubAccount = (new GitHubUser)->setRaw(['id' => 5150, 'login' => 'nora-gh'])->map(['id' => 5150, 'nickname' => 'nora-gh', 'name' => 'Nora New', 'email' => 'nora@example.com'])
+        ->setToken('ghu-token')->setRefreshToken('ghr-refresh')->setExpiresIn(28800);
     $provider = Mockery::mock(GithubProvider::class);
     $provider->shouldReceive('redirectUrl')->andReturnSelf();
     $provider->shouldReceive('redirect')->andReturn(new RedirectResponse('https://github.com/login/oauth/authorize'));
@@ -338,11 +341,18 @@ it('signs in with GitHub through the GitHub App: a code the first time, by itsel
     $this->post(route('sign-in.code.check'), ['code' => mailedCode('nora@example.com')])->assertRedirect(route('home'));
 
     $this->assertAuthenticatedAs($user);
-    expect(UserIdentity::query()->sole()->only(['provider', 'provider_id']))->toBe(['provider' => 'github', 'provider_id' => '5150']);
+    // Linked, and connected with the token the sign-in brought, without connecting it again.
+    expect(UserIdentity::query()->sole()->only(['provider', 'provider_id']))->toBe(['provider' => 'github', 'provider_id' => '5150'])
+        ->and(PersonalConnection::query()->sole()->only(['user_id', 'host', 'nickname', 'access_token', 'refresh_token']))
+        ->toBe(['user_id' => $user->id, 'host' => 'github', 'nickname' => 'nora-gh', 'access_token' => 'ghu-token', 'refresh_token' => 'ghr-refresh']);
 
+    // With no connection kept, signing in again keeps one.
+    PersonalConnection::query()->delete();
     auth()->logout();
     Notification::fake();
     $signIn()->assertRedirect(route('home'));
+
+    expect(PersonalConnection::query()->sole()->access_token)->toBe('ghu-token');
 
     $this->assertAuthenticatedAs($user);
     Notification::assertNothingSent();
