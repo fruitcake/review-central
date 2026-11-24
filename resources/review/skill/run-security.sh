@@ -15,7 +15,7 @@ set -u
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$HERE/reviewer-env.sh"
 # The pull request's own settings for the CLI are not the review's: see reviewer-env.sh.
-[ "${REVIEW_LOCAL:-false}" = "true" ] || { reviewer_drop_project_settings; reviewer_hide_claude_skills; }
+[ "${REVIEW_LOCAL:-false}" = "true" ] || { reviewer_drop_project_settings; reviewer_hide_claude_skills || exit 1; }
 TRANSCRIPT="${REVIEW_TRANSCRIPT_FILE:-claude-review.jsonl}"
 REPORT="${REVIEW_REPORT_FILE:-ai-review.json}"
 rm -f "$REPORT" "$TRANSCRIPT"

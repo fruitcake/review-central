@@ -13,7 +13,7 @@ Hyvä is a Magento storefront theme, so the Magento guide applies as well. It re
 
 ## Hyvä's own skill
 
-`.review-skills/hyva-alpine-component/SKILL.md` is Hyvä's reference for Alpine components, fetched by the review step at a pinned version (or `.claude/skills/hyva-alpine-component/` when the repository installed it, which a Claude review finds under `.review-repo-skills/.claude/skills/`). Read it before judging a template with `x-data`: it has the CSP patterns, the `hyva` helpers and the escaping rules. It recommends CSP patterns everywhere; on a theme that is not CSP, a standard Alpine expression still works and is not a finding.
+`.review-skills/hyva-alpine-component/SKILL.md` is Hyvä's reference for Alpine components, fetched by the review step at a pinned version (or `.claude/skills/hyva-alpine-component/` when the repository installed it, which a Claude review finds in `.claude/skills.as-text/`). Read it before judging a template with `x-data`: it has the CSP patterns, the `hyva` helpers and the escaping rules. It recommends CSP patterns everywhere; on a theme that is not CSP, a standard Alpine expression still works and is not a finding.
 
 ## Luma code on a Hyvä page does nothing
 
