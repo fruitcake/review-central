@@ -91,6 +91,11 @@ class CloudflareSandbox extends Sandbox
         $this->cost = null;
         $this->samples = [];
 
+        // Kept for the next review of the branch, when the review asked for that.
+        $warm = $clone === null ? null : $this->warm;
+        $this->warm = null;
+        $this->keptWarm = false;
+
         $files = $this->files();
         $instance = self::instance();
         // What is paid for: the instance's share of a processor, and its memory.
@@ -103,6 +108,9 @@ class CloudflareSandbox extends Sandbox
         $input = "review/sandbox/{$run}/input.tar.gz";
         $kept = "review/sandbox/{$run}/output.tar.gz";
         $archive = rtrim($workDirectory, '/').'-sandbox.tar';
+        // A warm sandbox goes by the branch's name, so the next review finds it;
+        // the files in the bucket stay this attempt's own.
+        $sandbox = $warm['name'] ?? $run;
 
         try {
             $output?->__invoke('out', "##[phase] upload\n");
@@ -134,7 +142,7 @@ class CloudflareSandbox extends Sandbox
                 ? ProviderKeys::proxied($environment)
                 : ['environment' => $environment, 'credentials' => []];
 
-            $exit = $this->ask($run, [
+            $spec = [
                 'input' => $input,
                 'output' => $kept,
                 'setup' => $setup,
@@ -149,7 +157,20 @@ class CloudflareSandbox extends Sandbox
                 'timeout' => $timeout,
                 'instance' => $instance,
                 'cache' => $vendor,
-            ], $timeout, $output);
+            ];
+
+            $exit = $this->ask($sandbox, $spec + ($warm === null ? [] : ['warm' => ['seconds' => $warm['seconds']]]), $timeout, $output);
+
+            // The warm sandbox is busy with another run of the branch, such as a
+            // question: this one gets a sandbox of its own, as without warm.
+            if ($exit === null) {
+                $output?->__invoke('out', "The warm sandbox of this branch is busy; starting a fresh one.\n");
+                $sandbox = $run;
+                $warm = null;
+                $exit = $this->ask($sandbox, $spec, $timeout, $output) ?? throw new RuntimeException('The Cloudflare Worker answered that a fresh sandbox is busy.');
+            }
+
+            $this->keptWarm = $warm !== null;
 
             if ($exit['kept']) {
                 $output?->__invoke('out', "##[phase] download\n");
@@ -166,9 +187,78 @@ class CloudflareSandbox extends Sandbox
         } finally {
             File::delete([$archive, "{$archive}.gz"]);
             rescue(fn () => $files->forget("review/sandbox/{$run}"), null, false);
-            // A sandbox whose stream was cut is still running until it is told.
-            rescue(fn () => $this->client(30)->delete("runs/{$run}"), null, false);
+
+            // A sandbox whose stream was cut is still running until it is told. One
+            // kept warm stays, until the review says it is not wanted (cool()).
+            if (! $this->keptWarm) {
+                rescue(fn () => $this->client(30)->delete("runs/{$sandbox}"), null, false);
+            }
         }
+    }
+
+    /**
+     * What the next run is kept warm as, set by keepWarm().
+     *
+     * @var array{name: string, seconds: int}|null
+     */
+    protected ?array $warm = null;
+
+    /** Whether the last run's sandbox was left warm. */
+    public bool $keptWarm = false;
+
+    /** When a sandbox is kept for the next review of its branch. */
+    public const WARM_OFF = 'off';
+
+    public const WARM_AFTER_CHANGES = 'changes';
+
+    public const WARM_ALWAYS = 'always';
+
+    public const WARM_MODES = [self::WARM_AFTER_CHANGES => 'After a review that asked for changes', self::WARM_ALWAYS => 'After every review', self::WARM_OFF => 'Never'];
+
+    /** Minutes a sandbox is kept, when neither the environment nor the settings say. */
+    public const WARM_DEFAULT_MINUTES = 15;
+
+    /** The longest a sandbox may be kept, as the Worker allows. */
+    public const WARM_MOST_MINUTES = 60;
+
+    /**
+     * When a sandbox is kept for the next review of its branch, and for how long.
+     *
+     * @return array{mode: string, seconds: int}
+     */
+    public static function warmth(): array
+    {
+        $mode = (string) config('review.cloudflare.warm');
+        $minutes = (int) (config('review.cloudflare.warm_minutes') ?: self::WARM_DEFAULT_MINUTES);
+
+        return [
+            'mode' => isset(self::WARM_MODES[$mode]) ? $mode : self::WARM_AFTER_CHANGES,
+            'seconds' => max(1, min(self::WARM_MOST_MINUTES, $minutes)) * 60,
+        ];
+    }
+
+    /**
+     * Keeps the sandbox of the next run, one that clones, for this long under this
+     * name: the next run under it starts in it, when it is still there.
+     */
+    public function keepWarm(string $name, int $seconds): void
+    {
+        $this->warm = ['name' => $name, 'seconds' => $seconds];
+    }
+
+    /**
+     * The name a branch's warm sandbox goes by: the repository's and the branch's
+     * own, so no other pull request's review ever starts in it.
+     */
+    public static function warmName(int $repositoryId, string $branch): string
+    {
+        return "warm-{$repositoryId}-".substr(hash('sha256', $branch), 0, 24);
+    }
+
+    /** Lets a warm sandbox go now, when the next review is not likely to need it. */
+    public function cool(string $name): void
+    {
+        rescue(fn () => $this->client(30)->delete("runs/{$name}"), null, false);
     }
 
     /**
@@ -427,12 +517,16 @@ class CloudflareSandbox extends Sandbox
      *
      * @param  array<string, mixed>  $spec
      * @param  Closure(string, string): void|null  $output
-     * @return array{exitCode: int, seconds: int, kept: bool, samples: list<array{0: int, 1: float, 2: int, 3: float}>}
+     * @return array{exitCode: int, seconds: int, kept: bool, samples: list<array{0: int, 1: float, 2: int, 3: float}>}|null null when the sandbox of that name is busy with another run
      */
-    protected function ask(string $run, array $spec, int $timeout, ?Closure $output): array
+    protected function ask(string $run, array $spec, int $timeout, ?Closure $output): ?array
     {
         // Its own time on top of the step's: the sandbox starts, and packs up after.
         $response = $this->client($timeout + 900)->withOptions(['stream' => true])->post("runs/{$run}", $spec);
+
+        if ($response->status() === 409) {
+            return null;
+        }
 
         if (! $response->successful()) {
             throw new RuntimeException("The Cloudflare Worker answered {$response->status()}: ".mb_substr((string) ($response->json('error') ?? $response->body()), 0, 300));

@@ -64,6 +64,8 @@ See [`cloudflare/README.md`](https://github.com/fruitcake/review-central/blob/ma
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_ENDPOINT` | — | That bucket's credentials, for the `r2` disk. Also under Settings. |
 | `REVIEW_CLOUDFLARE_PROXY_KEYS` | `true` | Keep the AI providers' keys in the Worker, and give the sandbox a placeholder the Worker swaps on the way to the provider. Off only for a reviewer that does not trust the Worker's certificate. |
 | `REVIEW_CLOUDFLARE_INSTANCE` | `standard-1` | The sandbox's size: `lite`, `basic`, `standard-1` to `standard-4`. Also under Settings → Cloudflare sandboxes. The capacity page advises one from what the reviews measured: their memory at most, and how often the steps around the model were short of processor on each size, with a button to switch. |
+| `REVIEW_CLOUDFLARE_WARM` | `changes` | When a sandbox that clones the repository stays for the next review of the same branch: `changes`, after a review that asked for changes; `always`; or `off`. That review then fetches the new commit and keeps `vendor/`, about a minute faster; what the last reviewer could have changed is cleared first. Also under Settings → Cloudflare sandboxes. |
+| `REVIEW_CLOUDFLARE_WARM_MINUTES` | `15` | How long a kept sandbox waits for that review, at most 60. It is paid for by its memory and disk while it waits. |
 | `REVIEW_CLOUDFLARE_SETUP` | `true` | Install PHP, Composer and the reviewers' tools in a fresh sandbox, and snapshot that. Off when the Worker's image has them. |
 | `REVIEW_CLOUDFLARE_RATE_VCPU`, `REVIEW_CLOUDFLARE_RATE_MEMORY`, `REVIEW_CLOUDFLARE_RATE_DISK` | Cloudflare's list prices | Dollars per vCPU-second, GiB-second of memory and GB-second of disk, to estimate what a sandbox cost. |
 

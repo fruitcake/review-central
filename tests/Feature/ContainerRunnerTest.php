@@ -673,13 +673,17 @@ it('reviews a merged pull request as it went in, against the destination as it w
 /**
  * A Cloudflare sandbox that notes what it was told to clone, and runs nothing.
  */
-function cloningSandbox(bool $clonesItself = true): ArrayObject
+/**
+ * @param  ArrayObject<string, mixed>|null  $warmth  what the review kept warm, and let go, is noted here
+ * @param  Closure(): void|null  $during  what happens while the reviewer runs
+ */
+function cloningSandbox(bool $clonesItself = true, ?ArrayObject $warmth = null, ?Closure $during = null): ArrayObject
 {
     $told = new ArrayObject;
 
-    app()->bind(Sandbox::class, fn () => new class($told, $clonesItself) extends CloudflareSandbox
+    app()->bind(Sandbox::class, fn () => new class($told, $clonesItself, $warmth ?? new ArrayObject, $during) extends CloudflareSandbox
     {
-        public function __construct(protected ArrayObject $told, protected bool $clones) {}
+        public function __construct(protected ArrayObject $told, protected bool $clones, protected ArrayObject $warmth, protected ?Closure $during) {}
 
         public function clonesItself(): bool
         {
@@ -689,13 +693,54 @@ function cloningSandbox(bool $clonesItself = true): ArrayObject
         public function run(string $name, string $script, string $workDirectory, array $environment, bool $trusted, int $timeout, ?string $home = null, bool $lockedGit = false, ?Closure $output = null, ?string $composerCache = null, ?array $clone = null): ProcessResult
         {
             $this->told[] = $clone;
+            $this->warmth['kept'] = $this->warm;
+            $this->keptWarm = $this->warm !== null;
+            $this->warm = null;
+            $this->during?->__invoke();
 
             return Process::result();
+        }
+
+        public function cool(string $name): void
+        {
+            $this->warmth['cooled'] = $name;
         }
     });
 
     return $told;
 }
+
+it('keeps the sandbox for the next review of the branch, and lets it go when that review is not likely to come', function (?string $mode, ?string $result, bool $kept, bool $cooled) {
+    Http::fake(['api.bitbucket.org/*' => Http::response([])]);
+    $this->repository->integration->update(['settings' => ['clone_in_sandbox' => true]]);
+    config(['review.cloudflare.warm' => $mode, 'review.cloudflare.warm_minutes' => '10']);
+    fakeSteps();
+    $warmth = new ArrayObject;
+    // The precheck is faked, so the run the review files is made here.
+    cloningSandbox(warmth: $warmth, during: fn () => ReviewRun::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'feature/export', 'commit' => str_repeat('b', 40), 'build_number' => 41, 'status' => ReviewRun::STATUS_FINISHED, 'result' => $result, 'started_at' => now(),
+    ]));
+
+    app(ContainerReview::class)->run($this->repository, 'feature/export', null, 41);
+
+    $name = CloudflareSandbox::warmName((int) $this->repository->getKey(), 'feature/export');
+
+    expect($warmth['kept'] ?? null)->toBe($kept ? ['name' => $name, 'seconds' => 600] : null)
+        ->and($warmth['cooled'] ?? null)->toBe($cooled ? $name : null);
+})->with([
+    'asked for changes' => [null, 'FAILED', true, false],
+    'passed' => [null, 'PASSED', true, true],
+    'after every review' => ['always', 'PASSED', true, false],
+    'never' => ['off', 'FAILED', false, false],
+]);
+
+it('names a warm sandbox after its repository and branch alone, as the Worker takes a name', function () {
+    expect(CloudflareSandbox::warmName(7, 'feature/export'))->toMatch('/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/')
+        ->and(CloudflareSandbox::warmName(7, 'feature/export'))->toBe(CloudflareSandbox::warmName(7, 'feature/export'))
+        ->not->toBe(CloudflareSandbox::warmName(8, 'feature/export'))
+        ->not->toBe(CloudflareSandbox::warmName(7, 'feature/import'));
+});
 
 it('has the Cloudflare sandbox clone a private repository for a connection that asks for it, and clones nothing here', function () {
     Http::fake(['api.bitbucket.org/*' => Http::response([])]);

@@ -68,6 +68,8 @@ class Settings extends Page
             PlatformSettings::CLOUDFLARE_WORKER => $settings->text(PlatformSettings::CLOUDFLARE_WORKER),
             PlatformSettings::CLOUDFLARE_BUCKET => $settings->text(PlatformSettings::CLOUDFLARE_BUCKET),
             PlatformSettings::CLOUDFLARE_INSTANCE => $settings->text(PlatformSettings::CLOUDFLARE_INSTANCE),
+            PlatformSettings::CLOUDFLARE_WARM => $settings->text(PlatformSettings::CLOUDFLARE_WARM),
+            PlatformSettings::CLOUDFLARE_WARM_MINUTES => $settings->get(PlatformSettings::CLOUDFLARE_WARM_MINUTES),
             PlatformSettings::R2_ACCESS_KEY_ID => $settings->text(PlatformSettings::R2_ACCESS_KEY_ID),
             PlatformSettings::MCP_REDIRECTS => $settings->text(PlatformSettings::MCP_REDIRECTS),
             // Secrets are never sent back to the browser.
@@ -230,6 +232,18 @@ class Settings extends Page
                             ->placeholder(fn (): string => 'As configured: '.CloudflareSandbox::instance())
                             ->helperText(fn (Capacity $capacity): string => 'What each review\'s sandbox runs on, from the next review on. A bigger one costs more per second and only helps a review that is short of memory or processor. '
                                 .($capacity->sizing()['advice'] ?? 'Advice follows from the reviews\' own measurements, on the Capacity page, once there are some.'))),
+                        self::overridable(Select::make(PlatformSettings::CLOUDFLARE_WARM)
+                            ->label('Keep the sandbox for the next review')
+                            ->options(CloudflareSandbox::WARM_MODES)
+                            ->placeholder(fn (): string => 'As configured: '.lcfirst(CloudflareSandbox::WARM_MODES[CloudflareSandbox::warmth()['mode']]))
+                            ->helperText('For a repository the sandbox clones itself. The sandbox stays after the review, and the next review of the same branch starts in it: it fetches the new commit, and Composer only brings vendor/ in line, instead of starting, cloning and installing. That saves about a minute. What the last reviewer could have changed is cleared first: its processes, its home, and everything in the git directory but what it left untouched. A kept sandbox is paid for by its memory while it waits; after a review that asked for changes, the author pushes a fix within minutes more often than not.')),
+                        self::overridable(TextInput::make(PlatformSettings::CLOUDFLARE_WARM_MINUTES)
+                            ->label('Minutes it is kept')
+                            ->integer()
+                            ->minValue(1)
+                            ->maxValue(CloudflareSandbox::WARM_MOST_MINUTES)
+                            ->placeholder(fn (): string => 'As configured: '.intdiv(CloudflareSandbox::warmth()['seconds'], 60))
+                            ->helperText('How long a sandbox waits for the next review of its branch, at most '.CloudflareSandbox::WARM_MOST_MINUTES.'. A wait costs about as much as the sandbox does running, without the processor.')),
                         self::overridable(TextInput::make(PlatformSettings::R2_ACCESS_KEY_ID)
                             ->label('Bucket access key ID')
                             ->regex('/^\s*[a-f0-9]{32}\s*$/')
