@@ -127,19 +127,20 @@ class SetupGuides
     public function bitbucket(): SetupGuide
     {
         return new SetupGuide(
-            title: 'A Bitbucket OAuth consumer to reply and sign in as yourself',
+            title: 'A Bitbucket OAuth consumer to sign in, reply and open pull requests as yourself',
             url: 'https://bitbucket.org/account/workspaces/',
             linkLabel: 'Your workspaces on Bitbucket',
             steps: [
                 'Open the link, pick a workspace you administer, and go to **Settings → OAuth consumers → Add consumer**. Any workspace will do: people of other workspaces can connect through it too.',
                 'Name it after this installation, and set the **Callback URL** to `'.url('/connections/bitbucket/callback').'`.',
-                'Tick the permissions below and no others, and save. Bitbucket gives every token the consumer\'s permissions, whatever Review Central asks for: leave **Pull requests: Write** off, which would let the token merge and write to repositories.',
+                'Tick the permissions below and no others, and save. Bitbucket gives every token the consumer\'s permissions, whatever Review Central asks for. **Pull requests: Write** is only for letting an assistant open and edit people\'s pull requests as them: it also lets the token merge, and Bitbucket ticks Repositories: Write with it, which lets it push. Leave it off to keep to replying.',
                 'Open the consumer, and fill in its **Key** and **Secret** under **Apps** in the admin panel, or set `BITBUCKET_CLIENT_ID` and `BITBUCKET_CLIENT_SECRET` in `.env`, which goes first.',
             ],
             permissions: [
                 'Account: Email' => 'the account\'s primary address, for signing in with Bitbucket.',
-                'Account: Read' => 'who the account is; it also fills in their account under "Your accounts on the hosts".',
+                'Account: Read' => 'who the account is, which tells which pull requests are theirs.',
                 'Pull requests: Read' => 'posts their replies to findings as them: reading includes commenting. Bitbucket ticks Repositories: Read with it.',
+                'Pull requests: Write (optional)' => 'opens and edits their own pull requests as them, through `create-pull-request` and `update-pull-request`. Who connected before it was ticked connects again.',
             ],
             notes: [
                 'Each person connects their own account on their profile; without it, their replies are posted by the team\'s connection with their name above them.',

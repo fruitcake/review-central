@@ -33,7 +33,7 @@ use Throwable;
  * comment that names its parent in a hidden marker, and one is resolved by
  * minimising it as resolved, which is how GitHub folds it away.
  */
-class GitHubClient implements FiltersSecrets, SourceControl
+class GitHubClient implements FiltersSecrets, OpensPullRequests, SourceControl
 {
     use SecretFiltering;
 
@@ -355,6 +355,25 @@ class GitHubClient implements FiltersSecrets, SourceControl
     public function resolvePullRequestTask(string $id, int $taskId, string $content): array
     {
         throw new LogicException('GitHub has no tasks on a pull request.');
+    }
+
+    /**
+     * Into the repository's default branch unless another is named. GitHub has no
+     * default reviewers to add: a CODEOWNERS file asks its own.
+     */
+    public function openPullRequest(string $branch, ?string $destination, string $title, string $description, bool $draft): array
+    {
+        $destination ??= (string) ($this->getRepository()['default_branch'] ?? 'main');
+
+        $pull = $this->request(20)->post($this->url('pulls'), [
+            'title' => $title,
+            'head' => $branch,
+            'base' => $destination,
+            'body' => $description,
+            'draft' => $draft,
+        ])->throw()->json();
+
+        return ['id' => (int) ($pull['number'] ?? 0), 'url' => (string) ($pull['html_url'] ?? $this->pullRequestUrl((int) ($pull['number'] ?? 0)))];
     }
 
     public function updatePullRequestDescription(string $id, string $title, string $description): int

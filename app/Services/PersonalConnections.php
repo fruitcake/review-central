@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Exceptions\ActionRefused;
+use App\Filament\Auth\EditProfile;
 use App\Models\PersonalConnection;
 use App\Models\Repository;
 use App\Models\User;
 use App\SourceControl\BitbucketClient;
 use App\SourceControl\GitHubApp;
 use App\SourceControl\GitHubClient;
+use App\SourceControl\OpensPullRequests;
 use App\SourceControl\ReadOnlyClient;
 use App\SourceControl\SourceControl;
 use App\Support\SecretFilter;
@@ -286,6 +289,58 @@ class PersonalConnections
 
         // What they write passes the tenant's secrets first, as the review's does.
         return $client->keepingOut(SecretFilter::forTenant($repository->tenant_id));
+    }
+
+    /**
+     * The repository's pull requests as the user opens and edits them, with the
+     * account they do it as: the one whose pull requests they may edit.
+     *
+     * @return array{client: SourceControl&OpensPullRequests, account_id: string}
+     *
+     * @throws ActionRefused with why not, and what to do about it
+     */
+    public function authorFor(User $user, Repository $repository): array
+    {
+        $host = self::DRIVERS[(string) $repository->integration?->driver] ?? null;
+        $profile = EditProfile::getUrl(panel: 'app', tenant: $repository->tenant);
+
+        if ($host === null) {
+            throw new ActionRefused("Pull requests are opened as you on Bitbucket, and on GitHub through the GitHub App; {$repository->fullName()} is reached otherwise. Open it on the host yourself.");
+        }
+
+        $name = self::HOSTS[$host];
+
+        if (! self::available($host)) {
+            throw new ActionRefused("This installation is not registered at {$name} for people to act as themselves. Open the pull request on {$name} yourself.");
+        }
+
+        if (($problem = $this->problem($user, $host)) !== null) {
+            throw new ActionRefused("{$problem} Connect it under \"Bitbucket and GitHub\" on your profile: {$profile}");
+        }
+
+        $connection = $this->of($user, $host);
+
+        if ($connection === null) {
+            throw new ActionRefused("Your {$name} account is not connected. Connect it on your profile: {$profile}");
+        }
+
+        // Bitbucket gives a token what its consumer may, and writing on pull requests
+        // is more than commenting: the consumer has to allow it, and the user to connect after.
+        if ($host === self::BITBUCKET && ! in_array('pullrequest:write', $connection->scopes ?? [], true)) {
+            throw new ActionRefused("Your Bitbucket account was connected without the right to open or edit pull requests. Once this installation's OAuth consumer has \"Pull requests: Write\", connect it again on your profile: {$profile}");
+        }
+
+        if ($repository->integration?->setting(ReadOnlyClient::SETTING) === ReadOnlyClient::READ) {
+            throw new ActionRefused("{$repository->fullName()} is set to write nothing on its pull requests. Open the pull request on {$name} yourself.");
+        }
+
+        $token = (string) $this->accessToken($connection);
+        $client = $host === self::GITHUB
+            ? new GitHubClient($repository->workspace, $repository->slug, $token)
+            : new BitbucketClient($repository->workspace, $repository->slug, $token);
+
+        // What they write passes the tenant's secrets first, as the review's does.
+        return ['client' => $client->keepingOut(SecretFilter::forTenant($repository->tenant_id)), 'account_id' => $connection->account_id];
     }
 
     /**
