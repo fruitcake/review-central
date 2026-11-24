@@ -118,17 +118,17 @@ class TicketLookup
      */
     public function forDetails(OpenPullRequest $record, ?array $reviewed): ?array
     {
+        $named = $this->tickets->referenceIn($record->repository, $record->title);
         $read = Cache::get(self::detailsKey($record));
 
-        if (is_array($read) && filled($read['reference'] ?? null)) {
+        // Only while the title still names that ticket: a renamed pull request may be for another.
+        if (is_array($read) && filled($read['reference'] ?? null) && $named !== null && ($read['named'] ?? null) === $named['reference']) {
             return self::shown($read, is_string($read['read_at'] ?? null) ? $read['read_at'] : null);
         }
 
         if ($reviewed !== null && filled($reviewed['reference'] ?? null)) {
             return self::shown($reviewed, null);
         }
-
-        $named = $this->tickets->referenceIn($record->repository, $record->title);
 
         return $named === null ? null : [...$named, 'url' => null, 'markdown' => null, 'error' => null, 'read_at' => null];
     }
@@ -141,9 +141,10 @@ class TicketLookup
      */
     public function readForDetails(OpenPullRequest $record): ?array
     {
-        $ticket = $this->tickets->forTitle($record->repository, $record->title);
+        $named = $this->tickets->referenceIn($record->repository, $record->title);
+        $ticket = $named === null ? null : $this->tickets->forTitle($record->repository, $record->title);
 
-        if ($ticket === null) {
+        if ($named === null || $ticket === null) {
             Cache::forget(self::detailsKey($record));
 
             return null;
@@ -158,7 +159,8 @@ class TicketLookup
             'read_at' => now()->toIso8601String(),
         ];
 
-        Cache::put(self::detailsKey($record), $read, now()->addDays(self::DETAILS_DAYS));
+        // With the reference the title named, which the details hold it against.
+        Cache::put(self::detailsKey($record), [...$read, 'named' => $named['reference']], now()->addDays(self::DETAILS_DAYS));
 
         return $read;
     }

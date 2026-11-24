@@ -264,4 +264,12 @@ it('shows the ticket the title names before any review read it, and reads it whe
         ->toContain('href="https://acme.atlassian.net/browse/MEDS-5007"')
         ->toContain('Fix the export')
         ->not->toContain('not read yet');
+
+    // Renamed for another ticket: what was read for the first one is not shown for it.
+    $record->forceFill(['title' => 'MEDS-5008 Something else'])->save();
+
+    expect(view('filament.app.pull-request', PullRequestResource::details($record))->render())
+        ->toContain('MEDS-5008')
+        ->not->toContain('browse/MEDS-5007')
+        ->not->toContain('Fix the export');
 });
