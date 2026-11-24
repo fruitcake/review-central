@@ -179,6 +179,33 @@ it('lists the pull requests whose turn is the user\'s under "With me", with the 
         ->toContain('develop');
 });
 
+it('links the ticket the newest review read, and only a web address', function () {
+    deliverTurn()->assertOk();
+    $record = OpenPullRequest::query()->sole();
+    $this->actingAs(User::factory()->create(['is_admin' => true]));
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+    Filament::setTenant($this->repository->tenant);
+    $review = fn (string $commit, array $ticket) => ReviewRun::query()->forceCreate([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'MEDS-5007', 'pull_request_id' => 7, 'commit' => str_repeat($commit, 40), 'status' => ReviewRun::STATUS_FINISHED,
+        'started_at' => now(), 'context' => ['ticket' => $ticket],
+    ]);
+
+    $review('a', ['reference' => 'MEDS-5006', 'url' => 'https://acme.atlassian.net/browse/MEDS-5006']);
+    $this->travel(1)->minute();
+    $review('b', ['reference' => 'MEDS-5007', 'url' => 'https://acme.atlassian.net/browse/MEDS-5007']);
+
+    expect(view('filament.app.pull-request', PullRequestResource::details($record))->render())
+        ->toContain('href="https://acme.atlassian.net/browse/MEDS-5007"')
+        ->not->toContain('MEDS-5006');
+
+    $review('c', ['reference' => 'MEDS-5008', 'url' => 'javascript:alert(1)']);
+
+    expect(view('filament.app.pull-request', PullRequestResource::details($record->refresh()))->render())
+        ->toContain('MEDS-5008')
+        ->not->toContain('javascript:');
+});
+
 it('has the AI say whose turn it is, for the state it was written for', function () {
     config(['review.turn.notes' => true]);
     Connection::factory()->create([
