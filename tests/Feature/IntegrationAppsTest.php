@@ -103,6 +103,17 @@ it('lets an administrator add apps, one of a single type, and keeps a secret lef
     expect(IntegrationApp::query()->where('name', 'Agency Asana')->sole()->tenants->modelKeys())->toBe([$this->tenant->id]);
 });
 
+it('gives the credentials of the type picked a place in the form, for the browser to write them in', function () {
+    $this->actingAs(User::factory()->create(['is_admin' => true]));
+    Filament::setCurrentPanel(Filament::getPanel('admin'));
+
+    // Livewire in the browser cannot write a field into a state that is null, and then sends nothing.
+    livewire(ManageIntegrationApps::class)
+        ->mountAction('create')
+        ->fillForm(['type' => 'bitbucket'])
+        ->assertSet('mountedActions.0.data.credentials', ['client_id' => null, 'client_secret' => null]);
+});
+
 it('lets a tenant add its own app, for itself alone', function () {
     $user = User::factory()->create();
     $user->tenants()->attach($this->tenant, ['role' => 'admin']);
