@@ -21,18 +21,28 @@
         @endif
     </div>
 
-    <section class="rc-attention" aria-labelledby="rc-turn">
-        <div class="rc-attention-head">
-            <span id="rc-turn" class="rc-eyebrow">Whose turn</span>
-            <strong>{{ $turn->who() }}</strong>
-            @if ($mine) <span class="rc-chip rc-chip-primary">You</span> @endif
-        </div>
-        @if ($note !== null)
-            <p>{{ $note['next_step'] }}</p>
-        @else
-            <p><strong>{{ $turn->action }}.</strong> {{ $turn->reason }}</p>
-        @endif
-    </section>
+    @if ($closed !== null)
+        <section class="rc-attention" aria-labelledby="rc-turn">
+            <div class="rc-attention-head">
+                <span id="rc-turn" class="rc-eyebrow">Closed</span>
+                <strong>{{ $closed }}</strong>
+            </div>
+            <p>Nobody's turn any more.</p>
+        </section>
+    @else
+        <section class="rc-attention" aria-labelledby="rc-turn">
+            <div class="rc-attention-head">
+                <span id="rc-turn" class="rc-eyebrow">Whose turn</span>
+                <strong>{{ $turn->who() }}</strong>
+                @if ($mine) <span class="rc-chip rc-chip-primary">You</span> @endif
+            </div>
+            @if ($note !== null)
+                <p>{{ $note['next_step'] }}</p>
+            @else
+                <p><strong>{{ $turn->action }}.</strong> {{ $turn->reason }}</p>
+            @endif
+        </section>
+    @endif
 
     <dl class="rc-details">
         <dt>Author</dt><dd>{{ $record->author ?? 'Someone' }}</dd>

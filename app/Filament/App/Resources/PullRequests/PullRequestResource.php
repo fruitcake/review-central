@@ -179,6 +179,10 @@ class PullRequestResource extends Resource
      */
     public static function turnCell(OpenPullRequest $record): HtmlString
     {
+        if ($record->closed_as !== null) {
+            return new HtmlString('<span class="rc-muted">'.e(self::closedText($record)).'</span>');
+        }
+
         $turn = PullRequestTurn::of($record);
         $note = $turn->note($record);
         $user = auth()->user();
@@ -190,6 +194,14 @@ class PullRequestResource extends Resource
             .'<span class="rc-muted">'.e($note === null ? "{$turn->action}: {$turn->reason}" : Str::limit($note['next_step'], 220)).'</span>'
             .'</div>'
         );
+    }
+
+    /**
+     * How and when a closed pull request was closed: "Merged 3 days ago".
+     */
+    public static function closedText(OpenPullRequest $record): string
+    {
+        return ($record->closed_as === OpenPullRequest::MERGED ? 'Merged' : 'Declined').($record->closed_at === null ? '' : ' '.$record->closed_at->diffForHumans());
     }
 
     /**
@@ -227,7 +239,8 @@ class PullRequestResource extends Resource
             'record' => $record,
             'turn' => $turn,
             'note' => $turn->note($record),
-            'mine' => $user instanceof User && $turn->isFor($user),
+            'mine' => $record->closed_as === null && $user instanceof User && $turn->isFor($user),
+            'closed' => $record->closed_as === null ? null : self::closedText($record),
             'run' => $run,
             'standing' => self::standing($record),
             'history' => $history,

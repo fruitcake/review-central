@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\OpenPullRequest;
 use Illuminate\Support\Facades\Schedule;
 
 Schedule::command('review:sweep-runs')->hourly();
@@ -7,6 +8,8 @@ Schedule::command('review:sync-model-prices')->dailyAt('04:30');
 Schedule::command('review:sync-exchange-rates')->dailyAt('04:35');
 Schedule::command('review:prune-logs')->dailyAt('04:40');
 Schedule::command('review:prune-caches')->dailyAt('04:45');
+// Merged and declined pull requests, once they are long enough closed.
+Schedule::command('model:prune', ['--model' => [OpenPullRequest::class]])->dailyAt('04:50');
 // A sandbox snapshot with the newest release of the reviewers' CLIs, made before any review needs it.
 Schedule::command('review:refresh-sandbox')->hourly();
 // Whose turn the open pull requests are, where a delivery was missed.
