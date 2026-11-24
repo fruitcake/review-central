@@ -40,7 +40,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
  * after one is told apart. tests/Feature/CloudflareWorkerVersionTest.php fails
  * on a change that leaves it as it was.
  */
-const WORKER_VERSION = "2026-11-24.5";
+const WORKER_VERSION = "2026-11-24.6";
 
 interface Env {
   REVIEW_SANDBOX: DurableObjectNamespace<ReviewSandbox>;
@@ -94,6 +94,8 @@ interface RunSpec {
    * the new commit instead of starting and cloning. Only with a clone.
    */
   warm?: { seconds: number } | null;
+  /** What names this attempt, so the caller can stop it again by name, and no newer one. */
+  attempt?: string | null;
 }
 
 /** What the sandbox clones, as review-central's Checkout::forSandbox() says it. */
@@ -153,8 +155,18 @@ if [ -n "$destination" ] && [ "$destination" != "$name" ]; then
   git fetch -q --filter=blob:none --no-tags origin "+refs/heads/$destination:refs/remotes/origin/$destination"
 fi
 git cat-file -e "$commit^{commit}" 2> /dev/null || git fetch -q --filter=blob:none --no-tags origin "$commit"
+# vendor/ of the last review stays only where Composer manages it: the commit
+# has a composer.json, and neither it nor the one before tracks files there.
+keep=""
+if [ -d vendor ] && [ ! -L vendor ] && [ -n "$previous" ] && git cat-file -e "$commit:composer.json" 2> /dev/null \
+  && git cat-file -e "$previous^{commit}" 2> /dev/null \
+  && [ -z "$(git ls-tree -r --name-only "$commit" -- vendor | head -n 1)" ] \
+  && [ -z "$(git ls-tree -r --name-only "$previous" -- vendor | head -n 1)" ]; then
+  keep=1
+fi
+[ -n "$keep" ] || rm -rf vendor
 git checkout -q -f --detach "$commit"
-git clean -q -ffdx -e /vendor
+if [ -n "$keep" ]; then git clean -q -ffdx -e /vendor; else git clean -q -ffdx; fi
 if [ -n "$base" ]; then
   git update-ref "refs/remotes/origin/$destination" "$base"
 fi
@@ -387,10 +399,11 @@ export default {
 
     const sandbox = env.REVIEW_SANDBOX.getByName(run[1]);
 
-    // With ?idle=1, only a sandbox that runs nothing: a warm one is the branch's,
-    // and a newer review of it may be running there by now.
+    // With ?idle=1, only a sandbox that runs nothing, or runs the attempt named
+    // in ?attempt: a warm one is the branch's, and a newer review of it may be
+    // running there by now.
     if (request.method === "DELETE") {
-      return json({ destroyed: url.searchParams.get("idle") === "1" ? await sandbox.cool() : (await sandbox.destroy(), true) });
+      return json({ destroyed: url.searchParams.get("idle") === "1" ? await sandbox.cool(url.searchParams.get("attempt")) : (await sandbox.destroy(), true) });
     }
 
     if (request.method !== "POST") {
@@ -516,6 +529,7 @@ export class ReviewSandbox extends DurableObject<Env> {
     }
 
     this.busy = true;
+    this.attempt = spec.attempt ?? null;
     await this.ctx.storage.deleteAlarm();
 
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
@@ -567,6 +581,7 @@ export class ReviewSandbox extends DurableObject<Env> {
         })
         .finally(async () => {
           this.busy = false;
+          this.attempt = null;
           await writer.close().catch(() => undefined);
         }),
     );
@@ -576,8 +591,10 @@ export class ReviewSandbox extends DurableObject<Env> {
     });
   }
 
-  /** Whether a run is going here. */
+  /** Whether a run is going here, and the attempt it is. */
   private busy = false;
+
+  private attempt: string | null = null;
 
   /**
    * Leaves the sandbox running for the next review, and has it destroyed when
@@ -592,9 +609,9 @@ export class ReviewSandbox extends DurableObject<Env> {
     await this.ctx.storage.setAlarm(Date.now() + seconds * 1000);
   }
 
-  /** Destroys the sandbox unless a run is going in it; says whether it did. */
-  async cool(): Promise<boolean> {
-    if (this.busy) {
+  /** Destroys the sandbox unless a run other than this attempt is going in it; says whether it did. */
+  async cool(attempt: string | null = null): Promise<boolean> {
+    if (this.busy && (attempt === null || attempt !== this.attempt)) {
       return false;
     }
 
@@ -1323,6 +1340,7 @@ function readSpec(body: unknown): RunSpec | string {
     cache: cache === null ? null : { key: cache.key as string, file: cache.file as string },
     clone,
     warm: warmSeconds === null ? null : { seconds: warmSeconds },
+    attempt: typeof spec.attempt === "string" && /^[A-Za-z0-9._-]{1,100}$/.test(spec.attempt) ? spec.attempt : null,
   };
 }
 

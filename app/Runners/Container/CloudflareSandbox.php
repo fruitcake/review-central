@@ -159,7 +159,7 @@ class CloudflareSandbox extends Sandbox
                 'cache' => $vendor,
             ];
 
-            $exit = $this->ask($sandbox, $spec + ($warm === null ? [] : ['warm' => ['seconds' => $warm['seconds']]]), $timeout, $output);
+            $exit = $this->ask($sandbox, $spec + ($warm === null ? [] : ['warm' => ['seconds' => $warm['seconds']], 'attempt' => $run]), $timeout, $output);
 
             // The warm sandbox is busy with another run of the branch, such as a
             // question: this one gets a sandbox of its own, as without warm.
@@ -193,9 +193,9 @@ class CloudflareSandbox extends Sandbox
             // A sandbox whose stream was cut is still running until it is told. One
             // kept warm stays, until the review says it is not wanted (cool()).
             // A warm one is the branch's, which a newer review may be running in by
-            // now: it is only let go while it runs nothing.
+            // now: it is only let go while it runs nothing, or still runs this attempt.
             if (! $this->keptWarm) {
-                rescue(fn () => $this->client(30)->delete("runs/{$sandbox}".($sandbox === $run ? '' : '?idle=1')), null, false);
+                rescue(fn () => $this->client(30)->delete("runs/{$sandbox}".($sandbox === $run ? '' : "?idle=1&attempt={$run}")), null, false);
             }
         }
     }
