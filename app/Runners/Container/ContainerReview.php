@@ -332,12 +332,6 @@ class ContainerReview
                 return false;
             }
 
-            // Stopped after the reviewer was done, while its files came back:
-            // nothing is filed either.
-            if ($this->stops->requested($repository, $build) !== null) {
-                throw new ReviewStopped('The review was stopped after its reviewer finished.');
-            }
-
             if ($resumes && $home !== null) {
                 $this->sessions->resumed($home);
             }
@@ -345,6 +339,12 @@ class ContainerReview
             // For the next review of the branch, or the questions about a trial, on
             // whichever worker runs them. A home of the job's own is not kept.
             $this->sessions->store($repository, $trial === null ? $branch : ReviewSessions::forTrial($branch, $build));
+
+            // Stopped after the reviewer was done, while its files came back or its
+            // session was kept: nothing is filed either. Looked at last, before filing.
+            if ($this->stops->requested($repository, $build) !== null) {
+                throw new ReviewStopped('The review was stopped after its reviewer finished.');
+            }
 
             // Filed here, by the worker: it reads what the reviewer wrote as data and
             // runs nothing of it, so it needs no container either.
