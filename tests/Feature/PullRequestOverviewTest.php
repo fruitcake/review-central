@@ -89,6 +89,8 @@ it('keeps a merged or declined pull request under its tab, open again only for n
     deliverPullRequest(['id' => 8, 'title' => 'Ready one'])->assertOk();
 
     $tab('draft')->assertCanSeeTableRecords([$all()])->assertCanNotSeeTableRecords(OpenPullRequest::query()->where('pull_request_id', 8)->get());
+    // The list opens on the active ones, without the drafts.
+    livewire(ListPullRequests::class)->assertCanSeeTableRecords(OpenPullRequest::query()->where('pull_request_id', 8)->get())->assertCanNotSeeTableRecords([$all()]);
 
     deliverPullRequest(['state' => 'DECLINED', 'updated_on' => '2026-11-19T10:05:00+00:00'])->assertOk();
 

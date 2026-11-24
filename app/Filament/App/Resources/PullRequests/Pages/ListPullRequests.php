@@ -27,11 +27,13 @@ class ListPullRequests extends ListRecords
         $mine = fn (): array => once(fn (): array => PullRequestResource::withUser($user instanceof User ? $user : null));
 
         $views = [
-            'all' => ['All', fn (Builder $query): Builder => $query],
+            // The first is the one the list opens on: drafts are their author's own business.
+            'active' => ['Active', fn (Builder $query): Builder => $query->where('draft', false)],
             // Whose turn is read from the reviewers and the AI review, not a column.
             'mine' => ['With me', fn (Builder $query): Builder => $query->whereKey($mine())],
             'waiting' => ['Waiting for approval', fn (Builder $query): Builder => $query->where('awaiting_approval', true)],
             'draft' => ['Draft', fn (Builder $query): Builder => $query->where('draft', true)],
+            'all' => ['All open', fn (Builder $query): Builder => $query],
             // The closed ones, which the list leaves out otherwise.
             'merged' => ['Merged', fn (Builder $query): Builder => $query->withoutGlobalScope(OpenPullRequest::OPEN)->where('closed_as', OpenPullRequest::MERGED)],
             'declined' => ['Declined', fn (Builder $query): Builder => $query->withoutGlobalScope(OpenPullRequest::OPEN)->where('closed_as', OpenPullRequest::DECLINED)],
