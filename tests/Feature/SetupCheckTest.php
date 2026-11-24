@@ -12,6 +12,7 @@ use App\Services\ReviewInstructions;
 use App\Services\SetupCheck;
 use Filament\Facades\Filament;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Defer\DeferredCallbackCollection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
@@ -208,8 +209,13 @@ it('shows the checks to an administrator, with a count of what is to fix in the 
     Filament::setCurrentPanel(Filament::getPanel('admin'));
     Queue::fake();
 
+    expect(Setup::getNavigationBadge())->toBeNull();
+
     livewire(Setup::class)
         ->assertOk()
+        ->assertSee('Checking the setup')
+        ->assertDontSee('This server')
+        ->call('check')
         ->assertSee('This server')
         ->assertSee('The scheduler runs')
         ->assertSee('php artisan schedule:run')
@@ -217,6 +223,7 @@ it('shows the checks to an administrator, with a count of what is to fix in the 
 
     Queue::assertPushed(CheckWorker::class);
 
+    // The page's own count, without running the checks again.
     expect(Setup::getNavigationBadge())->not->toBeNull();
 
     $this->actingAs(User::factory()->create());
@@ -281,4 +288,41 @@ it('says when this release has newer review instructions than are kept here', fu
 
     expect(($this->find)('newer review instructions'))->toMatchArray(['state' => SetupCheck::NOTE])
         ->and(($this->find)('newer review instructions')['fix'])->toContain('Update from this release');
+});
+
+it('counts for the badge after the response, not in the page\'s own request', function () {
+    expect(Setup::getNavigationBadge())->toBeNull()
+        ->and(Cache::get(Setup::WRONG_CACHE))->toBeNull();
+
+    app(DeferredCallbackCollection::class)->invoke();
+
+    $wrong = app(SetupCheck::class)->wrong();
+
+    expect($wrong)->toBeGreaterThan(0)
+        ->and(Cache::get(Setup::WRONG_CACHE)['count'])->toBe($wrong)
+        ->and(Setup::getNavigationBadge())->toBe((string) $wrong);
+});
+
+it('hides the badge when the cache cannot be reached, instead of failing the page', function () {
+    Cache::shouldReceive('get')->andThrow(new RuntimeException('Connection refused'));
+
+    expect(Setup::getNavigationBadge())->toBeNull();
+});
+
+it('checks the bucket with an object of its own each time, so two checks at once do not trip each other', function () {
+    $keys = [];
+    Storage::shouldReceive('disk')->with('r2')->andReturnSelf()->getMock()
+        ->shouldReceive('put')->andReturnUsing(function (string $key, string $contents) use (&$keys): bool {
+            $keys[] = $key;
+            Cache::put("written:{$key}", $contents);
+
+            return true;
+        })->getMock()
+        ->shouldReceive('get')->andReturnUsing(fn (string $key): ?string => Cache::get("written:{$key}"))->getMock()
+        ->shouldReceive('delete')->andReturnTrue();
+
+    expect(app(SetupCheck::class)->cloudflareBucket('r2', 'review-central')['state'])->toBe(SetupCheck::OK)
+        ->and(app(SetupCheck::class)->cloudflareBucket('r2', 'review-central')['state'])->toBe(SetupCheck::OK)
+        ->and($keys)->toHaveCount(2)
+        ->and($keys[0])->not->toBe($keys[1]);
 });

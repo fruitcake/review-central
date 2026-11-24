@@ -33,12 +33,38 @@ class Setup extends Page
 
     protected string $view = 'filament.admin.setup';
 
+    /** The count of checks that are not right, with when it was made: see the badge. */
+    public const WRONG_CACHE = 'setup-check:wrong';
+
+    /** Whether the checks have been run since the page loaded. */
+    public bool $checked = false;
+
+    /**
+     * The count of the last time the checks ran. The menu is on every page and the
+     * checks ask the Worker and the bucket, so they never run in the page's own
+     * request: a count older than a minute, or none, is made again after the
+     * response has gone out, and the badge shows the old one until then.
+     */
     public static function getNavigationBadge(): ?string
     {
-        // Kept for a minute: the menu is on every page, and one of the checks asks another server.
-        $wrong = rescue(fn (): int => (int) Cache::remember('setup-check:wrong', 60, fn (): int => app(SetupCheck::class)->wrong()), 0, false);
+        // The menu is on every admin page: a cache that cannot be reached hides the badge, no more.
+        return rescue(function (): ?string {
+            $counted = Cache::get(self::WRONG_CACHE);
 
-        return $wrong === 0 ? null : (string) $wrong;
+            if ((! is_array($counted) || $counted['at'] < now()->subMinute()->getTimestamp()) && Cache::add(self::WRONG_CACHE.':counting', true, 60)) {
+                defer(fn () => rescue(function (): void {
+                    try {
+                        self::remember(app(SetupCheck::class)->groups());
+                    } finally {
+                        Cache::forget(self::WRONG_CACHE.':counting');
+                    }
+                }, report: false));
+            }
+
+            $wrong = is_array($counted) ? (int) $counted['count'] : 0;
+
+            return $wrong === 0 ? null : (string) $wrong;
+        }, null, false);
     }
 
     public static function getNavigationBadgeColor(): string
@@ -104,10 +130,34 @@ class Setup extends Page
     }
 
     /**
+     * Runs the checks once the page is there, instead of before it is sent.
+     */
+    public function check(): void
+    {
+        $this->checked = true;
+    }
+
+    /**
+     * @param  array<int, array{title: string, checks: array<int, array{state: string}>}>  $groups
+     */
+    protected static function remember(array $groups): void
+    {
+        Cache::put(self::WRONG_CACHE, ['count' => app(SetupCheck::class)->wrong($groups), 'at' => now()->getTimestamp()], now()->addDay());
+    }
+
+    /**
      * @return array<string, mixed>
      */
     protected function getViewData(): array
     {
-        return ['groups' => app(SetupCheck::class)->groups()];
+        if (! $this->checked) {
+            return ['groups' => null];
+        }
+
+        $groups = app(SetupCheck::class)->groups();
+        // What this page found is what the badge says from now on.
+        self::remember($groups);
+
+        return ['groups' => $groups];
     }
 }
