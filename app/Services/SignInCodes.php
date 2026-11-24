@@ -81,6 +81,7 @@ class SignInCodes
     protected function addressFor(string $provider, array $emails): string
     {
         $linked = null;
+        $known = [];
 
         foreach ($emails as $email) {
             $user = User::query()->whereRaw('lower(email) = ?', [$email])->first();
@@ -88,6 +89,8 @@ class SignInCodes
             if ($user === null) {
                 continue;
             }
+
+            $known[] = $email;
 
             // Its account has another one there: that one signs it in, not this.
             if ($user->identities()->where('provider', $provider)->exists()) {
@@ -99,7 +102,8 @@ class SignInCodes
             return $email;
         }
 
-        foreach ($emails as $email) {
+        // A new account only for an address that has none here yet.
+        foreach (array_diff($emails, $known) as $email) {
             if ($this->signOn->tenantsForDomain(Str::after($email, '@'))->isNotEmpty()) {
                 return $email;
             }

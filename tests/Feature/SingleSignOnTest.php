@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\SignInRefused;
 use App\Http\Controllers\PersonalConnectionController;
 use App\Models\Tenant;
 use App\Models\User;
@@ -407,4 +408,18 @@ it('signs in with any confirmed address of the account, not only its primary one
 
     $signIn()->assertRedirect('/app/login')->assertSessionHas('sign_in_refused');
     Notification::assertNothingSent();
+});
+
+it('passes over an address whose account has another one linked, for the next address a tenant lets in', function () {
+    Notification::fake();
+    Tenant::factory()->create(['sign_in_domains' => ['work.test']]);
+    $linked = User::factory()->create(['email' => 'a@work.test']);
+    UserIdentity::query()->create(['user_id' => $linked->id, 'provider' => 'bitbucket', 'provider_id' => '{other-uuid}']);
+    $account = (new BitbucketUser)->setRaw(['uuid' => '{nora-uuid}'])->map(['id' => '{nora-uuid}', 'nickname' => 'nora-b', 'name' => 'Nora New']);
+
+    expect(app(SignInCodes::class)->start(session()->driver(), 'bitbucket', $account, ['a@work.test', 'b@work.test']))->toBe('b@work.test');
+
+    // With no other address, it says why.
+    expect(fn () => app(SignInCodes::class)->start(session()->driver(), 'bitbucket', $account, ['a@work.test']))
+        ->toThrow(SignInRefused::class, 'The account for a@work.test is already linked to another account there.');
 });
