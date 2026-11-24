@@ -6,10 +6,14 @@ namespace App\Runners\Container;
 
 use App\Models\Repository;
 use App\Models\ReviewRun;
+use FilesystemIterator;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
+use RecursiveDirectoryIterator;
+use RecursiveIteratorIterator;
+use SplFileInfo;
 
 /**
  * The reviewer's home, kept on the worker per repository and branch, so what it
@@ -73,6 +77,8 @@ class ReviewSessions
 
         File::ensureDirectoryExists($directory, 0700);
         $this->fetch($repository, $branch, $directory);
+        // Also a home kept from before links were removed after each step.
+        self::removeLinks($directory);
         // Its last use, which is what pruning goes by.
         touch($directory);
 
@@ -88,7 +94,7 @@ class ReviewSessions
         $directory = $this->directory($repository, $branch);
         $disk = $this->disk();
 
-        if ($disk === null || $directory === null || ! is_file("{$directory}/".self::SESSION)) {
+        if ($disk === null || $directory === null || ! is_file("{$directory}/".self::SESSION) || is_link("{$directory}/".self::SESSION)) {
             return;
         }
 
@@ -156,6 +162,26 @@ class ReviewSessions
     }
 
     /**
+     * Removes the links from a home the reviewer had mounted. The pull request's
+     * code ran there and can leave links to anywhere on the worker, which the
+     * worker would follow when it next reads or writes the home.
+     *
+     * Not those inside the caches: the CLIs installed there are reached through
+     * links, and the worker never reads or writes in them; tar leaves them out and
+     * removing a home does not follow a link.
+     */
+    public static function removeLinks(string $home): void
+    {
+        if (! is_dir($home) || is_link($home)) {
+            return;
+        }
+
+        $caches = collect(self::CACHES)->flatMap(fn (string $cache): array => ['-not', '-path', "{$home}/{$cache}/*"])->all();
+
+        Process::timeout(120)->run(['find', $home, '-type', 'l', ...$caches, '-delete']);
+    }
+
+    /**
      * tar's arguments that leave the caches out of an archive of a home made from
      * inside it (`-C <home> .`).
      *
@@ -205,7 +231,15 @@ class ReviewSessions
      */
     public function resumed(string $home): void
     {
-        File::put("{$home}/".self::RESUMES, (string) ($this->count($home) + 1));
+        $count = $this->count($home) + 1;
+        $path = "{$home}/".self::RESUMES;
+
+        // Written in place of a link, never through it.
+        if (is_link($path)) {
+            unlink($path);
+        }
+
+        File::put($path, (string) $count);
     }
 
     /**
@@ -231,10 +265,37 @@ class ReviewSessions
         File::copy("{$home}/".self::SESSION, "{$to}/".self::SESSION);
 
         if (is_dir("{$home}/.claude") && ! is_link("{$home}/.claude")) {
-            File::copyDirectory("{$home}/.claude", "{$to}/.claude");
+            $this->copyWithoutLinks("{$home}/.claude", "{$to}/.claude");
         }
 
         return $to;
+    }
+
+    /**
+     * Copies a directory of the home and leaves out every link in it, where
+     * File::copyDirectory() would copy what a link points to.
+     */
+    protected function copyWithoutLinks(string $from, string $to): void
+    {
+        File::ensureDirectoryExists($to, 0700);
+
+        // A linked directory is not descended into: hasChildren() follows no links.
+        $items = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($from, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST);
+
+        foreach ($items as $item) {
+            /** @var SplFileInfo $item */
+            if ($item->isLink()) {
+                continue;
+            }
+
+            $target = $to.substr($item->getPathname(), strlen($from));
+
+            if ($item->isDir()) {
+                File::ensureDirectoryExists($target, 0700);
+            } elseif ($item->isFile()) {
+                File::copy($item->getPathname(), $target);
+            }
+        }
     }
 
     /**
@@ -322,7 +383,7 @@ class ReviewSessions
     {
         File::delete(["{$home}/".self::SESSION, "{$home}/".self::RESUMES]);
 
-        if (is_dir("{$home}/.claude/projects") && ! is_link("{$home}/.claude/projects")) {
+        if (is_dir("{$home}/.claude/projects") && ! is_link("{$home}/.claude") && ! is_link("{$home}/.claude/projects")) {
             File::deleteDirectory("{$home}/.claude/projects");
         }
     }

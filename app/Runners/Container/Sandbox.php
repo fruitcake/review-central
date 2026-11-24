@@ -141,6 +141,12 @@ class Sandbox
             // A step that timed out leaves its container running; one that ended is
             // already gone, and this says so without failing.
             Process::timeout(30)->run([$config['docker'], 'rm', '--force', $name]);
+
+            // The step ran the pull request's code with the home mounted, and the
+            // worker reads and writes the home after it.
+            if ($home !== null) {
+                ReviewSessions::removeLinks($home);
+            }
         }
     }
 
