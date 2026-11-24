@@ -157,6 +157,8 @@ class PullRequestResource extends Resource
                     ->modalDescription(fn (OpenPullRequest $record): string => $record->repository->slug.' #'.$record->pull_request_id)
                     ->modalContent(fn (OpenPullRequest $record): View => view('filament.app.pull-request', self::details($record)))
                     ->extraModalFooterActions(fn (OpenPullRequest $record): array => [
+                        // Started from the details as from the row, for the pull request they are of.
+                        self::startAction($record),
                         Action::make('readTicket')
                             // Read from its source here, before any review did, or again since.
                             ->label(fn (): string => (self::ticketOf($record)['url'] ?? null) === null ? 'Read the ticket' : 'Refresh the ticket')
@@ -177,28 +179,7 @@ class PullRequestResource extends Resource
                     ])
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Close'),
-                Action::make('start')
-                    ->label(fn (OpenPullRequest $record): string => $record->awaiting_approval ? 'Approve and review' : 'Review')
-                    ->icon(Heroicon::OutlinedPlay)
-                    ->color(fn (OpenPullRequest $record): string => $record->awaiting_approval ? 'primary' : 'gray')
-                    // Not a closed one, whose branch may be another pull request's by now; nor a fork's
-                    // whose branch its host keeps nowhere here, as on Bitbucket: it can only be tried from the diff.
-                    // Checked again when it is pressed, as Filament runs no hidden action.
-                    ->visible(fn (OpenPullRequest $record): bool => $record->closed_as === null && $record->branch !== null && ReviewRequest::reviewable(['from_fork' => $record->from_fork, 'source' => ['branch' => ['name' => $record->branch]]]))
-                    ->requiresConfirmation()
-                    ->modalHeading(fn (OpenPullRequest $record): string => "Review #{$record->pull_request_id}?")
-                    ->modalDescription(fn (OpenPullRequest $record): string => ($record->from_fork || ! $record->repository->tenant->trusts($record->author_id, $record->author_nickname)
-                        ? 'Its code is not from an account this team trusts: the reviewer reads it in the sandbox, with this team\'s AI key and on its budget. '
-                        : '').'The review is posted on the pull request, and costs what a review costs.')
-                    ->action(function (OpenPullRequest $record, ReviewRequest $reviews): void {
-                        try {
-                            $reviews->start($record->repository, $record->branch, strict: true);
-
-                            Notification::make()->title('The review is started')->body("{$record->repository->slug} #{$record->pull_request_id}. It is under Reviews as queued until a worker begins it.")->success()->send();
-                        } catch (Throwable $exception) {
-                            Notification::make()->title('The review could not be started')->body($exception->getMessage())->danger()->send();
-                        }
-                    }),
+                self::startAction(),
                 Action::make('pullRequest')
                     ->label('Open on the pull request')
                     ->tooltip('Open on the pull request')
@@ -293,6 +274,47 @@ class PullRequestResource extends Resource
             ),
             'url' => rescue(fn (): string => $record->repository->sourceControl()->pullRequestUrl($record->pull_request_id), null, false),
         ];
+    }
+
+    /**
+     * Starts the review of a pull request, from its row or, for $for, from its details.
+     */
+    private static function startAction(?OpenPullRequest $for = null): Action
+    {
+        $pullRequest = fn (?OpenPullRequest $record): OpenPullRequest => $for ?? $record ?? throw new \LogicException('No pull request to review.');
+
+        return Action::make($for === null ? 'start' : 'startFromDetails')
+            ->label(fn (?OpenPullRequest $record): string => $pullRequest($record)->awaiting_approval ? 'Approve and review' : 'Review')
+            ->icon(Heroicon::OutlinedPlay)
+            ->color(fn (?OpenPullRequest $record): string => $pullRequest($record)->awaiting_approval ? 'primary' : 'gray')
+            // Not a closed one, whose branch may be another pull request's by now; nor a fork's
+            // whose branch its host keeps nowhere here, as on Bitbucket: it can only be tried from the diff.
+            // Checked again when it is pressed, as Filament runs no hidden action.
+            ->visible(function (?OpenPullRequest $record) use ($pullRequest): bool {
+                $record = $pullRequest($record);
+
+                return $record->closed_as === null && $record->branch !== null && ReviewRequest::reviewable(['from_fork' => $record->from_fork, 'source' => ['branch' => ['name' => $record->branch]]]);
+            })
+            ->requiresConfirmation()
+            ->modalHeading(fn (?OpenPullRequest $record): string => "Review #{$pullRequest($record)->pull_request_id}?")
+            ->modalDescription(function (?OpenPullRequest $record) use ($pullRequest): string {
+                $record = $pullRequest($record);
+
+                return ($record->from_fork || ! $record->repository->tenant->trusts($record->author_id, $record->author_nickname)
+                    ? 'Its code is not from an account this team trusts: the reviewer reads it in the sandbox, with this team\'s AI key and on its budget. '
+                    : '').'The review is posted on the pull request, and costs what a review costs.';
+            })
+            ->action(function (?OpenPullRequest $record, ReviewRequest $reviews) use ($pullRequest): void {
+                $record = $pullRequest($record);
+
+                try {
+                    $reviews->start($record->repository, $record->branch, strict: true);
+
+                    Notification::make()->title('The review is started')->body("{$record->repository->slug} #{$record->pull_request_id}. It is under Reviews as queued until a worker begins it.")->success()->send();
+                } catch (Throwable $exception) {
+                    Notification::make()->title('The review could not be started')->body($exception->getMessage())->danger()->send();
+                }
+            });
     }
 
     /**

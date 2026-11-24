@@ -86,10 +86,10 @@
     @endif
 
     @if (filled($ticket['markdown'] ?? null))
-        {{-- As text: it is what someone wrote in the tracker. --}}
         <details class="rc-turn-history">
             <summary><strong>Ticket {{ $ticket['reference'] }}</strong>@if (filled($ticket['read_at'] ?? null)) <span class="rc-muted">read {{ LocalTime::of(\Illuminate\Support\Carbon::parse($ticket['read_at']))->format('j M H:i') }}</span>@endif</summary>
-            <p style="white-space: pre-wrap">{{ \Illuminate\Support\Str::limit($ticket['markdown'], 6000) }}</p>
+            {{-- Someone wrote it in the tracker: its markdown, without HTML of its own or links that are not web addresses. --}}
+            <div class="rc-prose rc-ticket-text">{!! \Illuminate\Support\Str::markdown(\Illuminate\Support\Str::limit($ticket['markdown'], 6000), ['html_input' => 'strip', 'allow_unsafe_links' => false]) !!}</div>
         </details>
     @endif
 
