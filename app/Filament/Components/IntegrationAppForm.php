@@ -26,6 +26,7 @@ class IntegrationAppForm
     /** The guide for each type of app. */
     public const GUIDES = [
         'google' => SetupGuides::GOOGLE,
+        'bitbucket' => SetupGuides::BITBUCKET,
         'asana' => SetupGuides::ASANA,
         'atlassian' => SetupGuides::ATLASSIAN,
         'github_app' => SetupGuides::GITHUB_APP,
