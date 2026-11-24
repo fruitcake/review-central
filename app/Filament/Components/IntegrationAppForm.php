@@ -44,7 +44,11 @@ class IntegrationAppForm
                 ->required()
                 ->live()
                 ->disabledOn('edit')
-                ->afterStateUpdated(fn (Set $set, ?string $state) => $set('name', $state === null ? null : Integrations::TYPES[$state]['service']))
+                ->afterStateUpdated(function (Set $set, ?string $state): void {
+                    $set('name', $state === null ? null : Integrations::TYPES[$state]['service']);
+                    // The fields appear only now: without a key each in the state, the browser has nowhere to write them and sends nothing.
+                    $set('credentials', array_fill_keys(array_keys(Integrations::TYPES[$state]['fields'] ?? []), null));
+                })
                 ->hintAction(SetupGuideAction::make(fn (Get $get, SetupGuides $guides) => isset(self::GUIDES[$get('type')]) ? $guides->named(self::GUIDES[$get('type')]) : null, 'appGuide')),
             TextInput::make('name')
                 ->required()
