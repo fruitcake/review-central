@@ -56,8 +56,8 @@ reviewer_env_report() {
 # reads them as the project's: a hook in .claude/settings.json runs a command as
 # the reviewer, and an env entry such as ANTHROPIC_BASE_URL sends the key to
 # whoever it names. Codex reads .codex/config.toml, and Pi loads .pi/ with its
-# extensions, the same way. The skills, agents and CLAUDE.md stay: those are text
-# the reviewer reads, not settings it runs.
+# extensions, the same way. CLAUDE.md stays: it is text the reviewer reads. The
+# skills, agents and commands go to reviewer_hide_claude_skills, for Claude.
 #
 # Run after the vendor cache is unpacked, so a file an archive brought goes too.
 # Marked skip-worktree where the repository tracks it, so the removal is no change
@@ -70,6 +70,70 @@ reviewer_drop_project_settings() {
       echo "Left out the pull request's $path: the reviewer runs with the review's own settings."
     fi
   done
+}
+
+# The pull request's skills, agents and commands, out of where Claude Code
+# loads them: each .claude/skills, .claude/agents and .claude/commands is renamed
+# where it is, to skills.as-text and so on, where the reviewer reads it as text. A
+# skill Claude loads is more than text: its frontmatter can let a command run
+# without asking (`allowed-tools`), set how an agent asks, or start hooks and MCP
+# servers, and YAML has more ways to write that than a filter can follow. Claude
+# finds them under every .claude/ in the checkout, also one nested in a package,
+# and through a .claude that is a link, which is renamed to .claude.as-text. A
+# rename in the same folder keeps every relative link in it pointing where it
+# did, and moves a link as a link, never through it; find hands over each path
+# whole, whatever its name holds. Whatever already has a new name is removed
+# first, so it is not moved into.
+#
+# Then those in the reviewer's own home go, which the pull request's code may
+# have written in an earlier step: the review puts none there. When one is left
+# where Claude loads it, this fails, and the caller stops before Claude starts.
+#
+# For Claude only: Codex and Pi read skills as text already, and Codex reaches the
+# repository's through links prepare-review.sh made to .claude/skills/.
+reviewer_claude_skill_paths() {
+  find . -path ./.git -prune -o \
+    \( -path '*/.claude/skills' -o -path '*/.claude/agents' -o -path '*/.claude/commands' -o \( -name .claude -type l \) \) -prune -print 2> /dev/null
+}
+
+reviewer_hide_claude_skills() {
+  moved=$(
+    find . -path ./.git -prune -o \
+      \( -path '*/.claude/skills' -o -path '*/.claude/agents' -o -path '*/.claude/commands' -o \( -name .claude -type l \) \) -prune \
+      -exec sh -c '
+        for path do
+          git ls-files -z -- "$path" "$path.as-text" 2> /dev/null | xargs -0 -r git update-index --skip-worktree -- 2> /dev/null || true
+          rm -rf -- "$path.as-text" && mv -- "$path" "$path.as-text" && echo moved || exit 1
+        done
+      ' sh {} + 2> /dev/null
+  ) || true
+  moved=$(printf '%s' "$moved" | grep -c moved || true)
+  # Not new files to git: the renamed ones are the same, kept out of `git status`.
+  EXCLUDE=$(git rev-parse --git-path info/exclude 2> /dev/null) && mkdir -p "$(dirname "$EXCLUDE")" \
+    && for pattern in '**/.claude/skills.as-text/' '**/.claude/agents.as-text/' '**/.claude/commands.as-text/' '**/.claude.as-text'; do
+         grep -qxF "$pattern" "$EXCLUDE" 2> /dev/null || echo "$pattern" >> "$EXCLUDE"
+       done
+
+  for home in "${CLAUDE_CONFIG_DIR:-}" "$HOME/.claude"; do
+    [ -n "$home" ] || continue
+    for path in "$home/skills" "$home/agents" "$home/commands"; do
+      if [ -e "$path" ] || [ -L "$path" ]; then
+        rm -rf -- "$path" && echo "Removed $path: the review brings no skills of its own there, so these came from a pull request's code."
+      fi
+    done
+  done
+
+  if [ -n "$(reviewer_claude_skill_paths | head -n 1)" ]; then
+    echo "The pull request's Claude skills, agents or commands could not all be moved out of where Claude loads them; not reviewing with them in place."
+    return 1
+  fi
+  for home in "${CLAUDE_CONFIG_DIR:-}" "$HOME/.claude"; do
+    if [ -n "$home" ] && { [ -e "$home/skills" ] || [ -e "$home/agents" ] || [ -e "$home/commands" ]; }; then
+      echo "The skills, agents or commands in $home could not be removed; not reviewing with them in place."
+      return 1
+    fi
+  done
+  [ "$moved" -eq 0 ] || echo "Renamed the pull request's Claude skills, agents and commands ($moved folders) to skills.as-text, agents.as-text and commands.as-text: the reviewer reads them there, as text."
 }
 
 # The parts of the review the team turned off (REVIEW_OCR, REVIEW_FLOOR_GUARD,

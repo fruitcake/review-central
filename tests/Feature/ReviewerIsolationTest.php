@@ -110,3 +110,70 @@ it('tells every reviewer which parts the team turned off, over whatever its inst
         expect((string) file_get_contents(SKILL."/{$script}"))->toContain('reviewer_module_notes');
     }
 });
+
+it('renames every Claude skill, agent and command of the pull request to where it is read as text, links and nested ones included', function () {
+    $dir = storage_path('framework/testing/isolation');
+    $home = "{$dir}-home";
+    File::ensureDirectoryExists("{$dir}/.claude/skills/audit");
+    File::ensureDirectoryExists("{$dir}/.claude/agents");
+    File::ensureDirectoryExists("{$dir}/packages/api/.claude/skills/nested");
+    File::ensureDirectoryExists("{$dir}/packages/web");
+    File::ensureDirectoryExists("{$dir}/docs/claude/skills/via-link");
+    File::ensureDirectoryExists("{$dir}/.review/skill");
+    File::ensureDirectoryExists("{$home}/.claude/skills/planted");
+    File::put("{$dir}/.claude/skills/audit/SKILL.md", "\u{FEFF}---\r\nallowed-tools: Bash(node *)\r\n---\r\nRun it.\r\n");
+    File::put("{$dir}/.claude/agents/helper.md", "---\nname: helper\npermissionMode: bypassPermissions\n---\n");
+    File::put("{$dir}/packages/api/.claude/skills/nested/SKILL.md", "---\nallowed-tools: Bash\n---\n");
+    File::put("{$dir}/docs/audit.md", "---\nallowed-tools: Bash\n---\nThe linked skill.\n");
+    File::put("{$dir}/docs/claude/skills/via-link/SKILL.md", "---\nallowed-tools: Bash\n---\n");
+    File::put("{$dir}/.claude/CLAUDE.md", 'Stays.');
+    File::put("{$home}/.claude/skills/planted/SKILL.md", "---\nallowed-tools: Bash\n---\n");
+    // A skill that is a link to a file elsewhere, and a package whose .claude is a link.
+    File::ensureDirectoryExists("{$dir}/.claude/skills/linked");
+    symlink('../../../docs/audit.md', "{$dir}/.claude/skills/linked/SKILL.md");
+    symlink('../../docs/claude', "{$dir}/packages/web/.claude");
+    // A name with a newline in it that names the trusted script, and one already taken, as a link.
+    File::put("{$dir}/.review/skill/write-report.sh", "echo report\n");
+    File::ensureDirectoryExists("{$dir}/x\n.review/skill/write-report.sh\ny/.claude/skills/odd");
+    File::put("{$dir}/x\n.review/skill/write-report.sh\ny/.claude/skills/odd/SKILL.md", 'Odd.');
+    symlink('../.review/skill', "{$dir}/packages/api/.claude/skills.as-text");
+
+    $git = fn (string ...$args) => Process::path($dir)->run(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...$args])->throw();
+    $git('init', '-q');
+    $git('add', '.');
+    $git('commit', '-qm', 'The pull request');
+
+    $result = Process::path($dir)->env(['HOME' => $home, 'CLAUDE_CONFIG_DIR' => ''])->run(['sh', '-c', '. "$0" && reviewer_hide_claude_skills', realpath(SKILL.'/reviewer-env.sh')])->throw();
+
+    expect(File::exists("{$dir}/.claude/skills"))->toBeFalse()
+        ->and(File::exists("{$dir}/.claude/agents"))->toBeFalse()
+        ->and(File::exists("{$dir}/packages/api/.claude/skills"))->toBeFalse()
+        ->and(file_exists("{$dir}/packages/web/.claude") || is_link("{$dir}/packages/web/.claude"))->toBeFalse()
+        ->and(File::get("{$dir}/.claude/skills.as-text/audit/SKILL.md"))->toContain('Run it.')
+        ->and(File::get("{$dir}/.claude/skills.as-text/linked/SKILL.md"))->toContain('The linked skill.')
+        ->and(File::exists("{$dir}/packages/api/.claude/skills.as-text/nested/SKILL.md"))->toBeTrue()
+        ->and(File::get("{$dir}/x\n.review/skill/write-report.sh\ny/.claude/skills.as-text/odd/SKILL.md"))->toBe('Odd.')
+        ->and(File::get("{$dir}/.review/skill/write-report.sh"))->toBe("echo report\n")
+        ->and(File::get("{$dir}/.claude/CLAUDE.md"))->toBe('Stays.')
+        ->and(File::exists("{$home}/.claude/skills"))->toBeFalse()
+        ->and($result->output())->toContain('(5 folders) to skills.as-text')
+        // Not a change the review would read as the pull request's.
+        ->and(trim($git('status', '--porcelain')->output()))->toBe('');
+
+    File::deleteDirectory($home);
+});
+
+it('stops before Claude when a skill cannot be moved out of its way', function () {
+    $dir = storage_path('framework/testing/isolation');
+    File::ensureDirectoryExists("{$dir}/locked/.claude/skills/audit");
+    File::put("{$dir}/locked/.claude/skills/audit/SKILL.md", "---\nallowed-tools: Bash\n---\n");
+    chmod("{$dir}/locked/.claude", 0555);
+
+    $result = Process::path($dir)->env(['HOME' => "{$dir}/home"])->run(['sh', '-c', '. "$0" && reviewer_hide_claude_skills', realpath(SKILL.'/reviewer-env.sh')]);
+
+    chmod("{$dir}/locked/.claude", 0755);
+
+    expect($result->failed())->toBeTrue()
+        ->and($result->output())->toContain('could not all be moved')
+        ->and(File::exists("{$dir}/locked/.claude/skills/audit/SKILL.md"))->toBeTrue();
+});
