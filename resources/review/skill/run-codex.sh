@@ -65,7 +65,8 @@ else
   # npm cannot be asked.
   export PATH="$HOME/.tools/node_modules/.bin:$PATH"
   CODEX_INSTALLED=$(codex --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-  CODEX_LATEST=$(npm view @openai/codex version 2>/dev/null) || CODEX_LATEST=""
+  # A Cloudflare sandbox is told the version its snapshot was made with.
+  CODEX_LATEST=${REVIEW_CODEX_VERSION:-$(npm view @openai/codex version 2>/dev/null)} || CODEX_LATEST=""
   if [ -n "$CODEX_LATEST" ] && [ "$CODEX_INSTALLED" != "$CODEX_LATEST" ]; then
     npm install --prefix "$HOME/.tools" "@openai/codex@${CODEX_LATEST}" \
       || echo "Could not update Codex; reviewing with the cached ${CODEX_INSTALLED:-copy, if there is one}."

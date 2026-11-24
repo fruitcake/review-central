@@ -143,7 +143,7 @@ class CloudflareSandbox extends Sandbox
                 // no checkout at all.
                 'script' => 'mkdir -p "$HOME" && '.($clone === null ? '' : self::CLONED.' && ').$script,
                 'clone' => $clone,
-                'env' => $keys['environment'] + ($vendor === null ? [] : ['COMPOSER_CACHE_DIR' => self::COMPOSER_CACHE, 'REVIEW_VENDOR_BASE' => $vendor['file']]),
+                'env' => $keys['environment'] + ($vendor === null ? [] : ['COMPOSER_CACHE_DIR' => self::COMPOSER_CACHE, 'REVIEW_VENDOR_BASE' => $vendor['file']]) + self::cliVersions($setup),
                 'credentials' => $keys['credentials'],
                 'keep' => self::KEEP,
                 'timeout' => $timeout,
@@ -242,6 +242,32 @@ class CloudflareSandbox extends Sandbox
         $pinned = app(PlatformSettings::class)->get(PlatformSettings::CLOUDFLARE_CLIS);
 
         return is_array($pinned) ? array_filter($pinned, 'is_string') : [];
+    }
+
+    /**
+     * The CLI versions the sandbox's setup installed, for the review scripts to take
+     * as the current ones instead of asking npm each review: a newer release comes
+     * with the next snapshot (review:refresh-sandbox), not by an install per review.
+     *
+     * @return array<string, string>
+     */
+    protected static function cliVersions(?string $setup): array
+    {
+        if ($setup === null) {
+            return [];
+        }
+
+        $pinned = self::pinnedClis();
+        $variables = ['@anthropic-ai/claude-code' => 'REVIEW_CLAUDE_VERSION', '@openai/codex' => 'REVIEW_CODEX_VERSION'];
+        $versions = [];
+
+        foreach ($variables as $package => $variable) {
+            if (isset($pinned[$package]) && preg_match('/^[0-9A-Za-z.+-]+$/', $pinned[$package]) === 1) {
+                $versions[$variable] = $pinned[$package];
+            }
+        }
+
+        return $versions;
     }
 
     /**
