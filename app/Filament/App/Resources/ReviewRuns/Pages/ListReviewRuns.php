@@ -204,9 +204,10 @@ class ListReviewRuns extends ListRecords
                     $repository = CurrentTenant::get()->repositories()->whereKey($data['repository_id'])->firstOrFail();
 
                     try {
-                        $reviews->start($repository, $data['branch'], strict: true);
-
-                        Notification::make()->title('The review is started')->body("{$repository->slug} · {$data['branch']}. It is in the list as queued until a worker begins it.")->success()->send();
+                        ReviewRunResource::started(
+                            $reviews->start($repository, $data['branch'], strict: true),
+                            "{$repository->slug} · {$data['branch']}. It is in the list as queued until a worker begins it.",
+                        );
                     } catch (Throwable $exception) {
                         Notification::make()->title('The review could not be started')->body($exception->getMessage())->danger()->send();
                     }

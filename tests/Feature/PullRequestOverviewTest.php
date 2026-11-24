@@ -4,6 +4,7 @@ use App\Enums\ReviewsFrom;
 use App\Filament\App\Resources\PullRequests\Pages\ListPullRequests;
 use App\Filament\App\Resources\PullRequests\PullRequestResource;
 use App\Filament\App\Resources\Repositories\Pages\ManageRepositories;
+use App\Filament\App\Resources\ReviewRuns\ReviewRunResource;
 use App\Jobs\AnswerReviewQuestion;
 use App\Jobs\RunContainerReview;
 use App\Models\Connection;
@@ -192,6 +193,20 @@ it('starts the review from a pull request\'s details as well', function () {
         ->assertNotified('The review is started');
 
     Queue::assertPushed(RunContainerReview::class, fn (RunContainerReview $job): bool => $job->branch === 'feature/export');
+
+    // Queued, as the runner records it once it finds the pull request: the details
+    // open that review instead of starting another.
+    $run = ReviewRun::query()->forceCreate([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => $this->repository->workspace, 'slug' => $this->repository->slug,
+        'branch' => 'feature/export', 'pull_request_id' => $record->pull_request_id, 'commit' => str_repeat('a', 40), 'status' => ReviewRun::STATUS_QUEUED, 'started_at' => now(),
+    ]);
+
+    livewire(ListPullRequests::class)
+        ->assertActionHidden([TestAction::make('details')->table($record), TestAction::make('startFromDetails')])
+        ->assertActionVisible([TestAction::make('details')->table($record), TestAction::make('openReviewFromDetails')])
+        ->assertActionHasUrl([TestAction::make('details')->table($record), TestAction::make('openReviewFromDetails')], ReviewRunResource::getUrl('view', ['record' => $run]))
+        ->assertTableActionHidden('start', $record)
+        ->assertTableActionVisible('openReview', $record);
 });
 
 it('lists only the open tenant\'s pull requests', function () {

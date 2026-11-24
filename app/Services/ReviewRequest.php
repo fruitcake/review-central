@@ -533,14 +533,15 @@ class ReviewRequest
      * repository chose.
      *
      * @param  bool  $strict  a person asked for it: throw when the repository's runner is not set up, and review a draft
+     * @return ReviewRun|null the run as it was queued, for a link to it; null when none was recorded, as for a branch without an open pull request
      *
      * @throws RuntimeException when $strict and the runner is not set up
      * @throws Throwable when the runner could not start it
      */
-    public function start(Repository $repository, mixed $branch, bool $strict = false): void
+    public function start(Repository $repository, mixed $branch, bool $strict = false): ?ReviewRun
     {
         if (! is_string($branch) || $branch === '') {
-            return;
+            return null;
         }
 
         $runner = $repository->runner();
@@ -561,10 +562,12 @@ class ReviewRequest
 
         // Not pinned to a commit: the delivery only carries an abbreviated hash, and
         // the branch as it is now is what the person asked to have reviewed.
-        $repository->runner()->start($repository, $branch);
+        $build = $repository->runner()->start($repository, $branch);
 
         // Started, by a person or by itself: none of its pull requests waits any more.
         OpenPullRequest::query()->where('repository_id', $repository->getKey())->where('branch', $branch)->update(['awaiting_approval' => false]);
+
+        return $build === null ? null : $repository->reviewRuns()->where('build_number', $build)->latest('id')->first();
     }
 
     /**

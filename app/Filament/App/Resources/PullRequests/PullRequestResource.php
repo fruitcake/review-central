@@ -65,7 +65,7 @@ class PullRequestResource extends Resource
      * What whose turn it is and where the review stands are read from of a run:
      * see PullRequestTurn::of(), standing() and RunPresenter::outcome().
      */
-    private const array TURN_COLUMNS = ['id', 'repository_id', 'pull_request_id', 'kind', 'status', 'result', 'commit', 'findings', 'manual_review', 'started_at'];
+    private const array TURN_COLUMNS = ['id', 'uuid', 'repository_id', 'pull_request_id', 'kind', 'status', 'result', 'commit', 'findings', 'manual_review', 'started_at'];
 
     /**
      * The relation a row of the list carries its newest run in, null where it has none.
@@ -159,6 +159,7 @@ class PullRequestResource extends Resource
                     ->extraModalFooterActions(fn (OpenPullRequest $record): array => [
                         // Started from the details as from the row, for the pull request they are of.
                         self::startAction($record),
+                        self::openReviewAction($record),
                         Action::make('readTicket')
                             // Read from its source here, before any review did, or again since.
                             ->label(fn (): string => (self::ticketOf($record)['url'] ?? null) === null ? 'Read the ticket' : 'Refresh the ticket')
@@ -180,6 +181,7 @@ class PullRequestResource extends Resource
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Close'),
                 self::startAction(),
+                self::openReviewAction(),
                 Action::make('pullRequest')
                     ->label('Open on the pull request')
                     ->tooltip('Open on the pull request')
@@ -293,7 +295,8 @@ class PullRequestResource extends Resource
             ->visible(function (?OpenPullRequest $record) use ($pullRequest): bool {
                 $record = $pullRequest($record);
 
-                return $record->closed_as === null && $record->branch !== null && ReviewRequest::reviewable(['from_fork' => $record->from_fork, 'source' => ['branch' => ['name' => $record->branch]]]);
+                return $record->closed_as === null && $record->branch !== null && self::reviewing($record) === null
+                    && ReviewRequest::reviewable(['from_fork' => $record->from_fork, 'source' => ['branch' => ['name' => $record->branch]]]);
             })
             ->requiresConfirmation()
             ->modalHeading(fn (?OpenPullRequest $record): string => "Review #{$pullRequest($record)->pull_request_id}?")
@@ -308,13 +311,40 @@ class PullRequestResource extends Resource
                 $record = $pullRequest($record);
 
                 try {
-                    $reviews->start($record->repository, $record->branch, strict: true);
-
-                    Notification::make()->title('The review is started')->body("{$record->repository->slug} #{$record->pull_request_id}. It is under Reviews as queued until a worker begins it.")->success()->send();
+                    ReviewRunResource::started(
+                        $reviews->start($record->repository, $record->branch, strict: true),
+                        "{$record->repository->slug} #{$record->pull_request_id}. It is under Reviews as queued until a worker begins it.",
+                    );
                 } catch (Throwable $exception) {
                     Notification::make()->title('The review could not be started')->body($exception->getMessage())->danger()->send();
                 }
             });
+    }
+
+    /**
+     * Opens the review that is queued or running for a pull request, in the place of
+     * starting another, from its row or, for $for, from its details.
+     */
+    private static function openReviewAction(?OpenPullRequest $for = null): Action
+    {
+        $running = fn (?OpenPullRequest $record): ?ReviewRun => ($for ?? $record) === null ? null : self::reviewing($for ?? $record);
+
+        return Action::make($for === null ? 'openReview' : 'openReviewFromDetails')
+            ->label('Open the review')
+            ->icon(Heroicon::OutlinedArrowTopRightOnSquare)
+            ->color('gray')
+            ->visible(fn (?OpenPullRequest $record): bool => $running($record) !== null)
+            ->url(fn (?OpenPullRequest $record): ?string => ($run = $running($record)) === null ? null : ReviewRunResource::getUrl('view', ['record' => $run]));
+    }
+
+    /**
+     * The pull request's review that is queued or running, if its newest is.
+     */
+    private static function reviewing(OpenPullRequest $record): ?ReviewRun
+    {
+        $run = self::newestRun($record);
+
+        return $run !== null && in_array($run->status, [ReviewRun::STATUS_QUEUED, ReviewRun::STATUS_RUNNING], true) ? $run : null;
     }
 
     /**
