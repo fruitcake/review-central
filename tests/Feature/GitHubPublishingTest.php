@@ -391,7 +391,9 @@ it('says a finding is fixed on its first line, and leaves its thread open withou
     $fixed = $this->github->reviewComments[0]['body'];
 
     // The status on its first line, as the description lists it; the rest as it was.
-    expect(strtok($fixed, "\n"))->toBe(strtok($finding, "\n").' · ✅ Fixed')
+    // No longer to fix, so without its verdict.
+    expect(strtok($finding, "\n"))->toBe('F1 · Must fix · HIGH')
+        ->and(strtok($fixed, "\n"))->toBe('F1 · HIGH · ✅ Fixed')
         ->and(substr($fixed, strpos($fixed, "\n")))->toContain('The export skips the last row')
         ->and(collect($this->github->threads)->first()['resolved'])->toBeFalse()
         ->and(collect($this->github->reviewComments)->last()['body'])->toStartWith('Fixed in');

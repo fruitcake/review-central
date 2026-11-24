@@ -204,6 +204,49 @@ class ReviewPublisher
         return ! in_array($outcome['reason'] ?? '', self::NOT_A_FAILURE, true);
     }
 
+    /** What an open finding asks of the author, as its heading says it: see verdict(). */
+    public const MUST_FIX = 'Must fix';
+
+    public const SHOULD_FIX = 'Should fix';
+
+    public const CONSIDER = 'Consider';
+
+    /**
+     * The threshold the findings being published are judged by, for the verdict
+     * their headings carry.
+     */
+    protected string $failOn = self::DEFAULT_FAIL_ON;
+
+    /**
+     * What an open finding asks of the author, worked out from what the review
+     * established and the team's threshold rather than asked of the reviewer: so
+     * it always agrees with the task and the request for changes.
+     *
+     * Must fix holds the merge. Should fix is established and introduced here, but
+     * below the threshold or past the rounds where it could hold the merge.
+     * Consider is unconfirmed, was there before the change, or is of a category the
+     * team never holds the merge on. Null for a finding that is no longer open.
+     *
+     * @param  array<string, mixed>  $finding
+     */
+    public static function verdict(array $finding, string $failOn): ?string
+    {
+        if (! in_array(strtolower((string) ($finding['status'] ?? 'new')), self::OPEN, true)) {
+            return null;
+        }
+
+        $confidence = $finding['confidence'] ?? null;
+        $category = strtolower(trim((string) ($finding['category'] ?? '')));
+
+        return match (true) {
+            self::blocks($finding, $failOn) => self::MUST_FIX,
+            is_numeric($confidence) && (float) $confidence < self::CONFIDENT,
+            self::preExisting($finding),
+            ! self::reachesThreshold('HIGH', $failOn, $category) => self::CONSIDER,
+            default => self::SHOULD_FIX,
+        };
+    }
+
     /**
      * Whether a finding holds the merge. The same rule the run blocks the build
      * on (its `blocking.jq`), so the two can never disagree about what counts.
@@ -306,6 +349,7 @@ class ReviewPublisher
         }
 
         $pullRequestId = (string) $run->pull_request_id;
+        $this->failOn = $failOn;
 
         $comments = $repository->sourceControl()->getPullRequestComments($pullRequestId);
 
@@ -1666,8 +1710,8 @@ class ReviewPublisher
     }
 
     /**
-     * The id and label together, `F1 · HIGH · security`, shown above or beside the
-     * finding's title.
+     * The id, what it asks of the author while it is open, and the label together,
+     * `F1 · Must fix · HIGH · security`, shown above or beside the finding's title.
      *
      * The id is how a finding is named everywhere else — "Fix these", the tasks,
      * the feedback a coding agent reads and the reply it answers with — so the list
@@ -1679,8 +1723,9 @@ class ReviewPublisher
     protected function heading(array $finding): string
     {
         $id = trim((string) ($finding['id'] ?? ''));
+        $verdict = self::verdict($finding, $this->failOn);
 
-        return ($id === '' ? '' : $id.' · ').$this->label($finding);
+        return ($id === '' ? '' : $id.' · ').($verdict === null ? '' : $verdict.' · ').$this->label($finding);
     }
 
     /**
