@@ -74,7 +74,6 @@ Go to [API tokens](https://dash.cloudflare.com/profile/api-tokens) → **Create 
 | Workers Scripts: Edit | deploys the Worker |
 | Containers: Edit | deploys the sandbox's container with it |
 | Workers R2 Storage: Edit | makes the bucket, and binds it to the Worker |
-| Account Settings: Read | lets Wrangler read the account it deploys to |
 
 The token is only used to deploy. Reviews never see it.
 

@@ -154,7 +154,7 @@ class WorkerDeployment
 
             $tell("── the Worker {$worker} ──");
             $deployed = $this->run(['npx', 'wrangler', 'deploy', '--config', self::CONFIG], $tell, 'deploy the Worker',
-                refused: 'The API token may not deploy it: give it Workers Scripts: Edit, Containers: Edit, Workers R2 Storage: Edit and Account Settings: Read, for this account.');
+                refused: 'The API token may not deploy it: give it Workers Scripts: Edit, Containers: Edit and Workers R2 Storage: Edit, for this account.');
 
             $url = preg_match('#https://[A-Za-z0-9.-]+\.workers\.dev#', $deployed, $address) === 1 ? $address[0] : config('review.cloudflare.url');
 

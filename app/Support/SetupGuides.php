@@ -63,7 +63,6 @@ class SetupGuides
                 'Account → Workers Scripts: Edit' => 'deploys the Worker.',
                 'Account → Containers: Edit' => 'deploys the sandbox\'s container with it.',
                 'Account → Workers R2 Storage: Edit' => 'makes the bucket when it is not there, and binds it to the Worker.',
-                'Account → Account Settings: Read' => 'Wrangler reads the account it deploys to.',
             ],
             notes: [
                 'Used only to deploy; reviews never use it. The account needs the Workers Paid plan for containers.',

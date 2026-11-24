@@ -185,7 +185,7 @@ class Settings extends Page
                             ->revealable()
                             ->autocomplete('off')
                             ->placeholder(fn (): ?string => app(PlatformSettings::class)->secret(PlatformSettings::CLOUDFLARE_API_TOKEN) !== null ? 'Saved; type to replace' : null)
-                            ->helperText(new HtmlString('<a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener" class="underline">Create one</a> for this account with Workers Scripts, Containers and Workers R2 Storage: Edit, and Account Settings: Read. Used only to deploy.'))
+                            ->helperText(new HtmlString('<a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener" class="underline">Create one</a> for this account with Workers Scripts, Containers and Workers R2 Storage: Edit. Used only to deploy.'))
                             ->hintAction(SetupGuideAction::make(fn (SetupGuides $guides) => $guides->cloudflareToken(), 'cloudflareTokenGuide'))),
                         self::overridable(TextInput::make(PlatformSettings::CLOUDFLARE_WORKER)
                             ->label('Worker name')
