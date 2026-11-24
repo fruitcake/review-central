@@ -57,6 +57,17 @@
         </dd>
         <dt>Open since</dt><dd>{{ $record->opened_at === null ? '—' : LocalTime::of($record->opened_at)->format('j M Y') }}</dd>
         <dt>Branch</dt><dd><span class="rc-mono">{{ $record->branch ?? '—' }}</span>@if ($record->destination_branch) → <span class="rc-mono">{{ $record->destination_branch }}</span>@endif</dd>
+        @if ($ticket !== null)
+            <dt>Ticket</dt>
+            <dd>
+                {{-- Only a web address becomes a link: a ticket's address comes from whatever its tracker answered. --}}
+                @if (is_string($ticket['url'] ?? null) && preg_match('~^https?://~i', $ticket['url']) === 1)
+                    <a href="{{ $ticket['url'] }}" target="_blank" rel="noopener">{{ $ticket['reference'] }} ↗</a>
+                @else
+                    {{ $ticket['reference'] }}
+                @endif
+            </dd>
+        @endif
         @if ($record->head_since)
             <dt>Newest commits</dt><dd>{{ LocalTime::of($record->head_since)->format('j M H:i') }} · <span class="rc-mono">{{ substr((string) $record->commit, 0, 7) }}</span></dd>
         @endif

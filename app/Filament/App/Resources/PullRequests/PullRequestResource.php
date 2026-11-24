@@ -246,6 +246,8 @@ class PullRequestResource extends Resource
             'run' => $run,
             'standing' => self::standing($record),
             'history' => $history,
+            // As the newest review read it: the ticket is read when a review runs, not here.
+            'ticket' => $runs->reverse()->map(fn (ReviewRun $sibling): mixed => $sibling->context['ticket'] ?? null)->first(fn (mixed $ticket): bool => is_array($ticket) && filled($ticket['reference'] ?? null)),
             'url' => rescue(fn (): string => $record->repository->sourceControl()->pullRequestUrl($record->pull_request_id), null, false),
         ];
     }
