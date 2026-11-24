@@ -302,6 +302,9 @@ class ReviewOpening
                 'modules' => $reviewer['modules'] ?? null,
                 'custom' => (bool) ($reviewer['custom'] ?? false),
                 'instructions_version' => $instructionsVersion,
+                // The threshold the reviewer was told, which the report is filed under
+                // even when the setting changed while the review ran.
+                'fail_on' => isset($reviewer['fail_on']) ? ReviewPublisher::failOnSpec((string) $reviewer['fail_on']) : null,
                 'started_at' => now(),
             ],
         );

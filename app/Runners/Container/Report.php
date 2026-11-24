@@ -88,7 +88,9 @@ class Report
             'duration' => $this->duration("{$directory}/.review-started"),
             'mode' => 'both',
             'create_tasks' => true,
-            'fail_on' => ReviewSettings::failOn($repository),
+            // What the precheck told the reviewer, which its second check went by.
+            'fail_on' => ReviewRun::query()->where('repository_id', $repository->getKey())->where('commit', $commit)->where('build_number', $build)->value('fail_on')
+                ?? ReviewSettings::failOn($repository),
             // A trial is recorded in full and kept off the pull request, and so is
             // any review of a repository whose host is only read from.
             'publish' => $trial === null && $repository->sourceControl()->publishes(),
