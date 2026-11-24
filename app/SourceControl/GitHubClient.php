@@ -475,7 +475,10 @@ class GitHubClient implements FiltersSecrets, OpensPullRequests, SourceControl
         $message = trim(strtok((string) $response->json('commit.message'), "\n") ?: '');
         $author = trim((string) ($response->json('commit.author.name') ?? ''));
 
-        return $message === '' && $author === '' ? null : ['message' => $message, 'author' => $author];
+        // The commits it was made on: two for a merge.
+        $parents = array_values(array_filter(array_map(fn (mixed $parent): mixed => is_array($parent) ? ($parent['sha'] ?? null) : null, (array) $response->json('parents')), is_string(...)));
+
+        return $message === '' && $author === '' ? null : ['message' => $message, 'author' => $author, 'parents' => $parents];
     }
 
     public function resolveCommit(string $commit): ?string

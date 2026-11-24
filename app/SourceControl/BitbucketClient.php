@@ -264,7 +264,10 @@ class BitbucketClient implements FiltersSecrets, OpensPullRequests, SourceContro
             $author = trim((string) preg_replace('/\s*<[^>]*>\s*/', '', (string) $response->json('author.raw')));
         }
 
-        return $message === '' && $author === '' ? null : ['message' => $message, 'author' => $author];
+        // The commits it was made on: two for a merge.
+        $parents = array_values(array_filter(array_map(fn (mixed $parent): mixed => is_array($parent) ? ($parent['hash'] ?? null) : null, (array) $response->json('parents')), is_string(...)));
+
+        return $message === '' && $author === '' ? null : ['message' => $message, 'author' => $author, 'parents' => $parents];
     }
 
     public function resolveCommit(string $commit): ?string
