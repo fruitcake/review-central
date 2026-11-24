@@ -116,7 +116,7 @@ class FindingSettlement
      * Posts each reply under its finding's comment, or on the pull request naming
      * the finding when it has none there: as the user where their own account is
      * connected, else by the tenant's connection, with their name above it. A
-     * reply Bitbucket refuses from their account, as on a repository it cannot
+     * reply the host refuses from their account, as on a repository it cannot
      * reach, goes the second way; one whose answer was lost may have been posted,
      * and is not posted again.
      *

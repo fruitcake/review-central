@@ -15,7 +15,7 @@ use Laravel\Socialite\Contracts\User as ProviderUser;
 
 /**
  * Signing in with an account at a provider that names an address but does not
- * deliver its mail, as Bitbucket: someone who had the address at a former
+ * deliver its mail, as Bitbucket and GitHub: someone who had the address at a former
  * employer may still have an account there under it. The first time, a code is
  * mailed to the address and has to be typed in the browser that signed in, which
  * shows the address is theirs now; the account is linked, and signs in by
@@ -71,7 +71,7 @@ class SignInCodes
             'attempts' => 0,
         ]);
 
-        Notification::route('mail', $email)->notify(new SignInCode($code, $account->getNickname() ?? $account->getName() ?? $email));
+        Notification::route('mail', $email)->notify(new SignInCode($code, $account->getNickname() ?? $account->getName() ?? $email, SingleSignOn::providers()[$provider] ?? $provider));
 
         return $email;
     }
@@ -84,6 +84,14 @@ class SignInCodes
         $pending = $session->get(self::SESSION);
 
         return is_array($pending) && $pending['expires'] > now()->getTimestamp() ? $pending['email'] : null;
+    }
+
+    /**
+     * The provider of the account a code was sent for and not yet used.
+     */
+    public function pendingProvider(Session $session): ?string
+    {
+        return $this->pendingEmail($session) === null ? null : $session->get(self::SESSION.'.provider');
     }
 
     /**

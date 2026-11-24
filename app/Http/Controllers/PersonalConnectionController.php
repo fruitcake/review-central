@@ -13,26 +13,25 @@ use App\Services\SingleSignOn;
 use Filament\Notifications\Notification;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\AbstractProvider;
 use Symfony\Component\HttpFoundation\RedirectResponse as SymfonyRedirect;
 use Throwable;
 
 /**
- * Connects a user's own Bitbucket account on their profile, so that what they
- * write on a pull request through Review Central is written as them.
+ * Connects a user's own Bitbucket or GitHub account on their profile, so that
+ * what they write on a pull request through Review Central is written as them.
  */
 class PersonalConnectionController extends Controller
 {
-    /** In the session while a sign-in with Bitbucket is under way. */
-    public const SIGN_IN = 'bitbucket_sign_in';
+    /** In the session while a sign-in is under way: the host it is at. */
+    public const SIGN_IN = 'personal_sign_in';
 
     /**
-     * Off to Bitbucket, to say yes there.
+     * Off to the host, to say yes there.
      */
-    public function redirect(Request $request): SymfonyRedirect
+    public function redirect(Request $request, string $host): SymfonyRedirect
     {
-        abort_unless(PersonalConnections::available(), 404);
+        $provider = $this->provider($host);
 
         // Back to the profile it was started from, in the tenant it was open in
         // where the user is in that one.
@@ -43,20 +42,21 @@ class PersonalConnectionController extends Controller
             : EditProfile::urlForCurrentUser());
         $request->session()->forget(self::SIGN_IN);
 
-        return $this->driver()->setScopes(PersonalConnections::BITBUCKET_SCOPES)->redirect();
+        return $provider->redirect();
     }
 
     /**
-     * Back from Bitbucket: a sign-in goes on to signing in, else the account is
+     * Back from the host: a sign-in goes on to signing in, else the account is
      * kept for the user who asked, and signs them in from now on.
      */
-    public function callback(Request $request, PersonalConnections $connections, SingleSignOn $signOn): RedirectResponse
+    public function callback(Request $request, string $host, PersonalConnections $connections, SingleSignOn $signOn): RedirectResponse
     {
-        abort_unless(PersonalConnections::available(), 404);
+        $provider = $this->provider($host);
+        $name = PersonalConnections::HOSTS[$host];
 
-        // The consumer has one callback: a sign-in started there ends on its own route.
-        if ($request->session()->pull(self::SIGN_IN) === true) {
-            return redirect()->to(route('sign-in.callback', ['provider' => SingleSignOn::BITBUCKET]).'?'.http_build_query($request->query()));
+        // The app has one callback for both: a sign-in started there ends on its own route.
+        if ($request->session()->pull(self::SIGN_IN) === $host) {
+            return redirect()->to(route('sign-in.callback', ['provider' => $host]).'?'.http_build_query($request->query()));
         }
 
         $user = $request->user();
@@ -69,35 +69,43 @@ class PersonalConnectionController extends Controller
 
         try {
             /** @var \Laravel\Socialite\Two\User $account */
-            $account = $this->driver()->user();
+            $account = $provider->user();
         } catch (Throwable) {
             // Cancelled there, or a link that was opened twice: nothing to report.
-            Notification::make()->title('Bitbucket was not connected')->body('Connecting did not complete. Try again.')->danger()->send();
+            Notification::make()->title("{$name} was not connected")->body('Connecting did not complete. Try again.')->danger()->send();
 
             return redirect()->to($return);
         }
 
         try {
-            $signOn->link($user, SingleSignOn::BITBUCKET, (string) $account->getId());
+            $signOn->link($user, $host, (string) $account->getId());
         } catch (SignInRefused $exception) {
-            Notification::make()->title('Bitbucket was not connected')->body($exception->getMessage())->danger()->send();
+            Notification::make()->title("{$name} was not connected")->body($exception->getMessage())->danger()->send();
 
             return redirect()->to($return);
         }
 
-        $connection = $connections->connect($user, $account, $account->token, $account->refreshToken, $account->expiresIn === null ? null : (int) $account->expiresIn, $connections->grantedScopes($account->token));
+        $connection = $connections->connect(
+            $user,
+            $host,
+            $account,
+            $account->token,
+            $account->refreshToken,
+            $account->expiresIn === null ? null : (int) $account->expiresIn,
+            $host === PersonalConnections::BITBUCKET ? $connections->grantedScopes($account->token) : [],
+        );
 
-        Notification::make()->title('Bitbucket is connected')->body('As '.($connection->nickname ?? $account->getName() ?? 'your account').': what you write on a pull request through Review Central is now written as you.')->success()->send();
+        Notification::make()->title("{$name} is connected")->body('As '.($connection->nickname ?? $account->getName() ?? 'your account').': what you write on a pull request through Review Central is now written as you.')->success()->send();
 
         return redirect()->to($return);
     }
 
-    protected function driver(): AbstractProvider
+    protected function provider(string $host): AbstractProvider
     {
-        $driver = Socialite::driver('bitbucket');
+        $provider = PersonalConnections::provider($host);
 
-        abort_unless($driver instanceof AbstractProvider, 404);
+        abort_if($provider === null, 404);
 
-        return $driver->redirectUrl(route('connections.bitbucket.callback'));
+        return $provider;
     }
 }

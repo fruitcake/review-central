@@ -52,7 +52,7 @@ final class Integrations
             'client_id' => ['label' => 'Client ID', 'secret' => false, 'env' => 'services.atlassian.client_id'],
             'client_secret' => ['label' => 'Client secret', 'secret' => true, 'env' => 'services.atlassian.client_secret'],
         ]],
-        'github_app' => ['label' => 'GitHub App: review as the app', 'single' => true, 'tenants_add' => false, 'service' => 'GitHub', 'fields' => [
+        'github_app' => ['label' => 'GitHub App: review, sign in and reply as yourself', 'single' => true, 'tenants_add' => false, 'service' => 'GitHub', 'fields' => [
             'app_id' => ['label' => 'App ID', 'secret' => false, 'env' => 'services.github_app.id'],
             'slug' => ['label' => 'Name in its address', 'secret' => false, 'env' => 'services.github_app.slug'],
             'client_id' => ['label' => 'Client ID', 'secret' => false, 'env' => 'services.github_app.client_id'],

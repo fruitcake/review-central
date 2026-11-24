@@ -1,18 +1,24 @@
 <?php
 
 use App\Filament\Auth\EditProfile;
+use App\Models\Connection;
 use App\Models\PersonalConnection;
+use App\Models\Repository;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Models\UserIdentity;
 use App\Services\PersonalConnections;
+use App\SourceControl\ReadOnlyClient;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
+use Illuminate\Http\Client\Request;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Http;
 use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\BitbucketProvider;
+use Laravel\Socialite\Two\GithubProvider;
 use Laravel\Socialite\Two\User as BitbucketUser;
+use Laravel\Socialite\Two\User as GitHubUser;
 
 use function Pest\Livewire\livewire;
 
@@ -151,7 +157,7 @@ it('keeps the account the user connected while an older one was being renewed', 
         return Http::response(['access_token' => 'a-token-2', 'refresh_token' => 'a-refresh-2', 'expires_in' => 7200]);
     }]);
 
-    expect(app(PersonalConnections::class)->problem($this->user))->toBeNull()
+    expect(app(PersonalConnections::class)->problem($this->user, 'bitbucket'))->toBeNull()
         ->and($connection->refresh()->only(['account_id', 'access_token', 'refresh_token']))->toBe(['account_id' => 'id-b', 'access_token' => 'b-token', 'refresh_token' => 'b-refresh']);
 });
 
@@ -181,4 +187,115 @@ it('links no account for a session the password changed under while at Bitbucket
     $this->assertGuest();
     expect(PersonalConnection::query()->count())->toBe(0)
         ->and(UserIdentity::query()->count())->toBe(0);
+});
+
+describe('on GitHub, through the GitHub App', function () {
+    beforeEach(function () {
+        config(['services.github_app' => ['id' => '4242', 'slug' => 'review-central', 'client_id' => 'Iv1.client', 'client_secret' => 'client-secret', 'private_key' => 'a key', 'webhook_secret' => null]]);
+
+        /**
+         * Comes back from GitHub as this account, with a token that lasts eight hours.
+         */
+        $this->connectGitHub = function () {
+            $account = (new GitHubUser)->setRaw(['id' => 5150, 'login' => 'sam-gh'])
+                ->map(['id' => 5150, 'nickname' => 'sam-gh', 'name' => 'Sam Sample'])
+                ->setToken('ghu-token')->setRefreshToken('ghr-refresh')->setExpiresIn(28800);
+            $provider = Mockery::mock(GithubProvider::class);
+            $provider->shouldReceive('redirectUrl')->andReturnSelf();
+            $provider->shouldReceive('redirect')->andReturn(new RedirectResponse('https://github.com/login/oauth/authorize'));
+            $provider->shouldReceive('user')->andReturn($account);
+            Socialite::shouldReceive('buildProvider')->with(GithubProvider::class, Mockery::on(fn (array $config): bool => $config['client_id'] === 'Iv1.client' && $config['redirect'] === url('/connections/github/callback')))->andReturn($provider);
+
+            return $this->get('/connections/github/callback');
+        };
+
+        $this->githubRepository = fn (string $driver) => Repository::factory()
+            ->for(Connection::factory()->state(['tenant_id' => $this->tenant->id, 'driver' => $driver, 'settings' => ['workspace' => 'acme', 'installation_id' => '77']]), 'integration')
+            ->create(['tenant_id' => $this->tenant->id, 'workspace' => 'acme', 'slug' => 'shop']);
+    });
+
+    it('keeps the GitHub account a user connects, which signs them in, and forgets it at GitHub too on disconnecting', function () {
+        Http::fake(['api.github.com/applications/*' => Http::response(null, 204)]);
+        $this->actingAs($this->user);
+        Filament::setCurrentPanel(Filament::getPanel('app'));
+        Filament::setTenant($this->tenant);
+
+        // To the GitHub App, which comes back on the callback for people.
+        $this->get('/connections/github?tenant=acme')
+            ->assertRedirectContains('https://github.com/login/oauth/authorize?client_id=Iv1.client&redirect_uri='.urlencode(url('/connections/github/callback')));
+        ($this->connectGitHub)()->assertRedirect(url('app/acme/profile'));
+
+        expect(PersonalConnection::query()->sole()->only(['host', 'account_id', 'nickname', 'access_token', 'refresh_token', 'scopes']))->toBe([
+            'host' => 'github', 'account_id' => '5150', 'nickname' => 'sam-gh', 'access_token' => 'ghu-token', 'refresh_token' => 'ghr-refresh', 'scopes' => [],
+        ])
+            ->and(UserIdentity::query()->sole()->only(['provider', 'provider_id']))->toBe(['provider' => 'github', 'provider_id' => '5150'])
+            ->and($this->user->refresh()->source_accounts)->toBe(['sam-gh', '5150']);
+
+        livewire(EditProfile::class)
+            ->assertSee('Your GitHub account')
+            ->assertSee('Connected as sam-gh.')
+            ->callAction(TestAction::make('disconnectGithub')->schemaComponent('github_actions'))
+            ->assertNotified('GitHub is disconnected');
+
+        expect(PersonalConnection::query()->count())->toBe(0)
+            ->and(UserIdentity::query()->count())->toBe(0);
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'DELETE'
+            && $request->url() === 'https://api.github.com/applications/Iv1.client/token'
+            && $request['access_token'] === 'ghu-token');
+
+        // Without the GitHub App, there is nothing to connect.
+        config(['services.github_app.private_key' => null]);
+
+        livewire(EditProfile::class)->assertDontSee('Your GitHub account');
+        $this->get('/connections/github')->assertNotFound();
+    });
+
+    it('writes as the user only on repositories reviewed through the GitHub App, renewing the token GitHub spends once', function () {
+        $connection = PersonalConnection::query()->create([
+            'user_id' => $this->user->id, 'host' => 'github', 'account_id' => '5150', 'nickname' => 'sam-gh',
+            'access_token' => 'ghu-old', 'refresh_token' => 'ghr-old', 'expires_at' => now()->subMinute(), 'scopes' => [],
+        ]);
+        Http::fake([
+            'github.com/login/oauth/access_token' => Http::response(['access_token' => 'ghu-new', 'refresh_token' => 'ghr-new', 'expires_in' => 28800]),
+            'api.github.com/repos/acme/shop/issues/12/comments' => Http::response(['id' => 99]),
+        ]);
+        $connections = app(PersonalConnections::class);
+
+        // A repository GitHub is reached on with a token of the tenant's own: the app is not there.
+        expect($connections->writerFor($this->user, ($this->githubRepository)('github')))->toBeNull();
+
+        // Nor on one whose connection is set to post nothing.
+        $quiet = ($this->githubRepository)('github-app');
+        $quiet->integration->forceFill(['settings' => [...$quiet->integration->settings, ReadOnlyClient::SETTING => ReadOnlyClient::READ]])->save();
+
+        expect($connections->writerFor($this->user, $quiet))->toBeNull();
+
+        $connections->writerFor($this->user, ($this->githubRepository)('github-app'))->addPullRequestComment('12', 'Not so.');
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'https://github.com/login/oauth/access_token'
+            && $request['grant_type'] === 'refresh_token' && $request['refresh_token'] === 'ghr-old' && $request['client_id'] === 'Iv1.client');
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/issues/12/comments') && $request->hasHeader('Authorization', 'Bearer ghu-new'));
+        expect($connection->refresh()->only(['access_token', 'refresh_token']))->toBe(['access_token' => 'ghu-new', 'refresh_token' => 'ghr-new']);
+    });
+
+    it('uses the token another request renewed first, as GitHub takes a refresh token once, and says when GitHub renews none', function () {
+        $connection = PersonalConnection::query()->create([
+            'user_id' => $this->user->id, 'host' => 'github', 'account_id' => '5150',
+            'access_token' => 'ghu-old', 'refresh_token' => 'ghr-old', 'expires_at' => now()->subMinute(), 'scopes' => [],
+        ]);
+
+        // GitHub refuses with 200 and an error; meanwhile the other request kept its new token.
+        Http::fake(['github.com/login/oauth/access_token' => function () use ($connection) {
+            PersonalConnection::query()->whereKey($connection->id)->update(['access_token' => encrypt('ghu-other', false), 'refresh_token' => encrypt('ghr-other', false), 'expires_at' => now()->addHours(8)]);
+
+            return Http::response(['error' => 'bad_refresh_token']);
+        }]);
+
+        expect(app(PersonalConnections::class)->problem($this->user, 'github'))->toBeNull();
+
+        $connection->refresh()->update(['expires_at' => now()->subMinute()]);
+        Http::fake(['github.com/login/oauth/access_token' => Http::response(['error' => 'bad_refresh_token'])]);
+
+        expect(app(PersonalConnections::class)->problem($this->user, 'github'))->toBe('GitHub no longer accepts your connection: connect your account again on your profile.');
+    });
 });

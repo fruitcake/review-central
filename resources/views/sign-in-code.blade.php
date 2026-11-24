@@ -22,7 +22,7 @@
 <body>
 <main>
     <h1>Check your email</h1>
-    <p>We sent a code to {{ $email }}. Type it here to show the address is yours; after this, your Bitbucket account signs you in by itself.</p>
+    <p>We sent a code to {{ $email }}. Type it here to show the address is yours; after this, your {{ $name }} account signs you in by itself.</p>
     <form method="post" action="{{ route('sign-in.code.check') }}">
         @csrf
         <label for="code">Code</label>
@@ -32,7 +32,7 @@
         @enderror
         <button type="submit">Sign in</button>
     </form>
-    <p class="muted">The code works for {{ $minutes }} minutes. No mail? Look in your spam, or <a href="{{ route('sign-in.redirect', ['provider' => 'bitbucket']) }}">sign in with Bitbucket again</a> for a new one.</p>
+    <p class="muted">The code works for {{ $minutes }} minutes. No mail? Look in your spam, or <a href="{{ route('sign-in.redirect', ['provider' => $provider]) }}">sign in with {{ $name }} again</a> for a new one.</p>
 </main>
 </body>
 </html>

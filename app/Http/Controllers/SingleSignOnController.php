@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\SignInRefused;
 use App\Models\User;
+use App\Services\PersonalConnections;
 use App\Services\SignInCodes;
 use App\Services\SingleSignOn;
 use Filament\Facades\Filament;
@@ -27,11 +28,10 @@ class SingleSignOnController extends Controller
     {
         $driver = $this->driver($provider);
 
-        if ($provider === SingleSignOn::BITBUCKET) {
-            // Bitbucket comes back through the one callback its consumer has, which
-            // sends a sign-in on here.
-            $request->session()->put(PersonalConnectionController::SIGN_IN, true);
-            $driver->setScopes(['account', 'email']);
+        if (in_array($provider, SingleSignOn::BY_CODE, true)) {
+            // Back through the one callback the consumer or app has for people,
+            // which sends a sign-in on here.
+            $request->session()->put(PersonalConnectionController::SIGN_IN, $provider);
         }
 
         return $driver->redirect();
@@ -53,7 +53,7 @@ class SingleSignOnController extends Controller
         }
 
         try {
-            if ($provider === SingleSignOn::BITBUCKET) {
+            if (in_array($provider, SingleSignOn::BY_CODE, true)) {
                 $user = $signOn->known($provider, (string) $account->getId());
 
                 if ($user === null) {
@@ -82,7 +82,9 @@ class SingleSignOnController extends Controller
             return redirect()->to((string) Filament::getPanel('app')->getLoginUrl())->with('sign_in_refused', 'That code is no longer valid. Sign in again for a new one.');
         }
 
-        return view('sign-in-code', ['email' => $email, 'minutes' => SignInCodes::MINUTES]);
+        $provider = (string) $codes->pendingProvider($request->session());
+
+        return view('sign-in-code', ['email' => $email, 'minutes' => SignInCodes::MINUTES, 'provider' => $provider, 'name' => SingleSignOn::providers()[$provider] ?? $provider]);
     }
 
     /**
@@ -115,11 +117,12 @@ class SingleSignOnController extends Controller
     {
         abort_unless(array_key_exists($provider, SingleSignOn::providers()), 404);
 
-        $driver = Socialite::driver($provider);
+        // Bitbucket's consumer and the GitHub App have one callback for people,
+        // which connecting an account uses too.
+        $driver = in_array($provider, SingleSignOn::BY_CODE, true) ? PersonalConnections::provider($provider) : Socialite::driver($provider);
 
         abort_unless($driver instanceof AbstractProvider, 404);
 
-        // Bitbucket's consumer has one callback, which connecting an account uses too.
-        return $driver->redirectUrl($provider === SingleSignOn::BITBUCKET ? route('connections.bitbucket.callback') : route('sign-in.callback', ['provider' => $provider]));
+        return in_array($provider, SingleSignOn::BY_CODE, true) ? $driver : $driver->redirectUrl(route('sign-in.callback', ['provider' => $provider]));
     }
 }
