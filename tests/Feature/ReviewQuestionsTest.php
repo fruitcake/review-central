@@ -535,3 +535,28 @@ it('takes a question on the review\'s page and answers it there alone, saying no
 
     livewire(ViewReviewRun::class, ['record' => $run->uuid])->assertSee('It escapes nothing.');
 });
+
+it('prints what the reviewer reads and says while it answers, and keeps the result for the worker', function () {
+    $dir = storage_path('framework/testing/review-work/answer');
+    File::ensureDirectoryExists("{$dir}/home/.local/bin");
+    File::put("{$dir}/home/.local/bin/claude", <<<'SH'
+        #!/bin/sh
+        [ "$1" = "--version" ] && { echo "2.0.0 (Claude Code)"; exit 0; }
+        cat > /dev/null
+        echo '{"type":"system","subtype":"init","session_id":"s-1"}'
+        echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"app/Export.php"}}]}}'
+        echo '{"type":"assistant","message":{"content":[{"type":"text","text":"It escapes nothing."}]}}'
+        echo '{"type":"result","subtype":"success","is_error":false,"result":"It escapes nothing.","total_cost_usd":0.12,"session_id":"s-1"}'
+        SH);
+    chmod("{$dir}/home/.local/bin/claude", 0755);
+
+    $result = Process::path($dir)
+        ->env(['HOME' => "{$dir}/home", 'REVIEW_LOCAL' => 'true', 'REVIEW_QUESTION' => 'Does the export escape its cells?'])
+        ->run(['sh', resource_path('review/skill/answer-question.sh')]);
+
+    expect($result->successful())->toBeTrue()
+        ->and($result->output())->toContain('-> Read app/Export.php')
+        ->and($result->output())->toContain('It escapes nothing.')
+        ->and($result->output())->toContain('Answered, for $0.12.')
+        ->and(json_decode(File::get("{$dir}/review-answer.json"), true))->toMatchArray(['type' => 'result', 'result' => 'It escapes nothing.']);
+});

@@ -207,9 +207,16 @@
                                 {{-- What it did while it answered: open while it does, as a review's log. --}}
                                 @php($answering = in_array($question->status, [\App\Models\ReviewQuestion::STATUS_ASKED, \App\Models\ReviewQuestion::STATUS_UNSURE], true))
                                 @if (($questionLog = app(\App\Runners\Container\RunLog::class)->questionTail($question)) !== null)
-                                    <details class="rc-question-log" wire:ignore.self @if ($answering) open @endif>
+                                    {{-- Stays at the end while new lines come in, unless someone scrolled up to read, as the review's log does. --}}
+                                    <details class="rc-question-log" wire:ignore.self @if ($answering) open @endif
+                                        x-data="{ follow: true }"
+                                        x-on:toggle="if ($el.open) { follow = true; requestAnimationFrame(() => { $refs.log.scrollTop = $refs.log.scrollHeight }) }"
+                                    >
                                         <summary class="rc-muted">Log{{ $answering ? ' · follows the answer as it is written' : '' }}{{ $questionLog['truncated'] ? ' · the end of it' : '' }}</summary>
-                                        <pre class="rc-log" tabindex="0" aria-label="Log of this answer" x-data x-init="$el.scrollTop = $el.scrollHeight">{{ $questionLog['text'] === '' ? 'Nothing printed yet.' : $questionLog['text'] }}</pre>
+                                        <pre class="rc-log" tabindex="0" aria-label="Log of this answer" x-ref="log"
+                                            x-init="$el.scrollTop = $el.scrollHeight; new MutationObserver(() => { if (follow) $el.scrollTop = $el.scrollHeight }).observe($el, { childList: true, characterData: true, subtree: true })"
+                                            x-on:scroll="follow = $el.scrollTop + $el.clientHeight >= $el.scrollHeight - 24"
+                                        >{{ $questionLog['text'] === '' ? 'Nothing printed yet.' : $questionLog['text'] }}</pre>
                                     </details>
                                 @endif
                             </div>
