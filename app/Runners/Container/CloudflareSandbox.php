@@ -139,7 +139,7 @@ class CloudflareSandbox extends Sandbox
             // The keys stay in the Worker, which puts them in for their placeholders
             // on the way to the providers' hosts.
             $keys = config('review.cloudflare.proxy_keys')
-                ? ProviderKeys::proxied($environment)
+                ? ProviderKeys::proxied($environment, $warm['name'] ?? null)
                 : ['environment' => $environment, 'credentials' => []];
 
             $spec = [
@@ -170,7 +170,9 @@ class CloudflareSandbox extends Sandbox
                 $exit = $this->ask($sandbox, $spec, $timeout, $output) ?? throw new RuntimeException('The Cloudflare Worker answered that a fresh sandbox is busy.');
             }
 
-            $this->keptWarm = $warm !== null;
+            // The Worker keeps a sandbox only where it could keep the reviewer from
+            // changing what the next review runs; it says so in its answer.
+            $this->keptWarm = $warm !== null && $exit['warm'];
 
             if ($exit['kept']) {
                 $output?->__invoke('out', "##[phase] download\n");
@@ -190,8 +192,10 @@ class CloudflareSandbox extends Sandbox
 
             // A sandbox whose stream was cut is still running until it is told. One
             // kept warm stays, until the review says it is not wanted (cool()).
+            // A warm one is the branch's, which a newer review may be running in by
+            // now: it is only let go while it runs nothing.
             if (! $this->keptWarm) {
-                rescue(fn () => $this->client(30)->delete("runs/{$sandbox}"), null, false);
+                rescue(fn () => $this->client(30)->delete("runs/{$sandbox}".($sandbox === $run ? '' : '?idle=1')), null, false);
             }
         }
     }
@@ -255,10 +259,14 @@ class CloudflareSandbox extends Sandbox
         return "warm-{$repositoryId}-".substr(hash('sha256', $branch), 0, 24);
     }
 
-    /** Lets a warm sandbox go now, when the next review is not likely to need it. */
+    /**
+     * Lets a warm sandbox go now, when the next review is not likely to need it:
+     * only while it runs nothing, as a review of the branch that started meanwhile
+     * may be running in it.
+     */
     public function cool(string $name): void
     {
-        rescue(fn () => $this->client(30)->delete("runs/{$name}"), null, false);
+        rescue(fn () => $this->client(30)->delete("runs/{$name}?idle=1"), null, false);
     }
 
     /**
@@ -517,7 +525,7 @@ class CloudflareSandbox extends Sandbox
      *
      * @param  array<string, mixed>  $spec
      * @param  Closure(string, string): void|null  $output
-     * @return array{exitCode: int, seconds: int, kept: bool, samples: list<array{0: int, 1: float, 2: int, 3: float}>}|null null when the sandbox of that name is busy with another run
+     * @return array{exitCode: int, seconds: int, kept: bool, warm: bool, samples: list<array{0: int, 1: float, 2: int, 3: float}>}|null null when the sandbox of that name is busy with another run
      */
     protected function ask(string $run, array $spec, int $timeout, ?Closure $output): ?array
     {
@@ -540,7 +548,7 @@ class CloudflareSandbox extends Sandbox
             } elseif ($event === 'error') {
                 throw new RuntimeException('The Cloudflare sandbox did not run the step: '.mb_substr(is_string($data) ? $data : (string) json_encode($data), 0, 500));
             } elseif ($event === 'exit' && is_array($data)) {
-                return ['exitCode' => (int) ($data['exitCode'] ?? 1), 'seconds' => (int) ($data['seconds'] ?? 0), 'kept' => ($data['kept'] ?? false) === true, 'samples' => self::samples($data['metrics']['samples'] ?? [])];
+                return ['exitCode' => (int) ($data['exitCode'] ?? 1), 'seconds' => (int) ($data['seconds'] ?? 0), 'kept' => ($data['kept'] ?? false) === true, 'warm' => ($data['keptWarm'] ?? false) === true, 'samples' => self::samples($data['metrics']['samples'] ?? [])];
             }
         }
 

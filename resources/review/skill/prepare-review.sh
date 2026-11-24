@@ -435,14 +435,8 @@ if [ -f composer.json ]; then
   COMMITTED_VENDOR=$(git ls-files vendor 2> /dev/null | head -n 1)
   VENDOR_TAR=""
   VENDOR_BASE=""
-  WARM_VENDOR=""
   if [ -n "$COMMITTED_VENDOR" ]; then
     echo "This repository commits files under vendor/, so vendor/ is installed and not kept in the cache."
-  elif [ "${REVIEW_WARM_VENDOR:-}" = "true" ] && [ -d vendor ] && [ ! -L vendor ]; then
-    # In a warm Cloudflare sandbox: the vendor/ the last review of this branch
-    # installed, which Composer brings in line with this lock. Never kept for
-    # other pull requests: that reviewer could write it.
-    WARM_VENDOR=1
   elif [ -n "${REVIEW_VENDOR_BASE:-}" ]; then
     # In a Cloudflare sandbox: one vendor/ per repository, the destination
     # branch's, which the Worker brings when it has one. Composer then installs
@@ -457,9 +451,7 @@ if [ -f composer.json ]; then
 
   # The step says whether it starts from a vendor/ that was kept: an install from
   # nothing takes many times longer, so the figures of the two are kept apart.
-  if [ -n "$WARM_VENDOR" ]; then
-    echo "##[phase] composer warm"
-  elif { [ -n "$VENDOR_BASE" ] && [ -f "$VENDOR_BASE" ]; } || { [ -n "$VENDOR_TAR" ] && [ -f "$VENDOR_TAR" ]; }; then
+  if { [ -n "$VENDOR_BASE" ] && [ -f "$VENDOR_BASE" ]; } || { [ -n "$VENDOR_TAR" ] && [ -f "$VENDOR_TAR" ]; }; then
     echo "##[phase] composer cached"
   else
     echo "##[phase] composer fresh"

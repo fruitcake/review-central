@@ -48,11 +48,12 @@ final class ProviderKeys
      * Worker would send on unencrypted, stops the run instead.
      *
      * @param  array<string, string>  $environment
+     * @param  string|null  $stableFor  the name of a warm sandbox, whose placeholders stay the same for the same keys
      * @return array{environment: array<string, string>, credentials: list<array{host: string, placeholder: string, value: string}>}
      *
      * @throws RuntimeException
      */
-    public static function proxied(array $environment): array
+    public static function proxied(array $environment, ?string $stableFor = null): array
     {
         $credentials = [];
 
@@ -79,7 +80,7 @@ final class ProviderKeys
                 $host = strtolower($gateway);
             }
 
-            $placeholder = self::placeholder($value);
+            $placeholder = self::placeholder($value, $stableFor);
             $environment[$variable] = $placeholder;
             $credentials[] = ['host' => $host, 'placeholder' => $placeholder, 'value' => $value];
         }
@@ -90,11 +91,16 @@ final class ProviderKeys
     /**
      * Random, and shaped like the key where a CLI looks at its start: the
      * provider's prefix ("sk-ant-api03-", "sk-proj-", "gsk_"), never more of it.
+     *
+     * For a sandbox kept warm, the same for the same key under the same name, so
+     * the Worker can tell the next run brings the same keys and keep what it
+     * set up for them; a key that changed gives another one, and a fresh sandbox.
      */
-    protected static function placeholder(string $key): string
+    protected static function placeholder(string $key, ?string $stableFor = null): string
     {
         $prefix = preg_match('/^[A-Za-z]{2,5}[-_](?:[A-Za-z0-9]{2,6}[-_]){0,2}/', $key, $matches) === 1 ? $matches[0] : '';
+        $unique = $stableFor === null ? bin2hex(random_bytes(20)) : substr(hash_hmac('sha256', $key, config('app.key').'|warm|'.$stableFor), 0, 40);
 
-        return $prefix.'placeholder-'.bin2hex(random_bytes(20));
+        return $prefix.'placeholder-'.$unique;
     }
 }

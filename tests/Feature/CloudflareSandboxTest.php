@@ -380,7 +380,7 @@ it('keeps a sandbox warm under the branch\'s name, and starts a fresh one of its
 
         return $busy && str_contains($request->url(), '/runs/warm-')
             ? Http::response(['error' => 'This sandbox is running a review.'], 409)
-            : Http::response(sandboxEvents([['exit', ['exitCode' => 0, 'seconds' => 10, 'kept' => false]]]), 200, ['Content-Type' => 'text/event-stream']);
+            : Http::response(sandboxEvents([['exit', ['exitCode' => 0, 'seconds' => 10, 'kept' => false, 'keptWarm' => str_contains($request->url(), '/runs/warm-')]]]), 200, ['Content-Type' => 'text/event-stream']);
     }]);
     $clone = ['url' => 'https://bitbucket.org/acme/shop.git', 'authorization' => null, 'ref' => 'refs/heads/feature', 'name' => 'feature', 'commit' => str_repeat('a', 40), 'destination' => 'main', 'base' => null, 'since' => null];
 
