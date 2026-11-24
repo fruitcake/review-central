@@ -130,7 +130,7 @@ Where the tenant has an AI provider, a small model also writes it in a sentence 
 
 **With me** lists the pull requests whose turn is yours. It goes by the accounts you connected on your profile (the menu at the top right), and the ones you list there for hosts you did not connect: your Bitbucket nickname or account ID, your GitHub login. They only tell which pull requests are yours and give no access. With none, your name is matched to the name the host shows. A row's details show the reviewers, the summary and the history: opened, pushed, asked to review, approved, changes requested, and each AI review.
 
-**Draft** lists the open drafts. **Merged** and **Declined** list the pull requests closed that way in the last 90 days, with their history; after that they are removed. A declined pull request that is opened again, as GitHub allows, is back among the open ones; a merged one stays merged, also when a delivery from before arrives late.
+The list opens on **Active**: the open pull requests that are not drafts. **Draft** lists the open drafts, and **All open** both. **Merged** and **Declined** list the pull requests closed that way in the last 90 days, with their history; after that they are removed. A declined pull request that is opened again, as GitHub allows, is back among the open ones; a merged one stays merged, also when a delivery from before arrives late.
 
 Approvals and requests for changes reach Review Central through the webhook events listed under [Setting up a tenant](./tenants). `php artisan review:sync-pull-requests` reads every listed pull request from its host again, for those from before and for a delivery that was missed; it runs every night by itself.
 
