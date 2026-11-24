@@ -43,7 +43,9 @@ else
   [ -x "$CLAUDE" ] || IMAGE_CLAUDE=$(command -v claude 2>/dev/null) || IMAGE_CLAUDE=""
   if [ -n "$IMAGE_CLAUDE" ]; then
     IMAGE_VERSION=$("$IMAGE_CLAUDE" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) || IMAGE_VERSION=""
-    LATEST_VERSION=$(npm view @anthropic-ai/claude-code version 2>/dev/null) || LATEST_VERSION=""
+    # A Cloudflare sandbox is told the version its snapshot was made with, which
+    # is current until the next snapshot: no need to ask npm.
+    LATEST_VERSION=${REVIEW_CLAUDE_VERSION:-$(npm view @anthropic-ai/claude-code version 2>/dev/null)} || LATEST_VERSION=""
     if [ -z "$IMAGE_VERSION" ]; then
       echo "The image's Claude Code does not start; installing it."
     elif [ -n "$LATEST_VERSION" ] && [ "$IMAGE_VERSION" != "$LATEST_VERSION" ]; then
@@ -66,7 +68,13 @@ else
     exit 1
   fi
 
-  echo "Claude Code $("$CLAUDE" --version)"
+  # Started once less where the image's was just asked: a cold start of the CLI
+  # takes seconds on a sandbox's share of a processor.
+  if [ "$CLAUDE" = "$IMAGE_CLAUDE" ] && [ -n "${IMAGE_VERSION:-}" ]; then
+    echo "Claude Code $IMAGE_VERSION"
+  else
+    echo "Claude Code $("$CLAUDE" --version)"
+  fi
 fi
 
 # No MCP server at all. --strict-mcp-config keeps out the repository's own

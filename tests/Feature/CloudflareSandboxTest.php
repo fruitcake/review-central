@@ -196,6 +196,28 @@ it('reports a step that failed in the sandbox by its exit code, as Docker does',
         ->and($sandbox->seconds)->toBe(1800);
 });
 
+it('tells the scripts the CLI versions its snapshot has, so they do not ask npm each review', function (bool $setup, array $told) {
+    config(['review.cloudflare.setup' => $setup]);
+    app(PlatformSettings::class)->save([PlatformSettings::CLOUDFLARE_CLIS => ['@anthropic-ai/claude-code' => '2.1.329', '@openai/codex' => '0.9.1; rm -rf /']]);
+    Process::fake(function ($process) {
+        if (((array) $process->command)[0] === 'gzip') {
+            File::put(end($process->command).'.gz', 'packed');
+        }
+
+        return Process::result();
+    });
+    Http::fake(['sandbox.example.com/*' => Http::response(sandboxEvents([['exit', ['exitCode' => 0, 'seconds' => 60, 'kept' => false]]]))]);
+
+    app(CloudflareSandbox::class)->run('review-7-41-review', 'true', $this->work, [], trusted: false, timeout: 1800);
+
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+        && array_intersect_key((array) $request['env'], ['REVIEW_CLAUDE_VERSION' => true, 'REVIEW_CODEX_VERSION' => true]) === $told);
+})->with([
+    'from the snapshot' => [true, ['REVIEW_CLAUDE_VERSION' => '2.1.329']],
+    // An image of one's own has its own CLIs, which the scripts check with npm.
+    'an image of one\'s own' => [false, []],
+]);
+
 it('runs in the sandbox of the trial\'s runner, else the repository\'s, else the platform\'s, and on Docker when Cloudflare is not set up', function () {
     $docker = new Sandbox;
     $trial = fn (?string $runner): Trial => new Trial(pullRequestId: 570, destination: 'main', sandbox: $runner);
