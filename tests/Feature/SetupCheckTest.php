@@ -302,3 +302,27 @@ it('counts for the badge after the response, not in the page\'s own request', fu
         ->and(Cache::get(Setup::WRONG_CACHE)['count'])->toBe($wrong)
         ->and(Setup::getNavigationBadge())->toBe((string) $wrong);
 });
+
+it('hides the badge when the cache cannot be reached, instead of failing the page', function () {
+    Cache::shouldReceive('get')->andThrow(new RuntimeException('Connection refused'));
+
+    expect(Setup::getNavigationBadge())->toBeNull();
+});
+
+it('checks the bucket with an object of its own each time, so two checks at once do not trip each other', function () {
+    $keys = [];
+    Storage::shouldReceive('disk')->with('r2')->andReturnSelf()->getMock()
+        ->shouldReceive('put')->andReturnUsing(function (string $key, string $contents) use (&$keys): bool {
+            $keys[] = $key;
+            Cache::put("written:{$key}", $contents);
+
+            return true;
+        })->getMock()
+        ->shouldReceive('get')->andReturnUsing(fn (string $key): ?string => Cache::get("written:{$key}"))->getMock()
+        ->shouldReceive('delete')->andReturnTrue();
+
+    expect(app(SetupCheck::class)->cloudflareBucket('r2', 'review-central')['state'])->toBe(SetupCheck::OK)
+        ->and(app(SetupCheck::class)->cloudflareBucket('r2', 'review-central')['state'])->toBe(SetupCheck::OK)
+        ->and($keys)->toHaveCount(2)
+        ->and($keys[0])->not->toBe($keys[1]);
+});

@@ -612,7 +612,9 @@ class SetupCheck
     public function cloudflareBucket(string $disk, string $bucket): array
     {
         $title = 'Cloudflare sandboxes: this installation reaches the bucket';
-        $key = 'review/setup-check';
+        // One object per check: the badge and the Setup page can check at the same
+        // time, and one must not remove what the other is about to read back.
+        $key = 'review/setup-check/'.Str::uuid();
         $what = 'write to';
         // Where each part comes from: the settings, or the environment where it sets one.
         $from = function (string $setting, string $variable): string {

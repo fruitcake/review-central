@@ -47,18 +47,24 @@ class Setup extends Page
      */
     public static function getNavigationBadge(): ?string
     {
-        $counted = Cache::get(self::WRONG_CACHE);
+        // The menu is on every admin page: a cache that cannot be reached hides the badge, no more.
+        return rescue(function (): ?string {
+            $counted = Cache::get(self::WRONG_CACHE);
 
-        if ((! is_array($counted) || $counted['at'] < now()->subMinute()->getTimestamp()) && Cache::add(self::WRONG_CACHE.':counting', true, 60)) {
-            defer(function (): void {
-                rescue(fn () => self::remember(app(SetupCheck::class)->groups()), report: false);
-                Cache::forget(self::WRONG_CACHE.':counting');
-            });
-        }
+            if ((! is_array($counted) || $counted['at'] < now()->subMinute()->getTimestamp()) && Cache::add(self::WRONG_CACHE.':counting', true, 60)) {
+                defer(fn () => rescue(function (): void {
+                    try {
+                        self::remember(app(SetupCheck::class)->groups());
+                    } finally {
+                        Cache::forget(self::WRONG_CACHE.':counting');
+                    }
+                }, report: false));
+            }
 
-        $wrong = is_array($counted) ? (int) $counted['count'] : 0;
+            $wrong = is_array($counted) ? (int) $counted['count'] : 0;
 
-        return $wrong === 0 ? null : (string) $wrong;
+            return $wrong === 0 ? null : (string) $wrong;
+        }, null, false);
     }
 
     public static function getNavigationBadgeColor(): string
