@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\PersonalConnectionController;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Models\UserIdentity;
@@ -12,8 +13,10 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Testing\TestResponse;
 use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\BitbucketProvider;
+use Laravel\Socialite\Two\GithubProvider;
 use Laravel\Socialite\Two\GoogleProvider;
 use Laravel\Socialite\Two\User as BitbucketUser;
+use Laravel\Socialite\Two\User as GitHubUser;
 use Laravel\Socialite\Two\User as GoogleUser;
 
 beforeEach(function () {
@@ -286,7 +289,7 @@ it('signs a Bitbucket account in no more once it is disconnected', function () {
     $user = User::factory()->create(['email' => 'nora@example.com']);
     UserIdentity::query()->create(['user_id' => $user->id, 'provider' => 'bitbucket', 'provider_id' => '{nora-uuid}']);
 
-    app(PersonalConnections::class)->disconnect($user);
+    app(PersonalConnections::class)->disconnect($user, 'bitbucket');
 
     signInWithBitbucket('nora@example.com')->assertRedirect(route('sign-in.code'));
     $this->assertGuest();
@@ -306,4 +309,55 @@ it('links no account by a code when the user linked another one meanwhile', func
 
     $this->assertGuest();
     expect(UserIdentity::query()->sole()->provider_id)->toBe('{account-b}');
+});
+
+it('signs in with GitHub through the GitHub App: a code the first time, by itself after, and only for this account', function () {
+    Notification::fake();
+    config(['services.github_app' => ['id' => '4242', 'slug' => 'review-central', 'client_id' => 'Iv1.client', 'client_secret' => 'client-secret', 'private_key' => 'a key', 'webhook_secret' => null]]);
+    $user = User::factory()->create(['email' => 'nora@example.com']);
+    $this->githubAccount = (new GitHubUser)->setRaw(['id' => 5150, 'login' => 'nora-gh'])->map(['id' => 5150, 'nickname' => 'nora-gh', 'name' => 'Nora New', 'email' => 'nora@example.com']);
+    $provider = Mockery::mock(GithubProvider::class);
+    $provider->shouldReceive('redirectUrl')->andReturnSelf();
+    $provider->shouldReceive('redirect')->andReturn(new RedirectResponse('https://github.com/login/oauth/authorize'));
+    $provider->shouldReceive('user')->andReturnUsing(fn (): GitHubUser => $this->githubAccount);
+    Socialite::shouldReceive('buildProvider')->with(GithubProvider::class, Mockery::any())->andReturn($provider);
+    $signIn = function (): TestResponse {
+        $this->get('/sign-in/github')->assertRedirect('https://github.com/login/oauth/authorize');
+        $this->get('/connections/github/callback?code=abc&state=xyz')->assertRedirect('/sign-in/github/callback?code=abc&state=xyz');
+
+        return $this->get('/sign-in/github/callback?code=abc&state=xyz');
+    };
+
+    $this->get('/app/login')->assertSee('Sign in with GitHub');
+    $signIn()->assertRedirect(route('sign-in.code'));
+    $this->get(route('sign-in.code'))->assertSee('your GitHub account signs you in by itself')->assertSee('sign in with GitHub again');
+    Notification::assertSentOnDemand(SignInCode::class, fn (SignInCode $notification): bool => $notification->provider === 'GitHub' && $notification->account === 'nora-gh');
+
+    $this->post(route('sign-in.code.check'), ['code' => mailedCode('nora@example.com')])->assertRedirect(route('home'));
+
+    $this->assertAuthenticatedAs($user);
+    expect(UserIdentity::query()->sole()->only(['provider', 'provider_id']))->toBe(['provider' => 'github', 'provider_id' => '5150']);
+
+    auth()->logout();
+    Notification::fake();
+    $signIn()->assertRedirect(route('home'));
+
+    $this->assertAuthenticatedAs($user);
+    Notification::assertNothingSent();
+
+    // A GitHub App without the right to read addresses gives none: that signs nobody in.
+    auth()->logout();
+    $this->githubAccount = (new GitHubUser)->setRaw(['id' => 6160])->map(['id' => 6160, 'nickname' => 'other-gh', 'email' => null]);
+
+    $signIn()->assertRedirect('/app/login')->assertSessionHas('sign_in_refused');
+    $this->assertGuest();
+});
+
+it('hands a sign-in at Bitbucket to nothing that comes back from GitHub', function () {
+    config(['services.github_app' => ['id' => '4242', 'slug' => 'review-central', 'client_id' => 'Iv1.client', 'client_secret' => 'client-secret', 'private_key' => 'a key', 'webhook_secret' => null]]);
+
+    // Started at Bitbucket, then a callback from GitHub in the same session: no sign-in, and no one to connect for.
+    $this->withSession([PersonalConnectionController::SIGN_IN => 'bitbucket'])
+        ->get('/connections/github/callback?code=abc&state=xyz')
+        ->assertRedirect(route('filament.app.auth.login'));
 });

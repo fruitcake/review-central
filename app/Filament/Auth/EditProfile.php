@@ -92,54 +92,61 @@ class EditProfile extends BaseEditProfile
                 $this->getPasswordFormComponent(),
                 $this->getPasswordConfirmationFormComponent(),
                 $this->getCurrentPasswordFormComponent(),
-                self::bitbucketSection(),
+                self::personalSection(PersonalConnections::BITBUCKET),
+                self::personalSection(PersonalConnections::GITHUB),
                 self::assistantsSection(),
             ]);
     }
 
     /**
-     * The user's own Bitbucket account, which what they write on a pull request
+     * The user's own account at a host, which what they write on a pull request
      * through Review Central is written as. Only where the installation is
-     * registered at Bitbucket.
+     * registered there: a Bitbucket consumer, or a GitHub App.
      */
-    private static function bitbucketSection(): Section
+    private static function personalSection(string $host): Section
     {
         $connections = app(PersonalConnections::class);
+        $name = PersonalConnections::HOSTS[$host];
         $user = fn (): User => Filament::auth()->user() instanceof User ? Filament::auth()->user() : throw new LogicException('Not signed in.');
 
-        return Section::make('Your Bitbucket account')
-            ->description('Connected, your replies to findings on Bitbucket pull requests are written as you, and no longer by the team\'s connection with your name above them. Review Central uses it for nothing else, though Bitbucket lets it comment on every pull request you can.')
-            ->visible(fn (): bool => PersonalConnections::available())
+        return Section::make("Your {$name} account")
+            ->description(match ($host) {
+                PersonalConnections::GITHUB => 'Connected, your replies to findings on GitHub pull requests are written as you, with the app\'s badge next to your name, and no longer by the app with your name above them. Only on repositories reviewed through the GitHub App; Review Central uses it for nothing else.',
+                default => 'Connected, your replies to findings on Bitbucket pull requests are written as you, and no longer by the team\'s connection with your name above them. Review Central uses it for nothing else, though Bitbucket lets it comment on every pull request you can.',
+            })
+            ->visible(fn (): bool => PersonalConnections::available($host))
             ->schema([
-                TextEntry::make('bitbucket_account')
+                TextEntry::make("{$host}_account")
                     ->hiddenLabel()
-                    ->state(function () use ($connections, $user): string {
-                        $connection = $connections->of($user());
+                    ->state(function () use ($connections, $user, $host): string {
+                        $connection = $connections->of($user(), $host);
 
                         return match (true) {
-                            $connection === null && $connections->signsIn($user()) => 'It signs you in, but is not connected to reply as you.',
+                            $connection === null && $connections->signsIn($user(), $host) => 'It signs you in, but is not connected to reply as you.',
                             $connection === null => 'Not connected.',
-                            ($problem = $connections->problem($user())) !== null => $problem,
+                            ($problem = $connections->problem($user(), $host)) !== null => $problem,
                             default => 'Connected as '.($connection->nickname ?? $connection->account_id).'.',
                         };
                     }),
                 Actions::make([
-                    Action::make('connectBitbucket')
-                        ->label(fn (): string => $connections->of($user()) === null ? 'Connect' : 'Connect again')
+                    Action::make('connect'.ucfirst($host))
+                        ->label(fn (): string => $connections->of($user(), $host) === null ? 'Connect' : 'Connect again')
                         ->icon(Heroicon::OutlinedLink)
                         // Back to this profile, in the tenant it is open in.
-                        ->url(fn (): string => route('connections.bitbucket.redirect', array_filter(['tenant' => Filament::getTenant()?->getAttribute('slug')]))),
-                    Action::make('disconnectBitbucket')
+                        ->url(fn (): string => route('connections.personal.redirect', array_filter(['host' => $host, 'tenant' => Filament::getTenant()?->getAttribute('slug')]))),
+                    Action::make('disconnect'.ucfirst($host))
                         ->label('Disconnect')
                         ->color('gray')
-                        ->visible(fn (): bool => $connections->of($user()) !== null || $connections->signsIn($user()))
+                        ->visible(fn (): bool => $connections->of($user(), $host) !== null || $connections->signsIn($user(), $host))
                         ->requiresConfirmation()
-                        ->modalDescription('Your replies are written by the team\'s connection again, with your name above them, and the account no longer signs you in.')
-                        ->action(function () use ($connections, $user): void {
-                            $connections->disconnect($user());
-                            Notification::make()->title('Bitbucket is disconnected')->success()->send();
+                        ->modalDescription($host === PersonalConnections::GITHUB
+                            ? 'Your replies are written by the app again, with your name above them, and the account no longer signs you in.'
+                            : 'Your replies are written by the team\'s connection again, with your name above them, and the account no longer signs you in.')
+                        ->action(function () use ($connections, $user, $host, $name): void {
+                            $connections->disconnect($user(), $host);
+                            Notification::make()->title("{$name} is disconnected")->success()->send();
                         }),
-                ])->key('bitbucket_actions'),
+                ])->key("{$host}_actions"),
             ]);
     }
 

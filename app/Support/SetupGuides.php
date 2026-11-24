@@ -215,7 +215,7 @@ class SetupGuides
             steps: [
                 'Open the link, or the organisation\'s **Settings → Developer settings → GitHub Apps → New GitHub App** to have the organisation own it.',
                 'Name the app; its comments show as `<name>[bot]`. Homepage URL: `'.url('/').'`.',
-                'Callback URL: `'.url('/connections/oauth/callback').'`. Leave **Request user authorization (OAuth) during installation** off.',
+                'Callback URLs: `'.url('/connections/oauth/callback').'`, for connecting an installation, and `'.url('/connections/github/callback').'`, for people who sign in with GitHub or reply as themselves. Leave **Expire user authorization tokens** on, and **Request user authorization (OAuth) during installation** off.',
                 'Webhook URL: `'.url('/api/webhooks/github-app').'`, with a long random secret of your own.',
                 'Set the permissions below, subscribe to the events **Pull request**, **Issue comment**, **Pull request review comment**, **Pull request review** and **Check run**, and under **Where can this GitHub App be installed?** pick **Any account** for tenants outside your organisation. No verification is needed for that; GitHub asks for it only for a paid listing in the Marketplace.',
                 'Create it, then **Generate a private key** and generate a client secret. Fill in the app ID, the name in its address, the client ID and secret, the webhook secret and the contents of the private key under **Apps** in the admin panel; or set `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY` (the PEM file\'s path, or its contents) and `GITHUB_APP_WEBHOOK_SECRET` in `.env`, which goes first.',
@@ -228,9 +228,11 @@ class SetupGuides
                 'Repository → Commit statuses: Read and write' => 'the status on the commit.',
                 'Repository → Checks: Read and write' => 'the "AI Review" check with its annotations and its button.',
                 'Organization → Members: Read' => 'checks that whoever connects an installation owns the organisation.',
+                'Account → Email addresses: Read' => 'the account\'s primary verified address, for signing in with GitHub. Asked of each person when they sign in, not of the organisations that install the app.',
             ],
             notes: [
                 'Until all but the webhook secret are set, *GitHub App* is not offered as a connection.',
+                'With the app set up, the sign-in page offers **Sign in with GitHub**, and each person can connect their GitHub account on their profile to reply as themselves. An account that is not linked yet gets a code mailed to its address first.',
             ],
         );
     }

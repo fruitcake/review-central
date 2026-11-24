@@ -27,11 +27,20 @@ class SingleSignOn
     public const GOOGLE = 'google';
 
     /**
-     * Bitbucket says which address an account has, not that it delivers that
-     * address's mail: an account it does not know yet signs in only once its
-     * address has answered a code ({@see SignInCodes}).
+     * Bitbucket and GitHub say which address an account has, not that they
+     * deliver that address's mail: an account they do not know yet signs in
+     * only once its address has answered a code ({@see SignInCodes}).
      */
-    public const BITBUCKET = 'bitbucket';
+    public const BITBUCKET = PersonalConnections::BITBUCKET;
+
+    public const GITHUB = PersonalConnections::GITHUB;
+
+    /**
+     * The providers whose accounts are linked by a mailed code the first time.
+     *
+     * @var array<int, string>
+     */
+    public const BY_CODE = [self::BITBUCKET, self::GITHUB];
 
     /**
      * The providers this installation is set up for, with the name on the button.
@@ -42,7 +51,8 @@ class SingleSignOn
     {
         return array_filter([
             self::GOOGLE => filled(config('services.google.client_id')) && filled(config('services.google.client_secret')) ? 'Google' : null,
-            self::BITBUCKET => PersonalConnections::available() ? 'Bitbucket' : null,
+            self::BITBUCKET => PersonalConnections::available(self::BITBUCKET) ? 'Bitbucket' : null,
+            self::GITHUB => PersonalConnections::available(self::GITHUB) ? 'GitHub' : null,
         ]);
     }
 

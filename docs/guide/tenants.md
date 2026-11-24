@@ -55,9 +55,9 @@ An app cannot be added as a reviewer, and `@<app name>` notifies nobody. `/revie
 
 To register it, as the installation's administrator: on GitHub, under the organisation's (or your own) **Settings → Developer settings → GitHub Apps → New GitHub App**:
 
-- **Callback URL**: `<APP_URL>/connections/oauth/callback`. Leave *Request user authorization (OAuth) during installation* off.
+- **Callback URLs**: `<APP_URL>/connections/oauth/callback`, for connecting an installation, and `<APP_URL>/connections/github/callback`, for people who [sign in with GitHub or reply as themselves](#replying-and-signing-in-with-github). Leave *Expire user authorization tokens* on, and *Request user authorization (OAuth) during installation* off.
 - **Webhook URL**: `<APP_URL>/api/webhooks/github-app`, with a secret of your own.
-- **Repository permissions**: Contents and Metadata read; Pull requests, Issues, Commit statuses and Checks read and write. Contents read and write is optional: GitHub asks it of an app that resolves a review thread, as the review does for a fixed finding, and it would also let the app push. Without it the thread stays open, and the finding says it is done on its first line (`F1 · HIGH · ✅ Fixed`, as in the description) and in the reply under it. **Organization permissions**: Members read, to check who owns an organisation.
+- **Repository permissions**: Contents and Metadata read; Pull requests, Issues, Commit statuses and Checks read and write. Contents read and write is optional: GitHub asks it of an app that resolves a review thread, as the review does for a fixed finding, and it would also let the app push. Without it the thread stays open, and the finding says it is done on its first line (`F1 · HIGH · ✅ Fixed`, as in the description) and in the reply under it. **Organization permissions**: Members read, to check who owns an organisation. **Account permissions**: Email addresses read, for signing in with GitHub; GitHub asks it of each person when they sign in, not of the organisations that install the app.
 - **Events**: Pull request, Issue comment, Pull request review comment, Pull request review, Check run.
 - **Where can this GitHub App be installed**: *Any account*, for tenants outside your own organisation. That needs no verification by GitHub; it asks for one only for a paid listing in the Marketplace.
 
@@ -83,6 +83,14 @@ The tenant's connection itself stays a token of its own: the review comments, ap
 
 With the same consumer, the sign-in page has a **Sign in with Bitbucket** button. Bitbucket names an account's address but does not deliver its mail, so its word alone is not enough: someone who had an address at a former employer may still have a Bitbucket account under it. A Bitbucket account signs in by itself once it is linked: by connecting it on the profile, or by signing in with it once and typing the code that is then mailed to the account's primary address. The code works for 15 minutes, in the browser that signed in. Someone without an account here gets one that way only when a tenant lists their address's domain under **Sign-in domains**, as with Google; the code shows the address is theirs.
 
+## Replying and signing in with GitHub
+
+With the GitHub App set up, each person can connect their own GitHub account under **Your GitHub account** on their profile, and the sign-in page has a **Sign in with GitHub** button. Both go through the app, and come back on its callback `<APP_URL>/connections/github/callback`; nothing else is to be registered.
+
+Connected, a reply to a finding that an AI assistant posts for you is written as you, with the app's badge next to your name, instead of by the app with your name above it. GitHub gives the app's token for a person the app's permissions and no more than theirs, and only on the repositories the app is installed on: a repository whose connection is a token of its own gets the reply from that connection, signed with your name, as before. The token lasts eight hours and is renewed by itself; **Disconnect** also has GitHub revoke it. Connecting fills in your login under **Your accounts on the hosts**.
+
+Signing in works as with Bitbucket: GitHub names an account's primary verified address, but "verified" was true once and the address may belong to someone else by now, so the first sign-in with an account that is not linked yet mails a code to that address. A connected account signs in by itself. Someone without an account here gets one that way only when a tenant lists their address's domain under **Sign-in domains**. Without the app's *Email addresses* permission GitHub names no address, and signing in with an account that is not linked yet is refused.
+
 ## Signing in to Asana and Jira
 
 A ticket connection can sign in at Asana or Jira instead of taking a pasted token, when the installation is registered as an OAuth app there, with `<APP_URL>/connections/oauth/callback` as its redirect address. Add the app under **Admin → Apps**, or set it in `.env`. Each person who connects says yes with their own account, and the tokens are kept per connection, with the app they came through:
@@ -97,7 +105,7 @@ Without an app, a connection takes a token only, and its form says why.
 **Admin → Apps** lists the apps a person signs in at a service through. **Add app** picks its type:
 
 - **Google**, to sign in with: there is one, for everyone, before any tenant is known. Who joins which tenant goes by the tenant's sign-in domains.
-- **GitHub App**: one, for now.
+- **GitHub App**: one, for now. Signing in with GitHub and replying as yourself go through it too.
 - **Asana** and **Atlassian**: as many as you like, for instance one per agency or customer.
 
 An app other than Google is for the tenants picked on it, or for every tenant; a new one is for none until it is given to some. A tenant can also add its own Asana or Atlassian app under **Apps** in its panel, for itself alone. A connection that can sign in through more than one asks which when **Connect** is pressed, and keeps renewing its access through that one. Its form says why it cannot sign in where no app is there for its team. What `.env` sets is an app for every tenant too, listed first; for Google and the GitHub App it goes before the one in the list.
