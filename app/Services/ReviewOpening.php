@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Tickets\TicketResolver;
@@ -70,7 +71,7 @@ class ReviewOpening
             $pullRequest,
             $comments,
             $commit,
-            (bool) ($input['drafts'] ?? false),
+            (bool) ($input['drafts'] ?? false) || $this->askedByHand($repository, (int) $id),
         );
 
         // "Reviewed up to <commit>" is read from a marker in the description or in a
@@ -324,6 +325,21 @@ class ReviewOpening
                 'started_at' => now(),
             ],
         );
+    }
+
+    /**
+     * Whether someone started this pull request's review by hand and no review
+     * has finished since: it is then reviewed as a draft too, as on a /review
+     * comment, and left alone again once that review is done.
+     */
+    protected function askedByHand(Repository $repository, int $pullRequestId): bool
+    {
+        $requestedAt = OpenPullRequest::query()
+            ->where('repository_id', $repository->getKey())
+            ->where('pull_request_id', $pullRequestId)
+            ->value('review_requested_at');
+
+        return $requestedAt !== null && $this->budget->requestStands($repository, $pullRequestId, (string) $requestedAt);
     }
 
     /**

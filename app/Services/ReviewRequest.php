@@ -529,7 +529,7 @@ class ReviewRequest
      * Starts the review on the branch of an open pull request, on the runner the
      * repository chose.
      *
-     * @param  bool  $strict  throw when the repository's runner is not set up, for a person who asked in the panel
+     * @param  bool  $strict  a person asked for it: throw when the repository's runner is not set up, and review a draft
      *
      * @throws RuntimeException when $strict and the runner is not set up
      * @throws Throwable when the runner could not start it
@@ -548,12 +548,20 @@ class ReviewRequest
             throw new RuntimeException("{$repository->fullName()} reviews on {$runner->label()}, which is not set up on this installation. {$runner->setupHint()} Or pick another runner under \"Runs on\".");
         }
 
+        $pullRequests = OpenPullRequest::query()->where('repository_id', $repository->getKey())->where('branch', $branch);
+
+        // A person asked for this review by name, so a draft is reviewed, as on a
+        // /review comment. Noted before the run starts, which may be at once.
+        if ($strict) {
+            $pullRequests->clone()->update(['review_requested_at' => now()]);
+        }
+
         // Not pinned to a commit: the delivery only carries an abbreviated hash, and
         // the branch as it is now is what the person asked to have reviewed.
         $repository->runner()->start($repository, $branch);
 
         // Started, by a person or by itself: none of its pull requests waits any more.
-        OpenPullRequest::query()->where('repository_id', $repository->getKey())->where('branch', $branch)->update(['awaiting_approval' => false]);
+        $pullRequests->update(['awaiting_approval' => false]);
     }
 
     /**

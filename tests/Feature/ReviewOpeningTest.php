@@ -4,16 +4,20 @@ namespace Tests\Feature;
 
 use App\Enums\ReviewCommandAccess;
 use App\Enums\ReviewsFrom;
+use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Runners\ContainerRunner;
+use App\Runners\DiffRunner;
 use App\Services\ReviewLock;
 use App\Services\ReviewPublisher;
+use App\Services\ReviewRequest;
 use App\Services\ReviewSettings;
 use App\Tickets\TicketResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -182,6 +186,28 @@ class ReviewOpeningTest extends TestCase
 
         $this->openReview(['pull_request_id' => 570, 'commit' => str_repeat('b', 40)])
             ->assertJsonPath('skip', true)
+            ->assertJsonPath('reason', 'draft');
+    }
+
+    public function test_it_reviews_a_draft_someone_started_by_hand_until_a_review_has_finished(): void
+    {
+        $this->fakeBitbucket([], ['draft' => true]);
+        $record = OpenPullRequest::query()->create(['repository_id' => $this->repository->getKey(), 'pull_request_id' => 570]);
+        $record->forceFill(['branch' => 'feature/review', 'draft' => true])->save();
+        config(['review.diff.enabled' => true]);
+        $this->repository->update(['review_runner' => DiffRunner::NAME]);
+        Queue::fake();
+
+        app(ReviewRequest::class)->start($this->repository, 'feature/review', strict: true);
+
+        $this->openReview(['pull_request_id' => 570, 'commit' => str_repeat('9', 40)])
+            ->assertJsonPath('skip', false);
+
+        // That review is done: the draft is left alone again.
+        $this->reviewed($this->repository, 570, str_repeat('9', 40));
+        ReviewRun::query()->where('commit', str_repeat('9', 40))->update(['started_at' => now()->addMinute()]);
+
+        $this->openReview(['pull_request_id' => 570, 'commit' => str_repeat('8', 40)])
             ->assertJsonPath('reason', 'draft');
     }
 

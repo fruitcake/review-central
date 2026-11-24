@@ -32,6 +32,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property bool $draft
  * @property bool $from_fork
  * @property bool $awaiting_approval Not started by itself, for someone in the team to start
+ * @property CarbonInterface|null $review_requested_at When someone last started its review by hand
  * @property string|null $closed_as merged or declined; null while it is open
  * @property CarbonInterface|null $closed_at
  * @property string|null $source_updated_on
@@ -154,6 +155,7 @@ class OpenPullRequest extends Model
             'draft' => 'boolean',
             'from_fork' => 'boolean',
             'awaiting_approval' => 'boolean',
+            'review_requested_at' => 'datetime',
             'opened_at' => 'datetime',
             'head_since' => 'datetime',
             'reviewers' => 'array',
