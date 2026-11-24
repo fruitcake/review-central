@@ -242,6 +242,67 @@ class ReviewSettings
         return max(0, (int) ($own ?? ReviewFollowUps::MAX_ROUNDS));
     }
 
+    /** The thresholds a team can pick from, as `fail_on` names them. `low` is `any` by another name. */
+    public const THRESHOLDS = ['never', 'any', 'medium', 'high'];
+
+    /**
+     * The severity from which a finding holds the merge, as a `fail_on` spec: the
+     * platform's, with the team's over it, and the repository's over that, one
+     * category at a time. Set only for every category, a level below still keeps
+     * the categories it names on their own.
+     */
+    public static function failOn(Repository $repository): string
+    {
+        $thresholds = array_merge(
+            self::thresholds(ReviewPublisher::DEFAULT_FAIL_ON),
+            self::ownThresholds(self::defaults($repository->tenant)->fail_on),
+            self::ownThresholds($repository->reviewSetting?->fail_on),
+        );
+
+        $spec = $thresholds['default'];
+
+        foreach (ReviewPublisher::CATEGORIES as $category) {
+            if (isset($thresholds[$category]) && $thresholds[$category] !== $thresholds['default']) {
+                $spec .= ",{$category}:{$thresholds[$category]}";
+            }
+        }
+
+        return ReviewPublisher::failOnSpec($spec);
+    }
+
+    /**
+     * A `fail_on` spec by category, with `default` for every category it does not name.
+     *
+     * @return array<string, string>
+     */
+    public static function thresholds(string $failOn): array
+    {
+        $parts = explode(',', ReviewPublisher::failOnSpec($failOn));
+        $thresholds = ['default' => $parts[0] === 'low' ? 'any' : $parts[0]];
+
+        foreach (array_slice($parts, 1) as $part) {
+            [$category, $threshold] = explode(':', $part, 2);
+            $thresholds[$category] = $threshold === 'low' ? 'any' : $threshold;
+        }
+
+        return $thresholds;
+    }
+
+    /**
+     * What a setting sets of the threshold, without what it leaves to the level
+     * below and without anything that is no category or no threshold.
+     *
+     * @param  array<string, mixed>|null  $failOn
+     * @return array<string, string>
+     */
+    public static function ownThresholds(?array $failOn): array
+    {
+        return array_filter(
+            array_intersect_key($failOn ?? [], array_flip(['default', ...ReviewPublisher::CATEGORIES])),
+            fn (mixed $threshold): bool => in_array($threshold, self::THRESHOLDS, true),
+        );
+    }
+
     /** The most reviews one container job carries on with after its own. */
     public const MAX_FOLLOW_UPS = 2;
 
@@ -265,7 +326,7 @@ class ReviewSettings
     {
         $setting = self::defaults($tenant);
         // The notes on whose turn are the team's alone, and no repository's.
-        $setting->fill(array_intersect_key($data, self::VARIABLES + self::STRATEGY_FIELDS + ['providers' => true, 'follow_ups' => true, 'max_rounds' => true, 'turn_notes' => true, 'turn_model' => true, 'findings_check' => true]));
+        $setting->fill(array_intersect_key(self::withOwnThresholds($data), self::VARIABLES + self::STRATEGY_FIELDS + ['providers' => true, 'follow_ups' => true, 'max_rounds' => true, 'fail_on' => true, 'turn_notes' => true, 'turn_model' => true, 'findings_check' => true]));
         $setting->save();
     }
 
@@ -285,7 +346,7 @@ class ReviewSettings
      */
     public static function saveFor(Repository $repository, array $data): void
     {
-        $data = array_intersect_key($data, self::VARIABLES + self::STRATEGY_FIELDS + ['providers' => true, 'follow_ups' => true, 'max_rounds' => true]);
+        $data = array_intersect_key(self::withOwnThresholds($data), self::VARIABLES + self::STRATEGY_FIELDS + ['providers' => true, 'follow_ups' => true, 'max_rounds' => true, 'fail_on' => true]);
 
         if (array_filter($data, fn (mixed $value): bool => filled($value)) === []) {
             $repository->reviewSetting()->delete();
@@ -294,6 +355,22 @@ class ReviewSettings
         }
 
         $repository->reviewSetting()->updateOrCreate([], $data + ['tenant_id' => $repository->tenant_id]);
+    }
+
+    /**
+     * The form's thresholds as they are kept: only those set, and none at all as null,
+     * so a setting that sets none inherits every one.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    protected static function withOwnThresholds(array $data): array
+    {
+        if (array_key_exists('fail_on', $data)) {
+            $data['fail_on'] = self::ownThresholds(is_array($data['fail_on']) ? $data['fail_on'] : null) ?: null;
+        }
+
+        return $data;
     }
 
     /**

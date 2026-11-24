@@ -182,7 +182,7 @@ class DiffReview
 
             $log?->note("{$answer->model} answered: ".count($answer->report['findings'] ?? []).' finding(s), '.number_format($answer->usage['input'] + $answer->usage['cache_read'] + $answer->usage['cache_creation']).' tokens in and '.number_format($answer->usage['output']).' out.');
 
-            $filed = $this->filing->file($repository, $this->report($answer, $diff, $branch, $commit, $build, (int) $pullRequest['id'], $connection, $effort) + ($trial === null ? [] : ['custom' => true]) + ($trial === null && $repository->sourceControl()->publishes() ? [] : ['publish' => false]));
+            $filed = $this->filing->file($repository, $this->report($answer, $diff, $branch, $commit, $build, (int) $pullRequest['id'], $connection, $effort, ReviewSettings::failOn($repository)) + ($trial === null ? [] : ['custom' => true]) + ($trial === null && $repository->sourceControl()->publishes() ? [] : ['publish' => false]));
 
             $log?->note('Filed: '.(($filed['publish']['published'] ?? false) ? 'the review is on the pull request.' : 'not published ('.($filed['publish']['reason'] ?? 'no reason given').').'));
         } catch (ReviewerFailed $exception) {
@@ -318,14 +318,14 @@ class DiffReview
      *
      * @return array<string, mixed>
      */
-    protected function report(Answer $answer, Diff $diff, string $branch, string $commit, int $build, int $pullRequestId, Connection $connection, ?string $effort): array
+    protected function report(Answer $answer, Diff $diff, string $branch, string $commit, int $build, int $pullRequestId, Connection $connection, ?string $effort, string $failOn): array
     {
         $report = $answer->report;
         $findings = array_values(array_filter(is_array($report['findings'] ?? null) ? $report['findings'] : [], is_array(...)));
 
         // What the threshold says, not what the reviewer wrote: the approval or the
         // request for changes follows from it.
-        $blocking = array_filter($findings, fn (array $finding): bool => ReviewPublisher::blocks($finding, ReviewPublisher::DEFAULT_FAIL_ON));
+        $blocking = array_filter($findings, fn (array $finding): bool => ReviewPublisher::blocks($finding, $failOn));
 
         $lines = fn (string $field): array => array_values(array_filter(is_array($report[$field] ?? null) ? $report[$field] : [], is_string(...)));
 
@@ -345,7 +345,7 @@ class DiffReview
             // The findings go on the pull request as comments: there is no step here
             // to put them in the diff as annotations.
             'mode' => 'comment',
-            'fail_on' => ReviewPublisher::DEFAULT_FAIL_ON,
+            'fail_on' => $failOn,
             'agent' => self::AGENT,
             'provider' => $connection->driver,
             'model' => $answer->model,

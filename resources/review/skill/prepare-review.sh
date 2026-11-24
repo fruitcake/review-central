@@ -42,6 +42,11 @@ echo "AI review (${REVIEW_AGENT:-claude-code})"
 if [ -s review-context.json ]; then
   . .review/skill/review-settings.sh
   review_settings_apply "$(jq -c '.settings.server_variables // {}' review-context.json 2> /dev/null || echo '{}')"
+  # The threshold the review server set, where the step sets none: the second check
+  # picks the findings that would block by it. blocking.jq refuses one that does not parse.
+  if [ -z "${REVIEW_FAIL_ON:-}" ]; then
+    REVIEW_FAIL_ON=$(jq -r '.settings.fail_on // empty | strings' review-context.json 2> /dev/null) || REVIEW_FAIL_ON=""
+  fi
 fi
 echo "Settings, where the review server sets none the reviewer's own defaults:"
 echo "  REVIEW_MODE=${REVIEW_MODE:-both} (both | report | comment)"

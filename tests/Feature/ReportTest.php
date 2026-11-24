@@ -6,6 +6,7 @@ use App\Runners\Container\Report;
 use App\Runners\Container\RunLog;
 use App\Runners\Container\Trial;
 use App\Services\ReviewPublisher;
+use App\Services\ReviewSettings;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\File;
@@ -75,6 +76,16 @@ it('files what the reviewer wrote, posts it, and puts it on the commit, without 
         && $request[0]['external_id'] === 'ai-review-F1' && $request[0]['path'] === 'app/Export.php' && $request[0]['line'] === 12 && $request[0]['severity'] === 'MEDIUM');
 
     expect(($this->log)())->toContain('1 of 1 open finding(s) block the merge.', 'MEDIUM  app/Export.php:12  [blocks]', 'Published to the pull request:', 'Code Insights: the report is on the commit, with 1 annotation(s)');
+});
+
+it('passes a MEDIUM finding where the team holds the merge on HIGH only, and records that threshold', function () {
+    ReviewSettings::saveDefaults($this->repository->tenant, ['fail_on' => ['default' => 'high']]);
+    ($this->leave)(['result' => 'FAILED', 'summary' => '1 medium.', 'findings' => [$this->finding]]);
+
+    ($this->report)();
+
+    expect(ReviewRun::query()->sole()->only(['result', 'fail_on']))->toBe(['result' => 'PASSED', 'fail_on' => 'high,security:any,maintainability:never'])
+        ->and(($this->log)())->toContain('Nothing blocks the merge: 1 open finding(s), none at the threshold.');
 });
 
 it('publishes nothing when what the reviewer left is no report', function (Closure $leave, string $said) {

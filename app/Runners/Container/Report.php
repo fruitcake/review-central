@@ -8,6 +8,7 @@ use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Services\ReviewFiling;
 use App\Services\ReviewPublisher;
+use App\Services\ReviewSettings;
 use Illuminate\Support\Facades\File;
 use Throwable;
 
@@ -87,7 +88,7 @@ class Report
             'duration' => $this->duration("{$directory}/.review-started"),
             'mode' => 'both',
             'create_tasks' => true,
-            'fail_on' => ReviewPublisher::DEFAULT_FAIL_ON,
+            'fail_on' => ReviewSettings::failOn($repository),
             // A trial is recorded in full and kept off the pull request, and so is
             // any review of a repository whose host is only read from.
             'publish' => $trial === null && $repository->sourceControl()->publishes(),
