@@ -478,7 +478,7 @@ class SetupCheck
                 $missing === [],
                 "{$title}: the bucket's keys",
                 "The disk {$diskName} on the bucket ".($bucket['R2_BUCKET'] ?? '').'.',
-                'Set the account ID and the bucket\'s keys under Settings → Cloudflare sandboxes (or '.implode(', ', $missing).' in .env). In the Cloudflare dashboard: R2 → Manage API tokens → Create API token, with Object Read & Write on the bucket only. It shows the Access Key ID and the Secret Access Key.',
+                'Set the account ID and the bucket\'s keys under Settings → Cloudflare sandboxes (or '.implode(', ', $missing).' in .env). In the Cloudflare dashboard: R2 → Manage API Tokens → Create Account API token, with Object Read & Write on the bucket only. It shows the Access Key ID and the Secret Access Key.',
                 'Missing: '.implode(', ', $missing).'.',
             ) + ($missing === [] ? [] : ['guide' => SetupGuides::R2_KEYS]),
         ];
@@ -530,7 +530,7 @@ class SetupCheck
             '',
             '1. **A Cloudflare account on the Workers Paid plan** ($5 a month): sandboxes run on Containers, which the free plan does not have.',
             '2. **The bucket**, from any machine with Node 20 or later and a checkout of review-central, your own laptop as well as this server: the Worker is deployed to Cloudflare, not installed here. `cd cloudflare/worker && npm install && npx wrangler login && npx wrangler r2 bucket create review-central`.',
-            '3. **Its keys**: in the Cloudflare dashboard, R2 → Manage API tokens → Create API token, with Object Read & Write on that bucket only. Keep the access key id, the secret access key and the S3 endpoint it shows. Add lifecycle rules on the bucket that delete what is under `review/sandbox/` after a day, and what is under `review/cache/` (the vendor/ of each repository) after 14 days.',
+            '3. **Its keys**: in the Cloudflare dashboard, R2 → Manage API Tokens → Create Account API token, with Object Read & Write on that bucket only. Keep the access key id, the secret access key and the S3 endpoint it shows. Add lifecycle rules on the bucket that delete what is under `review/sandbox/` after a day, and what is under `review/cache/` (the vendor/ of each repository) after 14 days.',
             '4. **The Worker**: make a token with `openssl rand -hex 32`, give it to the Worker with `npx wrangler secret put API_TOKEN`, then `npx wrangler deploy`. It prints the Worker\'s address, such as `https://review-central-sandbox.<you>.workers.dev`.',
             '5. **This installation**, the only step on the server: in '.base_path('.env').' set `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET=review-central`, `R2_ENDPOINT`, `REVIEW_CLOUDFLARE_URL` (the address) and `REVIEW_CLOUDFLARE_TOKEN` (the token), then `php artisan config:cache` and `php artisan horizon:terminate`.',
             '6. **Back here**: this page then asks the Worker and the bucket. "A Cloudflare sandbox" can then be picked as the platform\'s runner under Settings, per repository under "Runs on", and per trial.',

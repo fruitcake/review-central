@@ -154,7 +154,7 @@ it('gives every step to set up Cloudflare sandboxes while none of it is there', 
 
     expect(($this->find)('Cloudflare sandboxes'))->toMatchArray(['state' => SetupCheck::NOTE])
         ->and(($this->find)('Cloudflare sandboxes')['fix'])->toContain(
-            'Workers Paid', 'npx wrangler r2 bucket create review-central', 'Manage API tokens',
+            'Workers Paid', 'npx wrangler r2 bucket create review-central', 'Manage API Tokens',
             'npx wrangler secret put API_TOKEN', 'npx wrangler deploy', 'REVIEW_CLOUDFLARE_URL', 'R2_ENDPOINT', 'cd cloudflare/worker', 'not installed here',
         );
 });

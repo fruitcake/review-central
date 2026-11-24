@@ -82,7 +82,7 @@ class SetupGuides
             url: 'https://dash.cloudflare.com/?to=/:account/r2/api-tokens',
             linkLabel: 'R2 API tokens in the Cloudflare dashboard',
             steps: [
-                'Open the link (or **R2 → Manage API tokens** in the dashboard) and choose **Create API token**.',
+                'Open the link (or **Manage API Tokens** under **Account Details** on R2\'s overview) and choose **Create Account API token**. Only a Super Administrator sees that button; a **User API token** works as well, but stops working when its user leaves the account.',
                 'Give it **Object Read & Write**, and under **Specify bucket(s)** only the review bucket, `review-central` unless you named another.',
                 'Create it. Cloudflare shows an **Access Key ID** (32 characters) and a **Secret Access Key** (64 characters) once: paste those two here. Not the token value above them.',
             ],
