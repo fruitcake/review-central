@@ -33,11 +33,21 @@ class Setup extends Page
 
     protected string $view = 'filament.admin.setup';
 
-    /** The count of checks that are not right, with when it was made: see the badge. */
+    /** The last result of the checks, with its count of what is not right and when it was made: see the badge. */
     public const WRONG_CACHE = 'setup-check:wrong';
+
+    /** How old the last result may get on an open Setup page before it is made again. */
+    private const PAGE_MAX_AGE = 300;
 
     /** Whether the checks have been run since the page loaded. */
     public bool $checked = false;
+
+    /**
+     * The checks' result when this request ran them.
+     *
+     * @var array<int, array{title: string, checks: array<int, array{state: string}>}>|null
+     */
+    protected ?array $found = null;
 
     /**
      * The count of the last time the checks ran. The menu is on every page and the
@@ -49,19 +59,8 @@ class Setup extends Page
     {
         // The menu is on every admin page: a cache that cannot be reached hides the badge, no more.
         return rescue(function (): ?string {
-            $counted = Cache::get(self::WRONG_CACHE);
-
-            if ((! is_array($counted) || $counted['at'] < now()->subMinute()->getTimestamp()) && Cache::add(self::WRONG_CACHE.':counting', true, 60)) {
-                defer(fn () => rescue(function (): void {
-                    try {
-                        self::remember(app(SetupCheck::class)->groups());
-                    } finally {
-                        Cache::forget(self::WRONG_CACHE.':counting');
-                    }
-                }, report: false));
-            }
-
-            $wrong = is_array($counted) ? (int) $counted['count'] : 0;
+            $last = self::last(60);
+            $wrong = $last !== null ? (int) $last['count'] : 0;
 
             return $wrong === 0 ? null : (string) $wrong;
         }, null, false);
@@ -80,6 +79,12 @@ class Setup extends Page
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('checkAgain')
+                ->label('Check again')
+                ->icon(Heroicon::OutlinedArrowPathRoundedSquare)
+                ->color('gray')
+                ->visible(fn (): bool => $this->checked)
+                ->action(fn () => $this->check()),
             Action::make('askWorker')
                 ->label('Ask the worker')
                 ->icon(Heroicon::OutlinedArrowPath)
@@ -130,11 +135,38 @@ class Setup extends Page
     }
 
     /**
-     * Runs the checks once the page is there, instead of before it is sent.
+     * Runs the checks once the page is there, instead of before it is sent, and
+     * again when asked to.
      */
     public function check(): void
     {
+        $this->found = app(SetupCheck::class)->groups();
+        // What this page found is what the badge says from now on.
+        self::remember($this->found);
         $this->checked = true;
+    }
+
+    /**
+     * The last result of the checks, made again after the response has gone out
+     * when it is older than $maxAge seconds or there is none.
+     *
+     * @return array<mixed>|null The count, the time it was made and the groups, as remember() keeps them.
+     */
+    protected static function last(int $maxAge): ?array
+    {
+        $last = Cache::get(self::WRONG_CACHE);
+
+        if ((! is_array($last) || $last['at'] < now()->subSeconds($maxAge)->getTimestamp()) && Cache::add(self::WRONG_CACHE.':counting', true, 60)) {
+            defer(fn () => rescue(function (): void {
+                try {
+                    self::remember(app(SetupCheck::class)->groups());
+                } finally {
+                    Cache::forget(self::WRONG_CACHE.':counting');
+                }
+            }, report: false));
+        }
+
+        return is_array($last) ? $last : null;
     }
 
     /**
@@ -142,7 +174,7 @@ class Setup extends Page
      */
     protected static function remember(array $groups): void
     {
-        Cache::put(self::WRONG_CACHE, ['count' => app(SetupCheck::class)->wrong($groups), 'at' => now()->getTimestamp()], now()->addDay());
+        Cache::put(self::WRONG_CACHE, ['count' => app(SetupCheck::class)->wrong($groups), 'at' => now()->getTimestamp(), 'groups' => $groups], now()->addDay());
     }
 
     /**
@@ -154,9 +186,14 @@ class Setup extends Page
             return ['groups' => null];
         }
 
-        $groups = app(SetupCheck::class)->groups();
-        // What this page found is what the badge says from now on.
-        self::remember($groups);
+        // The poll shows the last result instead of asking the Worker and the bucket
+        // every 15 seconds; one older than five minutes is made again after the response.
+        $groups = $this->found ?? rescue(fn (): ?array => self::last(self::PAGE_MAX_AGE)['groups'] ?? null, null, false);
+
+        if ($groups === null) {
+            $this->check();
+            $groups = $this->found;
+        }
 
         return ['groups' => $groups];
     }
