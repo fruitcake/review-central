@@ -159,6 +159,8 @@ claude mcp add --transport http review-central https://review.example.com/mcp/ag
 
 It does no more than your account may: only your tenants' repositories, and rules only where you are an admin. Starting a review costs what a review costs, and the assistant is told to ask you first.
 
+An assistant registers itself under a name of its own choosing, so the consent screen also shows where access goes: a web address such as `claude.ai`, or an app on your own computer. Only these may be signed in to: Claude (`claude.ai`, `claude.com`, the `claude://` scheme), ChatGPT (`chatgpt.com`), VS Code (`vscode.dev`, `insiders.vscode.dev`, `vscode://`, `vscode-insiders://`), Cursor (`cursor://`), and any client on the same computer through `http://localhost` or `http://127.0.0.1`, such as Claude Code. An administrator adds others under **Extra MCP redirect domains** in Admin → Settings, or with `MCP_REDIRECT_DOMAINS` in the [configuration](./configuration).
+
 ## A security review of a branch
 
 **Security review**, under Reviews, has the reviewer read a whole branch for security problems as it stands, rather than one pull request's change: pick the repository and the branch, such as the default one. Nothing is posted; the report shows under the *Security* view. It reads far more than a pull request's review, so it takes longer and costs more. It needs a runner that reads the code, a Cloudflare sandbox or Docker, and an Anthropic connection, since Claude Code is its reviewer. Its model and effort are set with `SECURITY_REVIEW_MODEL` and the variables beside it in the [configuration](./configuration).

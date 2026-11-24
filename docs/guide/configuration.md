@@ -89,6 +89,7 @@ See [`cloudflare/README.md`](https://github.com/fruitcake/review-central/blob/ma
 | `ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLIENT_SECRET` | The same for Jira. Also under Apps in the admin panel. |
 | `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_WEBHOOK_SECRET` | Review on GitHub as a GitHub App, and sign in and reply on GitHub as yourself through it. Also under Apps in the admin panel. See [Setting up a tenant](./tenants#github-as-an-app). |
 | `PASSPORT_PRIVATE_KEY`, `PASSPORT_PUBLIC_KEY` | The key pair the [MCP servers](./reviews#in-claude-and-other-ai-assistants) sign their sign-in tokens with. Not needed: without them a pair is made the first time and kept, encrypted, with the installation's settings. |
+| `MCP_REDIRECT_DOMAINS` | More places an [MCP client](./reviews#in-claude-and-other-ai-assistants) may have its sign-in sent, comma separated: an origin such as `https://assistant.example.com`, or a desktop app's scheme such as `zed://`. Added to the known assistants and to **Extra MCP redirect domains** under Admin → Settings. `*` allows any domain, as before this list existed. |
 
 ## Queue
 

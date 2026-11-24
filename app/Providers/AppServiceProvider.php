@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
+use Laravel\Mcp\Server\Http\Controllers\OAuthRegisterController;
 use Laravel\Passport\Passport;
 use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\ResourceServer;
@@ -88,6 +89,9 @@ class AppServiceProvider extends ServiceProvider
         // settings, so no server of the installation needs a key file of its own.
         $this->app->beforeResolving(AuthorizationServer::class, fn () => app(PlatformSettings::class)->applyOAuthKeys());
         $this->app->beforeResolving(ResourceServer::class, fn () => app(PlatformSettings::class)->applyOAuthKeys());
+
+        // The redirect origins an administrator added, read only when an MCP client registers.
+        $this->app->beforeResolving(OAuthRegisterController::class, fn () => app(PlatformSettings::class)->applyMcpRedirects());
 
         // A client that asks for no scope, as a registered MCP client may, gets the one
         // the MCP servers take: a token without it would be refused by both.

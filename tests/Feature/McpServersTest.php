@@ -4,6 +4,7 @@ use App\Enums\FindingVerdictKind;
 use App\Enums\FindingVerdictReason;
 use App\Enums\ReviewRuleKind;
 use App\Enums\TicketStyle;
+use App\Filament\Admin\Pages\Settings;
 use App\Filament\TenantRole;
 use App\Jobs\AnswerReviewQuestion;
 use App\Jobs\RunContainerReview;
@@ -43,6 +44,7 @@ use App\Services\ReviewRequest;
 use App\Services\ReviewSettings;
 use App\Services\TicketLookup;
 use App\SourceControl\GitHubClient;
+use Filament\Facades\Filament;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request;
@@ -51,6 +53,8 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Laravel\Passport\Passport;
+
+use function Pest\Livewire\livewire;
 
 beforeEach(function () {
     config(['review.docker.enabled' => true]);
@@ -135,7 +139,58 @@ it('sends someone who is not signed in to the sign-in page before the consent sc
         ->assertOk()
         ->assertSee('Connect Claude Code')
         ->assertSee($this->member->email)
-        ->assertSee('Use MCP server');
+        ->assertSee('Use MCP server')
+        ->assertSee('Connecting sends access to <strong>an app on this computer</strong>', false);
+});
+
+it('lets an MCP client register only with a redirect address of a known assistant or this computer', function (string $redirect, bool $allowed) {
+    $response = $this->postJson('/oauth/register', ['client_name' => 'Claude', 'redirect_uris' => [$redirect]]);
+
+    $allowed
+        ? $response->assertCreated()
+        : $response->assertStatus(400)->assertJson(['error' => 'invalid_redirect_uri']);
+})->with([
+    'claude.ai' => ['https://claude.ai/api/mcp/auth_callback', true],
+    'chatgpt.com' => ['https://chatgpt.com/connector_platform_oauth_redirect', true],
+    'localhost on any port' => ['http://localhost:4567/callback', true],
+    '127.0.0.1 on any port' => ['http://127.0.0.1:33418/', true],
+    'cursor scheme' => ['cursor://anysphere.cursor-mcp/oauth/callback', true],
+    'another domain' => ['https://attacker.example/callback', false],
+    'a look-alike of an allowed domain' => ['https://claude.ai.attacker.example/callback', false],
+    'another scheme' => ['attacker://callback', false],
+]);
+
+it('lets an MCP client register with a redirect address an administrator or the environment added', function () {
+    $this->actingAs(User::factory()->create(['is_admin' => true]));
+    Filament::setCurrentPanel(Filament::getPanel('admin'));
+
+    // Any domain at all is for whoever runs the server, not for the settings.
+    livewire(Settings::class)
+        ->fillForm([PlatformSettings::MCP_REDIRECTS => "*\nnot a domain"])
+        ->call('save')
+        ->assertHasFormErrors([PlatformSettings::MCP_REDIRECTS]);
+
+    livewire(Settings::class)
+        ->fillForm([PlatformSettings::MCP_REDIRECTS => "https://assistant.example.com\nzed://"])
+        ->call('save')
+        ->assertHasNoFormErrors();
+    config(['mcp.extra_redirects' => 'https://other.example.com']);
+
+    foreach (['https://assistant.example.com/callback', 'zed://oauth/callback', 'https://other.example.com/callback'] as $redirect) {
+        $this->postJson('/oauth/register', ['client_name' => 'Assistant', 'redirect_uris' => [$redirect]])->assertCreated();
+    }
+});
+
+it('shows on the consent screen the domain the sign-in is sent to, whatever the client calls itself', function () {
+    $client = $this->postJson('/oauth/register', ['client_name' => 'Claude', 'redirect_uris' => ['https://chatgpt.com/connector_platform_oauth_redirect']])->assertCreated()->json('client_id');
+    $query = http_build_query([
+        'client_id' => $client, 'redirect_uri' => 'https://chatgpt.com/connector_platform_oauth_redirect', 'response_type' => 'code', 'state' => 'abc',
+        'code_challenge' => rtrim(strtr(base64_encode(hash('sha256', str_repeat('v', 64), true)), '+/', '-_'), '='), 'code_challenge_method' => 'S256',
+    ]);
+
+    $this->actingAs($this->member)->get("/oauth/authorize?{$query}")
+        ->assertOk()
+        ->assertSee('Connecting sends access to <strong>chatgpt.com</strong>', false);
 });
 
 it('keeps one OAuth key pair for the whole installation, unless the environment gives one', function () {
