@@ -56,9 +56,8 @@ reviewer_env_report() {
 # reads them as the project's: a hook in .claude/settings.json runs a command as
 # the reviewer, and an env entry such as ANTHROPIC_BASE_URL sends the key to
 # whoever it names. Codex reads .codex/config.toml, and Pi loads .pi/ with its
-# extensions, the same way. The skills, agents, commands and CLAUDE.md stay: those
-# are text the reviewer reads. What in their frontmatter is a setting goes, see
-# reviewer_strip_skill_settings.
+# extensions, the same way. CLAUDE.md stays: it is text the reviewer reads. The
+# skills, agents and commands go to reviewer_hide_claude_skills, for Claude.
 #
 # Run after the vendor cache is unpacked, so a file an archive brought goes too.
 # Marked skip-worktree where the repository tracks it, so the removal is no change
@@ -71,47 +70,45 @@ reviewer_drop_project_settings() {
       echo "Left out the pull request's $path: the reviewer runs with the review's own settings."
     fi
   done
-  reviewer_strip_skill_settings
 }
 
-# The frontmatter of the pull request's skills, agents and commands, down to
-# what describes them. The rest can be a setting: `allowed-tools` lets a command
-# run without asking while the skill is in use, `permissionMode` sets how an agent
-# asks, and `hooks` and `mcpServers` run commands of their own. Kept by name, not
-# left out by name, as YAML spells a key in more ways than one ("allowed-tools",
-# a flow mapping): a top-level line stays only when it is one of these keys,
-# unquoted, and an indented line or list item only under one. The text after the
-# frontmatter stays, so a skill still loads. A frontmatter that never closes is
-# none, and is left alone, as is a link: nothing is written through it.
-REVIEWER_SKILL_KEYS='name|description|when_to_use|argument-hint|license|version|metadata|compatibility|tools|color|user-invocable|disable-model-invocation'
+# The pull request's skills, agents and commands, out of where Claude Code
+# loads them, into .review-repo-skills/ under the same path, where the reviewer
+# reads them as text. A skill Claude loads is more than text: its frontmatter can
+# let a command run without asking (`allowed-tools`), set how an agent asks, or
+# start hooks and MCP servers, and YAML has more ways to write that than a filter
+# can follow. Claude finds them under every .claude/ in the checkout, also one
+# nested in a package, so all of those go, and those in the reviewer's own home,
+# which the pull request's code may have written in an earlier step. Moved as
+# they are: a link stays a link, and nothing is read or written through it.
+#
+# For Claude only: Codex and Pi read skills as text already, and Codex reaches the
+# repository's through links prepare-review.sh made to .claude/skills/.
+REVIEWER_REPO_SKILLS=.review-repo-skills
 
-reviewer_strip_skill_settings() {
-  stripped=$(
-    for root in .claude/skills .claude/agents .claude/commands .agents/skills; do
-      [ -d "$root" ] && [ ! -L "$root" ] && find "$root" -type f -name '*.md' 2> /dev/null
-    done | while IFS= read -r file; do
-      head -n 1 "$file" | grep -qx -- '---' || continue
-      # Written outside the checkout, where the pull request has put nothing.
-      kept=$(mktemp) || continue
-      if ! awk -v keys="^($REVIEWER_SKILL_KEYS)[[:space:]]*:" '
-        NR == 1 { inside = 1; print; next }
-        inside && /^---[[:space:]]*$/ { inside = 0; print; next }
-        inside && /^([[:space:]]|-|$)/ { if (keeping || $0 ~ /^[[:space:]]*$/) print; next }
-        inside { keeping = ($0 ~ keys); if (keeping) print; next }
-        { print }
-        END { exit inside ? 3 : 0 }
-      ' "$file" > "$kept" || cmp -s "$file" "$kept"; then
-        rm -f -- "$kept"
-        continue
-      fi
-      # In place of the file, not through it: rm takes a link itself.
-      rm -f -- "$file" && cp -- "$kept" "$file"
-      rm -f -- "$kept"
-      git ls-files -z -- "$file" 2> /dev/null | xargs -0 -r git update-index --skip-worktree -- 2> /dev/null || true
-      echo "$file"
-    done | wc -l | tr -d ' '
+reviewer_hide_claude_skills() {
+  hidden=$(
+    find . \( -path ./.git -o -path "./$REVIEWER_REPO_SKILLS" \) -prune -o \
+      \( -path '*/.claude/skills' -o -path '*/.claude/agents' -o -path '*/.claude/commands' \) -print -prune 2> /dev/null \
+      | while IFS= read -r path; do
+          path=${path#./}
+          git ls-files -z -- "$path" 2> /dev/null | xargs -0 -r git update-index --skip-worktree -- 2> /dev/null || true
+          mkdir -p "$REVIEWER_REPO_SKILLS/$(dirname "$path")" && mv -- "$path" "$REVIEWER_REPO_SKILLS/$path" && echo "$path"
+        done | wc -l | tr -d ' '
   )
-  [ "$stripped" -eq 0 ] || echo "Left out the settings in the frontmatter of $stripped of the pull request's skills, agents and commands: they run with the review's own permissions."
+  EXCLUDE=$(git rev-parse --git-path info/exclude 2> /dev/null) && mkdir -p "$(dirname "$EXCLUDE")" \
+    && { grep -qxF "/$REVIEWER_REPO_SKILLS/" "$EXCLUDE" 2> /dev/null || echo "/$REVIEWER_REPO_SKILLS/" >> "$EXCLUDE"; }
+  [ "$hidden" -eq 0 ] || echo "Moved the pull request's Claude skills, agents and commands ($hidden folders) to $REVIEWER_REPO_SKILLS/: the reviewer reads them there, as text."
+
+  for home in "${CLAUDE_CONFIG_DIR:-}" "$HOME/.claude"; do
+    [ -n "$home" ] || continue
+    for path in "$home/skills" "$home/agents" "$home/commands"; do
+      if [ -e "$path" ] || [ -L "$path" ]; then
+        rm -rf -- "$path"
+        echo "Removed $path: the review brings no skills of its own there, so these came from a pull request's code."
+      fi
+    done
+  done
 }
 
 # The parts of the review the team turned off (REVIEW_OCR, REVIEW_FLOOR_GUARD,
