@@ -183,7 +183,9 @@ class OpenPullRequest extends Model
         return ReviewRun::query()
             ->where('repository_id', $this->repository_id)
             ->where('pull_request_id', $this->pull_request_id)
+            // Of two that started in the same second, the one created last, as the list picks it.
             ->latest('started_at')
+            ->latest('id')
             ->first();
     }
 
