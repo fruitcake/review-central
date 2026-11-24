@@ -60,7 +60,7 @@ class PersonalConnections
     /**
      * Who the account is, and commenting on pull requests, which `pullrequest`
      * allows without merging or writing to the repository. Bitbucket gives a
-     * token the permissions of its consumer whatever is asked, so the consumer
+     * token the permissions of its OAuth client whatever is asked, so the client
      * itself should have no more.
      *
      * @var array<int, string>
@@ -84,7 +84,7 @@ class PersonalConnections
 
     /**
      * Whether this installation is registered at the host, so users can connect:
-     * a Bitbucket consumer, or a GitHub App.
+     * a Bitbucket OAuth client, or a GitHub App.
      */
     public static function available(string $host): bool
     {
@@ -324,10 +324,10 @@ class PersonalConnections
             throw new ActionRefused("Your {$name} account is not connected. Connect it on your profile: {$profile}");
         }
 
-        // Bitbucket gives a token what its consumer may, and writing on pull requests
-        // is more than commenting: the consumer has to allow it, and the user to connect after.
+        // Bitbucket gives a token what its OAuth client may, and writing on pull requests
+        // is more than commenting: the client has to allow it, and the user to connect after.
         if ($host === self::BITBUCKET && ! in_array('pullrequest:write', $connection->scopes ?? [], true)) {
-            throw new ActionRefused("Your Bitbucket account was connected without the right to open or edit pull requests. Once this installation's OAuth consumer has \"Pull requests: Write\", connect it again on your profile: {$profile}");
+            throw new ActionRefused("Your Bitbucket account was connected without the right to open or edit pull requests. Once this installation's OAuth client has \"Pull requests: Write\", connect it again on your profile: {$profile}");
         }
 
         if ($repository->integration?->setting(ReadOnlyClient::SETTING) === ReadOnlyClient::READ) {

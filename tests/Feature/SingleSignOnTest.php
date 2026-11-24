@@ -164,7 +164,7 @@ it('adds someone who already had an account to a tenant that takes their organis
 
 /**
  * Comes back from Bitbucket as this account, with this primary confirmed address
- * (null for none), through the one callback its consumer has.
+ * (null for none), through the one callback its OAuth client has.
  */
 function signInWithBitbucket(?string $email, string $id = '{nora-uuid}'): TestResponse
 {
