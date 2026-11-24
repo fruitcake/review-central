@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Runners\Container;
 
+use App\Models\ReviewQuestion;
 use App\Models\ReviewRun;
 use App\Services\Broadcasts;
 use Illuminate\Contracts\Filesystem\Filesystem;
@@ -30,7 +31,25 @@ class RunLog
 
     public function path(int $repositoryId, int $build): string
     {
-        return rtrim((string) config('review.container.log.directory'), '/')."/{$repositoryId}/{$build}.log";
+        return $this->file($repositoryId, (string) $build);
+    }
+
+    /**
+     * The log of a question's answer, beside its repository's reviews' logs.
+     */
+    public function questionPath(ReviewQuestion $question): string
+    {
+        return $this->file((int) $question->repository_id, self::questionName($question));
+    }
+
+    protected function file(int $repositoryId, string $name): string
+    {
+        return rtrim((string) config('review.container.log.directory'), '/')."/{$repositoryId}/{$name}.log";
+    }
+
+    protected static function questionName(ReviewQuestion $question): string
+    {
+        return "question-{$question->getKey()}";
     }
 
     /**
@@ -81,6 +100,27 @@ class RunLog
     }
 
     /**
+     * Something to write the answering of a question to, or null when logs are not
+     * kept. No page is told it grew: the question's page asks again while it waits.
+     *
+     * @param  array<string, string>  $environment  the step's environment, whose secrets are kept out of the log
+     */
+    public function questionWriter(ReviewQuestion $question, array $environment = []): ?RunLogWriter
+    {
+        if (! $this->enabled()) {
+            return null;
+        }
+
+        $path = $this->questionPath($question);
+        $name = self::questionName($question);
+        $repositoryId = (int) $question->repository_id;
+        File::ensureDirectoryExists(dirname($path));
+        File::delete($path);
+
+        return new RunLogWriter($path, $environment, null, $this->disk() === null ? null : fn () => $this->copyFile($repositoryId, $name));
+    }
+
+    /**
      * The disk the logs are also kept on, for a page served from another server
      * than the worker that writes them.
      */
@@ -91,9 +131,9 @@ class RunLog
         return is_string($disk) && $disk !== '' ? Storage::disk($disk) : null;
     }
 
-    protected function key(int $repositoryId, int $build): string
+    protected function key(int $repositoryId, string $name): string
     {
-        return "review/logs/{$repositoryId}/{$build}.log";
+        return "review/logs/{$repositoryId}/{$name}.log";
     }
 
     /**
@@ -102,10 +142,15 @@ class RunLog
      */
     public function copy(int $repositoryId, int $build): void
     {
-        $path = $this->path($repositoryId, $build);
+        $this->copyFile($repositoryId, (string) $build);
+    }
+
+    protected function copyFile(int $repositoryId, string $name): void
+    {
+        $path = $this->file($repositoryId, $name);
 
         if (is_file($path)) {
-            rescue(fn () => $this->disk()?->put($this->key($repositoryId, $build), (string) file_get_contents($path)), null, false);
+            rescue(fn () => $this->disk()?->put($this->key($repositoryId, $name), (string) file_get_contents($path)), null, false);
         }
     }
 
@@ -117,15 +162,29 @@ class RunLog
      */
     public function tail(ReviewRun $run): ?array
     {
-        if ($run->build_number === null) {
-            return null;
-        }
+        return $run->build_number === null ? null : $this->tailOf((int) $run->repository_id, (string) $run->build_number);
+    }
 
-        $path = $this->path((int) $run->repository_id, (int) $run->build_number);
+    /**
+     * The end of the log of a question's answer, or null when there is none.
+     *
+     * @return array{text: string, truncated: bool}|null
+     */
+    public function questionTail(ReviewQuestion $question): ?array
+    {
+        return $this->tailOf((int) $question->repository_id, self::questionName($question));
+    }
+
+    /**
+     * @return array{text: string, truncated: bool}|null
+     */
+    protected function tailOf(int $repositoryId, string $name): ?array
+    {
+        $path = $this->file($repositoryId, $name);
 
         // Not on this server: the worker's copy on the disk, where it keeps one.
         if (! is_file($path)) {
-            $text = rescue(fn (): ?string => $this->disk()?->get($this->key((int) $run->repository_id, (int) $run->build_number)), null, false);
+            $text = rescue(fn (): ?string => $this->disk()?->get($this->key($repositoryId, $name)), null, false);
 
             if ($text === null) {
                 return null;

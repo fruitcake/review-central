@@ -10,6 +10,7 @@ use App\Models\ReviewRun;
 use App\Models\User;
 use App\Runners\Container\QuestionAnswer;
 use App\Runners\Container\ReviewSessions;
+use App\Runners\Container\RunLog;
 use App\Services\FindingSettlement;
 use App\Services\ReviewQuestions;
 use Filament\Facades\Filament;
@@ -80,7 +81,7 @@ function fakeReviewer(?array $answer, int $exit = 0): ArrayObject
             File::put(explode(':', $command[array_search('--volume', $command, true) + 1])[0].'/review-answer.json', json_encode($answer));
         }
 
-        return Process::result(exitCode: $command[1] === 'run' ? $exit : 0);
+        return Process::result(output: $command[1] === 'run' ? "Reading app/Export.php\n" : '', exitCode: $command[1] === 'run' ? $exit : 0);
     });
 
     return $steps;
@@ -158,6 +159,11 @@ it('answers from the session of the last review, in a copy of it, and replies un
     expect($question->refresh()->only(['status', 'answer', 'resumed', 'model']))->toBe([
         'status' => ReviewQuestion::STATUS_ANSWERED, 'answer' => 'The export, at `app/Export.php:12`.', 'resumed' => true, 'model' => 'claude-opus-5-5',
     ])->and((float) $question->cost)->toBe(0.42);
+
+    // What it did while it answered is kept, as a review's log is, without its key.
+    expect(app(RunLog::class)->questionTail($question)['text'])
+        ->toContain('── clone ──', 'Answering from the session of the last review.', 'Reading app/Export.php', 'Answered.')
+        ->not->toContain('sk-ant-one');
 });
 
 it('answers a question about a trial from the trial\'s own session, with its findings and the branch to diff against', function () {
@@ -254,11 +260,13 @@ it('lists the questions asked on a pull request on its review\'s page, with what
         'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop', 'branch' => 'feature/export',
         'commit' => str_repeat('a', 40), 'build_number' => 41, 'pull_request_id' => 570, 'status' => 'finished', 'result' => 'PASSED', 'started_at' => now(),
     ]);
-    ReviewQuestion::query()->create([
+    $asked = ReviewQuestion::query()->create([
         'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570, 'branch' => 'feature/export', 'comment_id' => 77,
         'author' => 'Alex', 'question' => 'Did you mean the export in F2?', 'answer' => 'The export, at `app/Export.php:12`. <script>alert(1)</script>',
         'status' => ReviewQuestion::STATUS_ANSWERED, 'resumed' => true, 'cost' => 0.42,
     ]);
+    File::ensureDirectoryExists(dirname(app(RunLog::class)->questionPath($asked)));
+    File::put(app(RunLog::class)->questionPath($asked), "── reviewer ──\nReading app/Export.php\n");
     // Another pull request's question is not this one's.
     ReviewQuestion::query()->create([
         'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 571, 'branch' => 'feature/other', 'comment_id' => 78,
@@ -270,6 +278,7 @@ it('lists the questions asked on a pull request on its review\'s page, with what
         ->assertSee('<code>app/Export.php:12</code>', false)
         ->assertSee('Answered from the last review&#039;s session', false)
         ->assertSee('$0.42')
+        ->assertSee('Reading app/Export.php')
         ->assertDontSee('<script>alert(1)</script>', false)
         ->assertDontSee('Something else entirely?');
 });
@@ -525,4 +534,29 @@ it('takes a question on the review\'s page and answers it there alone, saying no
     Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST' && str_contains($request->url(), '/comments'));
 
     livewire(ViewReviewRun::class, ['record' => $run->uuid])->assertSee('It escapes nothing.');
+});
+
+it('prints what the reviewer reads and says while it answers, and keeps the result for the worker', function () {
+    $dir = storage_path('framework/testing/review-work/answer');
+    File::ensureDirectoryExists("{$dir}/home/.local/bin");
+    File::put("{$dir}/home/.local/bin/claude", <<<'SH'
+        #!/bin/sh
+        [ "$1" = "--version" ] && { echo "2.0.0 (Claude Code)"; exit 0; }
+        cat > /dev/null
+        echo '{"type":"system","subtype":"init","session_id":"s-1"}'
+        echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"app/Export.php"}}]}}'
+        echo '{"type":"assistant","message":{"content":[{"type":"text","text":"It escapes nothing."}]}}'
+        echo '{"type":"result","subtype":"success","is_error":false,"result":"It escapes nothing.","total_cost_usd":0.12,"session_id":"s-1"}'
+        SH);
+    chmod("{$dir}/home/.local/bin/claude", 0755);
+
+    $result = Process::path($dir)
+        ->env(['HOME' => "{$dir}/home", 'REVIEW_LOCAL' => 'true', 'REVIEW_QUESTION' => 'Does the export escape its cells?'])
+        ->run(['sh', resource_path('review/skill/answer-question.sh')]);
+
+    expect($result->successful())->toBeTrue()
+        ->and($result->output())->toContain('-> Read app/Export.php')
+        ->and($result->output())->toContain('It escapes nothing.')
+        ->and($result->output())->toContain('Answered, for $0.12.')
+        ->and(json_decode(File::get("{$dir}/review-answer.json"), true))->toMatchArray(['type' => 'result', 'result' => 'It escapes nothing.']);
 });

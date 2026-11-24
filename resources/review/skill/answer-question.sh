@@ -8,8 +8,9 @@
 # Code resumes it and answers from what it read and found then. Without one it
 # answers from the checkout alone.
 #
-# Writes review-answer.json, Claude Code's own result: the answer as `result`, what
-# it cost as `total_cost_usd`. The worker posts the answer; this step has no
+# Prints what the reviewer reads and says while it answers, and writes
+# review-answer.json, Claude Code's own result: the answer as `result`, what it
+# cost as `total_cost_usd`. The worker posts the answer; this step has no
 # credential for the repository's host. Exits 1 when there is no answer.
 set -u
 
@@ -63,18 +64,37 @@ if command -v jq > /dev/null 2>&1; then
   fi
 fi
 
+# Streams what the reviewer reads and says to stdout, for the answer's log, and keeps
+# the last result event as review-answer.json. Exits as Claude Code did.
 ask() {
-  # shellcheck disable=SC2046
-  env $(reviewer_env 'ANTHROPIC_API_KEY|ANTHROPIC_BASE_URL|CLAUDE_CODE_[A-Z0-9_]+|CLAUDE_CONFIG_DIR') "$CLAUDE" -p \
-    "$@" \
-    --settings "$SETTINGS" \
-    --permission-mode auto \
-    --mcp-config '{"mcpServers":{}}' \
-    --strict-mcp-config \
-    --output-format json \
-    --max-budget-usd "${REVIEW_QUESTION_BUDGET:-2}" \
-    ${CLAUDE_REVIEW_MODEL:+--model "$CLAUDE_REVIEW_MODEL"} \
-    < "$PROMPT" > review-answer.json
+  _stream=$(mktemp)
+  {
+    # shellcheck disable=SC2046
+    env $(reviewer_env 'ANTHROPIC_API_KEY|ANTHROPIC_BASE_URL|CLAUDE_CODE_[A-Z0-9_]+|CLAUDE_CONFIG_DIR') "$CLAUDE" -p \
+      "$@" \
+      --settings "$SETTINGS" \
+      --permission-mode auto \
+      --mcp-config '{"mcpServers":{}}' \
+      --strict-mcp-config \
+      --output-format stream-json \
+      --verbose \
+      --max-budget-usd "${REVIEW_QUESTION_BUDGET:-2}" \
+      ${CLAUDE_REVIEW_MODEL:+--model "$CLAUDE_REVIEW_MODEL"} \
+      < "$PROMPT"
+    echo $? > .answer-exit
+  } | tee "$_stream" | jq -r --unbuffered '
+      select(.type == "assistant") | .message.content[]?
+      | if .type == "text" then "\n" + .text + "\n"
+        elif .type == "tool_use" then
+          "    -> \(.name) "
+          + (.input.command // .input.file_path // .input.pattern // .input.description // .input.query // "" | tostring | gsub("\\s+"; " ") | .[0:160])
+        else empty end
+    ' 2> /dev/null
+  jq -c 'select(.type == "result")' "$_stream" 2> /dev/null | tail -n 1 > review-answer.json
+  [ -s review-answer.json ] || rm -f review-answer.json
+  _rc=$(cat .answer-exit 2> /dev/null || echo 1)
+  rm -f "$_stream" .answer-exit
+  return "$_rc"
 }
 
 rm -f review-answer.json

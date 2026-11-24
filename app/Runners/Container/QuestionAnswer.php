@@ -10,6 +10,7 @@ use App\Services\ReviewQuestions;
 use App\Services\ReviewSettings;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Has the reviewer answer one question about a pull request, and posts the answer
@@ -33,6 +34,7 @@ class QuestionAnswer
         protected ReviewCredentials $credentials,
         protected ReviewQuestions $questions,
         protected Sandboxes $sandboxes,
+        protected RunLog $log,
     ) {}
 
     public function give(ReviewQuestion $question): void
@@ -40,8 +42,13 @@ class QuestionAnswer
         $repository = $question->repository;
         $directory = rtrim((string) config('review.container.work_directory'), '/')."/{$repository->getKey()}-question-{$question->getKey()}";
         $home = "{$directory}-home";
+        $environment = $this->credentials->environment($repository->tenant);
+        // What it does while it answers, for the question's page, as a review's log is.
+        $log = $this->log->questionWriter($question, $environment);
 
         try {
+            $log?->note('── clone ──');
+
             File::ensureDirectoryExists(dirname($directory), 0700);
             File::deleteDirectory($directory);
             File::deleteDirectory($home);
@@ -71,28 +78,35 @@ class QuestionAnswer
             File::ensureDirectoryExists("{$directory}/.review/skill");
 
             $settings = ReviewSettings::variables($repository, null, (string) $question->pull_request_id);
+            $log?->note($resumed ? 'Answering from the session of the last review.' : 'No session of a review to answer from: answering from the code.');
+            $log?->note('── reviewer ──');
 
             // Where the repository's reviews run.
             $result = $this->sandboxes->for(null, $repository, $this->sandbox)->run(
                 "review-{$repository->getKey()}-question-{$question->getKey()}",
                 'sh .review/skill/answer-question.sh',
                 $directory,
-                $this->credentials->environment($repository->tenant)
+                $environment
                     + array_intersect_key($settings, ['CLAUDE_REVIEW_MODEL' => true])
                     + ['REVIEW_QUESTION' => $this->asked($question), 'CI' => 'true'],
                 trusted: false,
                 timeout: (int) config('review.container.question_timeout'),
                 home: $home,
+                output: $log === null ? null : $log->write(...),
             );
+            $log?->flush();
 
             $answer = $result->successful() ? $this->read("{$directory}/review-answer.json") : null;
 
             if ($answer === null) {
                 Log::warning('A question for the reviewer got no answer', ['repository' => $repository->fullName(), 'question' => $question->getKey(), 'exit' => $result->exitCode()]);
+                $log?->note("No answer: the reviewer ended with exit code {$result->exitCode()}.");
                 $this->fail($question);
 
                 return;
             }
+
+            $log?->note('Answered.');
 
             // Asked on the review's page: answered there alone.
             $reply = $question->comment_id === null ? null : $this->questions->reply($repository, $question->pull_request_id, $question->comment_id, $answer['text']);
@@ -106,7 +120,12 @@ class QuestionAnswer
                 'cost' => $answer['cost'],
                 'answered_at' => now(),
             ]);
+        } catch (Throwable $exception) {
+            $log?->note('Stopped: '.$exception->getMessage());
+
+            throw $exception;
         } finally {
+            $log?->flush();
             File::deleteDirectory($directory);
             File::deleteDirectory($home);
         }
