@@ -176,6 +176,7 @@ describe('for the installation', function () {
         }
 
         livewire(Setup::class)
+            ->call('check')
             ->assertSee('How to get this')
             ->mountAction(TestAction::make('guide')->arguments(['guide' => SetupGuides::GITHUB_APP]))
             ->assertMountedActionModalSee(['https://github.com/settings/apps/new', url('/api/webhooks/github-app'), 'Organization → Members: Read']);

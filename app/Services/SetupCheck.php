@@ -106,11 +106,14 @@ class SetupCheck
     }
 
     /**
-     * How many checks are not right, for the badge in the menu.
+     * How many checks are not right, for the badge in the menu: of the groups
+     * given, or of running them now.
+     *
+     * @param  array<int, array{title: string, checks: array<int, array{state: string}>}>|null  $groups
      */
-    public function wrong(): int
+    public function wrong(?array $groups = null): int
     {
-        return collect($this->groups())->flatMap(fn (array $group): array => $group['checks'])->where('state', self::WRONG)->count();
+        return collect($groups ?? $this->groups())->flatMap(fn (array $group): array => $group['checks'])->where('state', self::WRONG)->count();
     }
 
     /**

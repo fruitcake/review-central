@@ -6,6 +6,14 @@
 @endphp
 
 <x-filament-panels::page>
+    @if ($groups === null)
+        {{-- The checks ask other servers: they run in a request of their own, after the page is shown. --}}
+        <div class="rc-stack" wire:init="check">
+            <section class="rc-card rc-pad">
+                <span class="rc-muted">Checking the setup…</span>
+            </section>
+        </div>
+    @else
     <div class="rc-stack" wire:poll.15s>
         @foreach ($groups as $group)
             <section class="rc-card rc-pad" aria-labelledby="rc-setup-{{ $loop->index }}">
@@ -30,4 +38,5 @@
             </section>
         @endforeach
     </div>
+    @endif
 </x-filament-panels::page>
