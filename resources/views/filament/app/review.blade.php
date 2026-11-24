@@ -192,7 +192,7 @@
                         </form>
                         {{-- Looks again while an answer is on its way. --}}
                         @if ($questions->contains(fn ($question) => in_array($question->status, [\App\Models\ReviewQuestion::STATUS_ASKED, \App\Models\ReviewQuestion::STATUS_UNSURE], true)))
-                            <div wire:poll.10s hidden></div>
+                            <div wire:poll.5s hidden></div>
                         @endif
                         @foreach ($questions as $question)
                             <div class="rc-question">
@@ -203,6 +203,14 @@
                                     <span class="rc-muted">{{ $question->resumed ? 'Answered from the last review\'s session' : 'Answered from the code alone' }}{{ $question->cost === null ? '' : ' · '.Currency::show($question->cost) }}</span>
                                 @else
                                     <span class="rc-muted">{{ $question->status === \App\Models\ReviewQuestion::STATUS_FAILED ? 'The reviewer gave no answer.' : 'The reviewer is answering.' }}</span>
+                                @endif
+                                {{-- What it did while it answered: open while it does, as a review's log. --}}
+                                @php($answering = in_array($question->status, [\App\Models\ReviewQuestion::STATUS_ASKED, \App\Models\ReviewQuestion::STATUS_UNSURE], true))
+                                @if (($questionLog = app(\App\Runners\Container\RunLog::class)->questionTail($question)) !== null)
+                                    <details class="rc-question-log" wire:ignore.self @if ($answering) open @endif>
+                                        <summary class="rc-muted">Log{{ $answering ? ' · follows the answer as it is written' : '' }}{{ $questionLog['truncated'] ? ' · the end of it' : '' }}</summary>
+                                        <pre class="rc-log" tabindex="0" aria-label="Log of this answer" x-data x-init="$el.scrollTop = $el.scrollHeight">{{ $questionLog['text'] === '' ? 'Nothing printed yet.' : $questionLog['text'] }}</pre>
+                                    </details>
                                 @endif
                             </div>
                         @endforeach

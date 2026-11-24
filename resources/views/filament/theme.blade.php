@@ -216,6 +216,9 @@
     .rc-ask .rc-button { background: var(--rc-button); color: var(--rc-button-text); border: 0; border-radius: 0; padding: 8px 18px; font-weight: 600; cursor: pointer; }
     .rc-ask .rc-button:hover { background: var(--rc-button-hover); }
     .rc-ask .rc-button[disabled] { opacity: .6; cursor: progress; }
+    .rc-question-log { margin-top: 6px; }
+    .rc-question-log summary { cursor: pointer; }
+    .rc-question-log .rc-log { margin-top: 6px; max-height: 280px; }
     .rc-question:first-of-type { border-top: 0; }
     .rc-question p { margin: 0 0 4px; }
     .rc-log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; background: var(--rc-ink); color: #fff; border-radius: 0; padding: 12px 14px; margin: 12px 0 0; max-height: 420px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -10,6 +10,7 @@ use App\Models\ReviewRun;
 use App\Models\User;
 use App\Runners\Container\QuestionAnswer;
 use App\Runners\Container\ReviewSessions;
+use App\Runners\Container\RunLog;
 use App\Services\FindingSettlement;
 use App\Services\ReviewQuestions;
 use Filament\Facades\Filament;
@@ -80,7 +81,7 @@ function fakeReviewer(?array $answer, int $exit = 0): ArrayObject
             File::put(explode(':', $command[array_search('--volume', $command, true) + 1])[0].'/review-answer.json', json_encode($answer));
         }
 
-        return Process::result(exitCode: $command[1] === 'run' ? $exit : 0);
+        return Process::result(output: $command[1] === 'run' ? "Reading app/Export.php\n" : '', exitCode: $command[1] === 'run' ? $exit : 0);
     });
 
     return $steps;
@@ -158,6 +159,11 @@ it('answers from the session of the last review, in a copy of it, and replies un
     expect($question->refresh()->only(['status', 'answer', 'resumed', 'model']))->toBe([
         'status' => ReviewQuestion::STATUS_ANSWERED, 'answer' => 'The export, at `app/Export.php:12`.', 'resumed' => true, 'model' => 'claude-opus-5-5',
     ])->and((float) $question->cost)->toBe(0.42);
+
+    // What it did while it answered is kept, as a review's log is, without its key.
+    expect(app(RunLog::class)->questionTail($question)['text'])
+        ->toContain('── clone ──', 'Answering from the session of the last review.', 'Reading app/Export.php', 'Answered.')
+        ->not->toContain('sk-ant-one');
 });
 
 it('answers a question about a trial from the trial\'s own session, with its findings and the branch to diff against', function () {
@@ -254,11 +260,13 @@ it('lists the questions asked on a pull request on its review\'s page, with what
         'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop', 'branch' => 'feature/export',
         'commit' => str_repeat('a', 40), 'build_number' => 41, 'pull_request_id' => 570, 'status' => 'finished', 'result' => 'PASSED', 'started_at' => now(),
     ]);
-    ReviewQuestion::query()->create([
+    $asked = ReviewQuestion::query()->create([
         'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570, 'branch' => 'feature/export', 'comment_id' => 77,
         'author' => 'Alex', 'question' => 'Did you mean the export in F2?', 'answer' => 'The export, at `app/Export.php:12`. <script>alert(1)</script>',
         'status' => ReviewQuestion::STATUS_ANSWERED, 'resumed' => true, 'cost' => 0.42,
     ]);
+    File::ensureDirectoryExists(dirname(app(RunLog::class)->questionPath($asked)));
+    File::put(app(RunLog::class)->questionPath($asked), "── reviewer ──\nReading app/Export.php\n");
     // Another pull request's question is not this one's.
     ReviewQuestion::query()->create([
         'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 571, 'branch' => 'feature/other', 'comment_id' => 78,
@@ -270,6 +278,7 @@ it('lists the questions asked on a pull request on its review\'s page, with what
         ->assertSee('<code>app/Export.php:12</code>', false)
         ->assertSee('Answered from the last review&#039;s session', false)
         ->assertSee('$0.42')
+        ->assertSee('Reading app/Export.php')
         ->assertDontSee('<script>alert(1)</script>', false)
         ->assertDontSee('Something else entirely?');
 });
