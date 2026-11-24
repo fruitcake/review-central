@@ -66,6 +66,16 @@ A finding holds the merge from a severity on, per category: on Bitbucket it gets
 
 A category the platform does not set apart, such as correctness or performance, follows **Every category**. So *HIGH only* there still holds the merge on a security finding of any severity, unless Security is set too. Whatever is set, a finding below confidence 8, one that was there before the change, and, from the third follow-up on, a new one below HIGH never hold the merge. The run's log and its Code Insights report say which threshold it used.
 
+Each open finding's heading says what it asks of the author, worked out from the threshold rather than chosen by the reviewer, so it always agrees with the tasks and the request for changes:
+
+| Heading | When |
+|---|---|
+| **Must fix** | It holds the merge. |
+| **Should fix** | Established and introduced by the change, but below the threshold, or past the third follow-up and below HIGH. |
+| **Consider** | Unconfirmed, there before the change, or of a category set to *Never*. |
+
+A finding that is fixed or otherwise settled drops it, and shows its status instead.
+
 ### Follow-up rounds
 
 A review of a pull request after its first is a follow-up: it re-checks the open findings and looks for new ones only in what changed since. So a review, a fix and another review do not go on for ever, the review server holds every follow-up to three rules, whatever the reviewer itself does:

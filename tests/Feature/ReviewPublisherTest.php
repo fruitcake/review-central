@@ -748,7 +748,7 @@ class ReviewPublisherTest extends TestCase
                 && ($data['inline']['to'] ?? null) === 42
                 // Led by its id, the name "Fix these" and a reply use for it, with
                 // the title on a line of its own.
-                && str_starts_with($data['content']['raw'] ?? '', "F1 · HIGH\n\n**Publishing is not idempotent**")
+                && str_starts_with($data['content']['raw'] ?? '', "F1 · Must fix · HIGH\n\n**Publishing is not idempotent**")
                 && str_contains($data['content']['raw'] ?? '', 'id=F1 status=new severity=HIGH path=app/Services/ReviewPublisher.php line=42');
         });
     }
@@ -760,7 +760,7 @@ class ReviewPublisherTest extends TestCase
         $this->report([$this->finding(['details' => str_repeat('x', 9000)])])->assertOk();
 
         $body = collect($this->postedComments())
-            ->first(fn (string $b): bool => str_contains($b, 'F1 · HIGH') && ! str_contains($b, '## AI Review'));
+            ->first(fn (string $b): bool => str_starts_with($b, 'F1 · ') && ! str_contains($b, '## AI Review'));
 
         $this->assertNotNull($body, 'The finding comment was not posted.');
         $this->assertLessThan(9000, strlen($body));
@@ -814,7 +814,7 @@ class ReviewPublisherTest extends TestCase
         // verbatim - so the block is dropped and the prose still says what to do.
         $this->report([$this->finding(['suggestion' => str_repeat("        \$x = 1;\n", 600)])])->assertOk();
 
-        $posted = collect($this->postedComments())->first(fn (string $b): bool => str_contains($b, 'F1 · HIGH'));
+        $posted = collect($this->postedComments())->first(fn (string $b): bool => str_starts_with($b, 'F1 · '));
 
         $this->assertNotNull($posted);
         $this->assertStringNotContainsString('```suggestion', $posted);
@@ -882,7 +882,7 @@ class ReviewPublisherTest extends TestCase
         // none, so an Apply button here would do nothing.
         $this->report([$this->finding(['line' => null, 'suggestion' => 'whatever();'])])->assertOk();
 
-        $comment = collect($this->postedComments())->first(fn (string $body): bool => str_contains($body, 'F1 · HIGH'));
+        $comment = collect($this->postedComments())->first(fn (string $body): bool => str_starts_with($body, 'F1 · '));
 
         $this->assertNotNull($comment);
         $this->assertStringNotContainsString('```suggestion', $comment);
@@ -931,7 +931,7 @@ class ReviewPublisherTest extends TestCase
         $this->report([$this->finding(['prompt' => $prompt])])->assertOk();
 
         $written = $this->publishedDescription();
-        $comment = collect($this->postedComments())->first(fn (string $b): bool => str_contains($b, 'F1 · HIGH'));
+        $comment = collect($this->postedComments())->first(fn (string $b): bool => str_starts_with($b, 'F1 · '));
 
         foreach (['the description' => $written, 'the finding comment' => $comment] as $where => $body) {
             $this->assertStringContainsString('````', $body, "The fence was not widened in {$where}.");
@@ -955,7 +955,7 @@ class ReviewPublisherTest extends TestCase
 
         $this->report([$this->finding(['suggestion' => '$md = "```php";'])])->assertOk();
 
-        $comment = collect($this->postedComments())->first(fn (string $b): bool => str_contains($b, 'F1 · HIGH'));
+        $comment = collect($this->postedComments())->first(fn (string $b): bool => str_starts_with($b, 'F1 · '));
 
         $this->assertStringContainsString('````suggestion', $comment);
         $this->assertStringContainsString('[//]: # (ai-finding id=F1', $comment);
@@ -995,7 +995,7 @@ class ReviewPublisherTest extends TestCase
 
         $this->fakeBitbucket([
             $this->comment(1, "## AI Review\n\n[//]: # (ai-review reviewed=abc1234def5678 mode=both)"),
-            $this->comment(2, "F1 · HIGH\n\n**Publishing is not idempotent**\n\n"
+            $this->comment(2, "F1 · Must fix · HIGH\n\n**Publishing is not idempotent**\n\n"
                 ."A second run posts the finding again. Match on the marker instead.\n\n"
                 ."**Prompt for a coding agent:**\n\n```text\nIn app/Services/ReviewPublisher.php, match findings on their marker id rather than on text, and add a test for a second run.\n```\n\n"
                 .'[//]: # (ai-finding id=F1 status=open severity=HIGH path=app/Services/ReviewPublisher.php line=42)'),
@@ -1512,8 +1512,17 @@ class ReviewPublisherTest extends TestCase
             return $request->method() === 'POST'
                 && str_contains($request->url(), '/comments')
                 && ($data['inline']['path'] ?? null) === 'app/Services/ReviewPublisher.php'
-                && str_starts_with($data['content']['raw'] ?? '', "F1 · LOW\n");
+                && str_starts_with($data['content']['raw'] ?? '', "F1 · Should fix · LOW\n");
         });
+    }
+
+    public function test_a_finding_of_a_category_that_never_holds_the_merge_is_one_to_consider(): void
+    {
+        $this->fakeBitbucket();
+
+        $this->report([$this->finding(['category' => 'maintainability'])], extra: ['result' => 'PASSED', 'fail_on' => 'medium,maintainability:never'])->assertOk();
+
+        $this->assertStringStartsWith("F1 · Consider · HIGH · maintainability\n", $this->postedComments()[0]);
     }
 
     public function test_a_security_finding_is_labelled_as_one(): void
@@ -1522,12 +1531,12 @@ class ReviewPublisherTest extends TestCase
 
         $this->report([$this->finding(['category' => 'security'])])->assertOk();
 
-        $comment = collect($this->postedComments())->first(fn (string $b): bool => str_contains($b, 'F1 · HIGH'));
+        $comment = collect($this->postedComments())->first(fn (string $b): bool => str_starts_with($b, 'F1 · '));
         $summary = $this->publishedDescription();
 
-        $this->assertStringStartsWith("F1 · HIGH · security\n\n**Publishing is not idempotent**", $comment);
+        $this->assertStringStartsWith("F1 · Must fix · HIGH · security\n\n**Publishing is not idempotent**", $comment);
         $this->assertStringContainsString(
-            "- **F1 · HIGH · security · 🆕 New** Publishing is not idempotent\n    - `app/Services/ReviewPublisher.php:42`",
+            "- **F1 · Must fix · HIGH · security · 🆕 New** Publishing is not idempotent\n    - `app/Services/ReviewPublisher.php:42`",
             $summary,
         );
     }
@@ -1544,9 +1553,9 @@ class ReviewPublisherTest extends TestCase
             // one, or it blocks through the back door what it cannot block directly.
             ->assertJsonPath('publish.tasks.created', 0);
 
-        $comment = collect($this->postedComments())->first(fn (string $b): bool => str_contains($b, 'F1 · HIGH'));
+        $comment = collect($this->postedComments())->first(fn (string $b): bool => str_starts_with($b, 'F1 · '));
 
-        $this->assertStringStartsWith("F1 · HIGH · security · unconfirmed\n", $comment);
+        $this->assertStringStartsWith("F1 · Consider · HIGH · security · unconfirmed\n", $comment);
     }
 
     public function test_an_established_finding_is_not_labelled_unconfirmed(): void
@@ -1576,7 +1585,7 @@ class ReviewPublisherTest extends TestCase
         ])->assertOk();
 
         foreach ($this->postedComments() as $body) {
-            $this->assertMatchesRegularExpression('/^F[12] · HIGH\n/', $body);
+            $this->assertMatchesRegularExpression('/^F[12] · Must fix · HIGH\n/', $body);
         }
     }
 
@@ -1686,8 +1695,8 @@ class ReviewPublisherTest extends TestCase
             ->assertOk()
             ->assertJsonPath('publish.tasks.created', 0);
 
-        $this->assertStringContainsString('- **F1 · HIGH · Pre-existing · 🆕 New** No tests cover the scheduler change', $this->publishedDescription());
-        $this->assertStringStartsWith("F1 · HIGH · Pre-existing\n", $this->postedComments()[0]);
+        $this->assertStringContainsString('- **F1 · Consider · HIGH · Pre-existing · 🆕 New** No tests cover the scheduler change', $this->publishedDescription());
+        $this->assertStringStartsWith("F1 · Consider · HIGH · Pre-existing\n", $this->postedComments()[0]);
     }
 
     public function test_the_comment_says_why_the_finding_was_flagged(): void
