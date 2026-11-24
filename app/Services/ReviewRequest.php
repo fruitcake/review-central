@@ -238,7 +238,7 @@ class ReviewRequest
                 app(OpenFindings::class)->record($repository, (int) $data['id'], is_string($data['merge_commit']['hash'] ?? null) ? $data['merge_commit']['hash'] : null, is_string($data['destination']['branch']['name'] ?? null) ? $data['destination']['branch']['name'] : null);
             }
 
-            OpenPullRequest::query()->where($key)->delete();
+            OpenPullRequest::close($key['repository_id'], $key['pull_request_id'], ($data['state'] ?? null) === 'MERGED', self::timestamp($data['updated_on'] ?? null));
 
             // Merged or declined: what the reviewer kept of it has no further use.
             if (is_string($data['source']['branch']['name'] ?? null)) {
@@ -249,6 +249,10 @@ class ReviewRequest
         }
 
         $updatedOn = self::timestamp($data['updated_on'] ?? null);
+
+        if (OpenPullRequest::staysClosed($key, $updatedOn)) {
+            return;
+        }
 
         // Created outside the transaction, so a second delivery racing to create the
         // same row finds it instead of failing on the unique key.
@@ -336,7 +340,12 @@ class ReviewRequest
                 app(OpenFindings::class)->record($repository, $pullRequestId, is_string($data['merge_commit']['hash'] ?? null) ? $data['merge_commit']['hash'] : null, is_string($data['destination']['branch']['name'] ?? null) ? $data['destination']['branch']['name'] : null);
             }
 
-            OpenPullRequest::query()->where(['repository_id' => $repository->getKey(), 'pull_request_id' => $pullRequestId])->delete();
+            // None at all, as for one the host deleted: nothing to keep of it.
+            if ($data === null) {
+                OpenPullRequest::query()->where(['repository_id' => $repository->getKey(), 'pull_request_id' => $pullRequestId])->delete();
+            } else {
+                OpenPullRequest::close($repository->getKey(), $pullRequestId, ($data['state'] ?? null) === 'MERGED', self::timestamp($data['updated_on'] ?? null));
+            }
 
             return;
         }
@@ -359,9 +368,13 @@ class ReviewRequest
 
         $key = ['repository_id' => $repository->getKey(), 'pull_request_id' => (int) $data['id']];
 
-        OpenPullRequest::query()->createOrFirst($key, ['draft' => ($data['draft'] ?? false) === true]);
-
         $updatedOn = self::timestamp($data['updated_on'] ?? null);
+
+        if (OpenPullRequest::staysClosed($key, $updatedOn)) {
+            return;
+        }
+
+        OpenPullRequest::query()->createOrFirst($key, ['draft' => ($data['draft'] ?? false) === true]);
 
         DB::transaction(function () use ($repository, $key, $data, $updatedOn): void {
             $record = OpenPullRequest::query()->where($key)->lockForUpdate()->firstOrFail();

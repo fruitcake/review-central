@@ -142,8 +142,10 @@ class PullRequestResource extends Resource
                     ->label(fn (OpenPullRequest $record): string => $record->awaiting_approval ? 'Approve and review' : 'Review')
                     ->icon(Heroicon::OutlinedPlay)
                     ->color(fn (OpenPullRequest $record): string => $record->awaiting_approval ? 'primary' : 'gray')
-                    // Not a fork's whose branch its host keeps nowhere here, as on Bitbucket: it can only be tried from the diff.
-                    ->visible(fn (OpenPullRequest $record): bool => $record->branch !== null && ReviewRequest::reviewable(['from_fork' => $record->from_fork, 'source' => ['branch' => ['name' => $record->branch]]]))
+                    // Not a closed one, whose branch may be another pull request's by now; nor a fork's
+                    // whose branch its host keeps nowhere here, as on Bitbucket: it can only be tried from the diff.
+                    // Checked again when it is pressed, as Filament runs no hidden action.
+                    ->visible(fn (OpenPullRequest $record): bool => $record->closed_as === null && $record->branch !== null && ReviewRequest::reviewable(['from_fork' => $record->from_fork, 'source' => ['branch' => ['name' => $record->branch]]]))
                     ->requiresConfirmation()
                     ->modalHeading(fn (OpenPullRequest $record): string => "Review #{$record->pull_request_id}?")
                     ->modalDescription(fn (OpenPullRequest $record): string => ($record->from_fork || ! $record->repository->tenant->trusts($record->author_id, $record->author_nickname)
@@ -179,6 +181,10 @@ class PullRequestResource extends Resource
      */
     public static function turnCell(OpenPullRequest $record): HtmlString
     {
+        if ($record->closed_as !== null) {
+            return new HtmlString('<span class="rc-muted">'.e(self::closedText($record)).'</span>');
+        }
+
         $turn = PullRequestTurn::of($record);
         $note = $turn->note($record);
         $user = auth()->user();
@@ -190,6 +196,14 @@ class PullRequestResource extends Resource
             .'<span class="rc-muted">'.e($note === null ? "{$turn->action}: {$turn->reason}" : Str::limit($note['next_step'], 220)).'</span>'
             .'</div>'
         );
+    }
+
+    /**
+     * How and when a closed pull request was closed: "Merged 3 days ago".
+     */
+    public static function closedText(OpenPullRequest $record): string
+    {
+        return ($record->closed_as === OpenPullRequest::MERGED ? 'Merged' : 'Declined').($record->closed_at === null ? '' : ' '.$record->closed_at->diffForHumans());
     }
 
     /**
@@ -227,7 +241,8 @@ class PullRequestResource extends Resource
             'record' => $record,
             'turn' => $turn,
             'note' => $turn->note($record),
-            'mine' => $user instanceof User && $turn->isFor($user),
+            'mine' => $record->closed_as === null && $user instanceof User && $turn->isFor($user),
+            'closed' => $record->closed_as === null ? null : self::closedText($record),
             'run' => $run,
             'standing' => self::standing($record),
             'history' => $history,

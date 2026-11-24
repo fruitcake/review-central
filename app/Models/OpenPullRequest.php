@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace App\Models;
 
 use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Prunable;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * An open pull request, as the webhook last told of it: reviewed by itself or
- * not. Gone once it is merged or declined.
+ * A pull request, as the webhook last told of it: reviewed by itself or not.
+ * Only the open ones, unless asked otherwise: one that was merged or declined is
+ * kept with how and when, for the list's tabs, and gone after CLOSED_DAYS.
  *
  * A reviewer is kept as the host names them, with what they last did and when:
  * name, account_id, nickname, state (approved, changes_requested or null for not
@@ -29,6 +32,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property bool $draft
  * @property bool $from_fork
  * @property bool $awaiting_approval Not started by itself, for someone in the team to start
+ * @property string|null $closed_as merged or declined; null while it is open
+ * @property CarbonInterface|null $closed_at
  * @property string|null $source_updated_on
  * @property CarbonInterface|null $opened_at
  * @property CarbonInterface|null $head_since When the current head was first seen
@@ -45,8 +50,92 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class OpenPullRequest extends Model
 {
+    use Prunable;
+
     /** How many history entries are kept: the newest. */
     public const HISTORY_LIMIT = 40;
+
+    public const MERGED = 'merged';
+
+    public const DECLINED = 'declined';
+
+    /** The global scope that leaves out the closed ones. */
+    public const OPEN = 'open';
+
+    /** How long one that was closed stays listed. */
+    public const CLOSED_DAYS = 90;
+
+    protected static function booted(): void
+    {
+        static::addGlobalScope(self::OPEN, fn (Builder $query): Builder => $query->whereNull($query->qualifyColumn('closed_as')));
+    }
+
+    /**
+     * Those closed longer ago than CLOSED_DAYS.
+     *
+     * @return Builder<static>
+     */
+    public function prunable(): Builder
+    {
+        return $this->newQueryWithoutScope(self::OPEN)->whereNotNull('closed_as')->where('closed_at', '<', now()->subDays(self::CLOSED_DAYS));
+    }
+
+    /**
+     * Keeps a pull request as closed, merged or declined, rather than removing it:
+     * also one already closed here, as declined, that a newer snapshot says was
+     * merged since. A snapshot older than the one kept says nothing, and merged
+     * is for good. One not listed here stays unlisted.
+     *
+     * @param  string|null  $updatedOn  when the host says it last changed, as source_updated_on keeps it
+     */
+    public static function close(int $repositoryId, int $pullRequestId, bool $merged, ?string $updatedOn = null): void
+    {
+        $record = static::withoutGlobalScope(self::OPEN)->where(['repository_id' => $repositoryId, 'pull_request_id' => $pullRequestId])->first();
+        $closedAs = $merged ? self::MERGED : self::DECLINED;
+
+        if ($record === null || $record->closed_as === self::MERGED || $record->closed_as === $closedAs) {
+            return;
+        }
+
+        if ($updatedOn !== null && $record->source_updated_on !== null && $updatedOn < $record->source_updated_on) {
+            return;
+        }
+
+        $record->closed_as = $closedAs;
+        $record->closed_at = now();
+        $record->awaiting_approval = false;
+        $record->source_updated_on = $updatedOn ?? $record->source_updated_on;
+        $record->record($closedAs, $merged ? 'Merged' : 'Declined');
+        $record->save();
+    }
+
+    /**
+     * Whether a delivery that says the pull request is open finds it closed here
+     * for good: merged, or declined after the delivery's snapshot, which then
+     * came late. A declined one the host changed since is open again, as
+     * GitHub's can be, and listed as open.
+     *
+     * @param  array{repository_id: int, pull_request_id: int}  $key
+     */
+    public static function staysClosed(array $key, ?string $updatedOn): bool
+    {
+        $closed = static::withoutGlobalScope(self::OPEN)->where($key)->whereNotNull('closed_as')->first();
+
+        if ($closed === null) {
+            return false;
+        }
+
+        if ($closed->closed_as === self::MERGED || $updatedOn === null || ($closed->source_updated_on !== null && $updatedOn <= $closed->source_updated_on)) {
+            return true;
+        }
+
+        $closed->closed_as = null;
+        $closed->closed_at = null;
+        $closed->record('reopened', 'Reopened');
+        $closed->save();
+
+        return false;
+    }
 
     protected $fillable = [
         'repository_id',
@@ -71,6 +160,7 @@ class OpenPullRequest extends Model
             'merge_conflicts' => 'boolean',
             'conflicting_files' => 'array',
             'merge_checked_at' => 'datetime',
+            'closed_at' => 'datetime',
             'history' => 'array',
             'note' => 'array',
         ];
