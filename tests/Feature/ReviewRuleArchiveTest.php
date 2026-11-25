@@ -106,10 +106,12 @@ it('takes only a rule file the review gives the reviewer as the rule\'s place', 
         'api.bitbucket.org/2.0/repositories/acme/shop/src/main/.github/instructions/*' => Http::response(['values' => [['type' => 'commit_file', 'path' => '.github/instructions/notes.md']]]),
         // Cursor's agent picks a rule without globs by its description; the review leaves it out.
         'api.bitbucket.org/2.0/repositories/acme/shop/src/main/.cursor/rules/exports.mdc' => Http::response("---\ndescription: Exports\nglobs:\nalwaysApply: false\n---\n\nEvery export is scoped to the company.\n"),
+        'api.bitbucket.org/2.0/repositories/acme/shop/src/main/.cursor/rules/empty.mdc' => Http::response("---\nglobs: []\nalwaysApply: false\n---\n\nEvery export is scoped to the company.\n"),
         'api.bitbucket.org/2.0/repositories/acme/shop/src/main/.cursor/rules/scoped.mdc' => Http::response("---\nglobs: app/Export*.php\n---\n\nEvery export is scoped to the company.\n"),
         'api.bitbucket.org/2.0/repositories/acme/shop/src/main/.cursor/rules/*' => Http::response(['values' => [
             ['type' => 'commit_file', 'path' => '.cursor/rules/exports.mdc'],
             ['type' => 'commit_file', 'path' => '.cursor/rules/scoped.mdc'],
+            ['type' => 'commit_file', 'path' => '.cursor/rules/empty.mdc'],
         ]]),
         'api.bitbucket.org/2.0/repositories/acme/shop/src/main/*' => Http::response('', 404),
     ]);
@@ -121,6 +123,7 @@ it('takes only a rule file the review gives the reviewer as the rule\'s place', 
     expect($rule->refresh()->enabled)->toBeTrue();
     RuleMatcher::assertPrompted(fn ($prompt): bool => str_contains($prompt->prompt, '## .cursor/rules/scoped.mdc')
         && ! str_contains($prompt->prompt, 'exports.mdc')
+        && ! str_contains($prompt->prompt, 'empty.mdc')
         && ! str_contains($prompt->prompt, 'notes.md'));
 });
 
