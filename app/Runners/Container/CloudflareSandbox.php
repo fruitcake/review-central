@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Number;
 use Psr\Http\Message\StreamInterface;
 use RuntimeException;
 
@@ -123,6 +124,9 @@ class CloudflareSandbox extends Sandbox
             if ($stream === false) {
                 throw new RuntimeException('The checkout could not be packed for the sandbox.');
             }
+
+            // How much goes up, so a slow or failed upload can be told from a large checkout.
+            $output?->__invoke('out', 'Uploading the checkout: '.Number::fileSize((int) filesize("{$archive}.gz"), 1).".\n");
 
             try {
                 $files->put($input, $stream);

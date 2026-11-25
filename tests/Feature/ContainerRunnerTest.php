@@ -38,6 +38,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
+use League\Flysystem\UnableToWriteFile;
 
 beforeEach(function () {
     config([
@@ -890,6 +891,16 @@ it('gives a review more time than its reviewer, and the queue more than that', f
         ->and($job->timeout)->toBeLessThan($supervisor['timeout'])
         ->and($supervisor['timeout'])->toBeLessThan(config('queue.connections.reviews.retry_after'))
         ->and($job->tries)->toBe(1);
+});
+
+it('says in the log why a step was cut short, not only what broke', function () {
+    Http::fake(['api.bitbucket.org/*' => Http::response([])]);
+    fakeSteps(whileReviewing: fn () => throw UnableToWriteFile::atLocation('review/sandbox/input.tar.gz', '', new RuntimeException("Error executing \"PutObject\":\n  AccessDenied (client): Access Denied")));
+
+    rescue(fn () => app(ContainerReview::class)->run($this->repository, 'feature/export', null, 41), report: false);
+
+    expect(File::get(app(RunLog::class)->path($this->repository->id, 41)))
+        ->toContain('The review step was cut short: UnableToWriteFile: Error executing "PutObject": AccessDenied (client): Access Denied');
 });
 
 it('keeps what the steps print in the run\'s log as they print it, without the secrets they were given', function () {
