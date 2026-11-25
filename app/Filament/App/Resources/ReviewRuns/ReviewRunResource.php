@@ -107,7 +107,9 @@ class ReviewRunResource extends Resource
                     // Who reviewed and with which model: two reviewers can share one.
                     ->description(fn (ReviewRun $record): ?string => implode(' · ', array_filter([RunPresenter::reviewer($record), $record->model])) ?: null),
                 TextColumn::make('duration_seconds')->label('Duration')
-                    ->formatStateUsing(fn (?int $state): ?string => RunPresenter::duration($state))->placeholder('—'),
+                    ->formatStateUsing(fn (?int $state): ?string => RunPresenter::duration($state))->placeholder('—')
+                    // The sandbox it left for the next review of the branch, while it is there.
+                    ->description(fn (ReviewRun $record): ?HtmlString => self::warm($record, 'Sandbox warm until :time')),
                 TextColumn::make('cost')->formatStateUsing(fn (mixed $state): string => Currency::show($state))->placeholder('—')->sortable()
                     ->description(fn (ReviewRun $record): ?string => $record->cost_estimated ? 'estimated' : null),
             ])
@@ -324,6 +326,24 @@ class ReviewRunResource extends Resource
     /**
      * A small rounded label in one of the theme's tones.
      */
+    /**
+     * Until when the sandbox a review left waits for the next review of its branch,
+     * while it does. Taken off the page when that time comes, which a page left
+     * open would otherwise go on showing: nothing tells it the sandbox went.
+     *
+     * @param  string  $text  with :time for the time
+     */
+    public static function warm(ReviewRun $record, string $text): ?HtmlString
+    {
+        if (($until = $record->warmUntil()) === null) {
+            return null;
+        }
+
+        $milliseconds = (int) max(0, now()->diffInMilliseconds($until));
+
+        return new HtmlString('<span x-data x-init="setTimeout(() => $el.remove(), '.$milliseconds.')">'.e(str_replace(':time', LocalTime::of($until)->format('H:i'), $text)).'</span>');
+    }
+
     public static function chip(string $label, string $tone): HtmlString
     {
         return new HtmlString('<span class="rc-chip rc-chip-'.e($tone).'">'.e($label).'</span>');

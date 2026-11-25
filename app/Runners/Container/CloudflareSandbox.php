@@ -7,6 +7,7 @@ namespace App\Runners\Container;
 use App\Exceptions\ReviewStopped;
 use App\Llm\ProviderKeys;
 use App\Services\PlatformSettings;
+use Carbon\CarbonInterface;
 use Closure;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Http\Client\PendingRequest;
@@ -96,6 +97,7 @@ class CloudflareSandbox extends Sandbox
         $warm = $clone === null ? null : $this->warm;
         $this->warm = null;
         $this->keptWarm = false;
+        $this->warmUntil = null;
 
         $files = $this->files();
         $instance = self::instance();
@@ -174,6 +176,8 @@ class CloudflareSandbox extends Sandbox
             // The Worker keeps a sandbox only where it could keep the reviewer from
             // changing what the next review runs; it says so in its answer.
             $this->keptWarm = $warm !== null && $exit['warm'];
+            // From now, not from after the download: the Worker set its alarm before it answered.
+            $this->warmUntil = $this->keptWarm ? now()->addSeconds($warm['seconds']) : null;
 
             if ($exit['kept']) {
                 $output?->__invoke('out', "##[phase] download\n");
@@ -210,6 +214,9 @@ class CloudflareSandbox extends Sandbox
 
     /** Whether the last run's sandbox was left warm. */
     public bool $keptWarm = false;
+
+    /** Until when the last run's sandbox stays warm, when it was left so. */
+    public ?CarbonInterface $warmUntil = null;
 
     /** When a sandbox is kept for the next review of its branch. */
     public const WARM_OFF = 'off';

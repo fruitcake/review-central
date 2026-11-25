@@ -270,7 +270,7 @@
                             <dt>Memory</dt><dd>{{ number_format($run->peak_memory_mb) }} MB at most{{ $run->memory_limit === null ? '' : ", of {$run->memory_limit} allowed" }}</dd>
                         @endif
                         @if ($run->sandbox !== null)
-                            <dt>Sandbox</dt><dd>{{ ucfirst($run->sandbox) }}{{ $run->sandbox_size === null ? '' : " · {$run->sandbox_size}" }}{{ $run->sandbox_seconds === null ? '' : ' · '.RunPresenter::duration($run->sandbox_seconds) }}{{ $run->sandbox_cost === null ? '' : ' · about '.Currency::show($run->sandbox_cost, null, 4) }}</dd>
+                            <dt>Sandbox</dt><dd>{{ ucfirst($run->sandbox) }}{{ $run->sandbox_size === null ? '' : " · {$run->sandbox_size}" }}{{ $run->sandbox_seconds === null ? '' : ' · '.RunPresenter::duration($run->sandbox_seconds) }}{{ $run->sandbox_cost === null ? '' : ' · about '.Currency::show($run->sandbox_cost, null, 4) }}{{ \App\Filament\App\Resources\ReviewRuns\ReviewRunResource::warm($run, ' · warm until :time for the next review of this branch') }}</dd>
                         @endif
                         @if ($run->queue_seconds !== null)
                             <dt>Waited</dt><dd>{{ RunPresenter::duration($run->queue_seconds) }} for a worker</dd>

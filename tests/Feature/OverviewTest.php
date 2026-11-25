@@ -3,6 +3,7 @@
 use App\Filament\Admin\Pages\Platform;
 use App\Filament\App\Pages\Overview;
 use App\Filament\App\Resources\ReviewRuns\Pages\ListReviewRuns;
+use App\Filament\LocalTime;
 use App\Models\Connection;
 use App\Models\OpenPullRequest;
 use App\Models\Repository;
@@ -126,8 +127,10 @@ it('shows the overview and the views of the list to a tenant\'s user', function 
     Filament::setTenant($this->tenant);
     Filament::bootCurrentPanel();
 
-    $approved = ($this->run)();
-    $blocked = ($this->run)(['result' => 'FAILED', 'findings' => [($this->finding)('F1', 'HIGH', 'new', 'security')]]);
+    // Its sandbox is gone by now.
+    $approved = ($this->run)(['warm_until' => now()->subMinutes(5)]);
+    // Its sandbox waits for the next review of the branch.
+    $blocked = ($this->run)(['result' => 'FAILED', 'findings' => [($this->finding)('F1', 'HIGH', 'new', 'security')], 'warm_until' => now()->addMinutes(10)]);
     $running = ($this->run)(['status' => ReviewRun::STATUS_RUNNING, 'result' => null]);
     $failed = ($this->run)(['status' => ReviewRun::STATUS_FAILED, 'result' => null]);
     $waiting = ($this->run)(['status' => ReviewRun::STATUS_PENDING, 'result' => null]);
@@ -147,6 +150,8 @@ it('shows the overview and the views of the list to a tenant\'s user', function 
         ->assertCanSeeTableRecords([$approved, $blocked, $running, $failed])
         ->assertCanNotSeeTableRecords([$waiting])
         ->assertSee('1 high')
+        ->assertSee('Sandbox warm until '.LocalTime::of(now()->addMinutes(10))->format('H:i'))
+        ->assertDontSee('Sandbox warm until '.LocalTime::of(now()->subMinutes(5))->format('H:i'))
         ->set('activeTab', 'action')
         ->assertCanSeeTableRecords([$blocked, $failed])
         ->assertCanNotSeeTableRecords([$approved, $running])

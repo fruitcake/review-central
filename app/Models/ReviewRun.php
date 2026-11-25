@@ -68,6 +68,7 @@ use Illuminate\Support\Str;
  * @property string|null $sandbox_size
  * @property int|null $sandbox_seconds
  * @property string|null $sandbox_cost
+ * @property CarbonInterface|null $warm_until Until when its sandbox stays for the next review of the branch, unless one takes it over or it is let go before
  * @property string|null $input_hash
  * @property string|null $rating_token
  * @property-read Repository $repository
@@ -192,6 +193,15 @@ class ReviewRun extends Model
     /**
      * @return array<string, string>
      */
+    /**
+     * Until when the sandbox this review left is still there for the next review
+     * of the branch; null when it left none, or it is gone.
+     */
+    public function warmUntil(): ?CarbonInterface
+    {
+        return $this->warm_until?->isFuture() ? $this->warm_until : null;
+    }
+
     protected function casts(): array
     {
         return [
@@ -206,6 +216,7 @@ class ReviewRun extends Model
             'cost' => 'decimal:4',
             'sandbox_cost' => 'decimal:4',
             'sandbox_seconds' => 'integer',
+            'warm_until' => 'datetime',
             'cost_estimated' => 'boolean',
             'custom' => 'boolean',
             'metrics' => 'array',

@@ -384,12 +384,14 @@ it('keeps a sandbox warm under the branch\'s name, and starts a fresh one of its
     }]);
     $clone = ['url' => 'https://bitbucket.org/acme/shop.git', 'authorization' => null, 'ref' => 'refs/heads/feature', 'name' => 'feature', 'commit' => str_repeat('a', 40), 'destination' => 'main', 'base' => null, 'since' => null];
 
+    $this->freezeTime();
     $sandbox = app(CloudflareSandbox::class);
     $sandbox->keepWarm('warm-7-abc', 900);
     $sandbox->run('review-7-41-review', 'true', $this->work, [], trusted: false, timeout: 1800, clone: $clone);
 
     expect($asked[0])->toBe(['POST', 'runs/warm-7-abc', ['seconds' => 900]])
-        ->and($sandbox->keptWarm)->toBe(! $busy);
+        ->and($sandbox->keptWarm)->toBe(! $busy)
+        ->and($sandbox->warmUntil?->timestamp)->toBe($busy ? null : now()->addSeconds(900)->timestamp);
 
     if ($busy) {
         // A sandbox of this run's own, not kept, and let go after it as always.
