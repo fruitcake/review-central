@@ -109,7 +109,7 @@ it('runs a step in a Cloudflare sandbox: the checkout up through the bucket, the
 
     expect($result->successful())->toBeTrue()
         // The steps on this side are marked for the run's metrics.
-        ->and($printed)->toBe("##[phase] upload\nSandbox started (basic).\nReviewing\npull request 570\n##[phase] download\n")
+        ->and($printed)->toBe("##[phase] upload\nUploading the checkout: 20.0 B.\nSandbox started (basic).\nReviewing\npull request 570\n##[phase] download\n")
         ->and($uploaded)->toBe('the checkout, packed')
         ->and($asked['script'])->toBe('mkdir -p "$HOME" && sh .review/skill/run-review.sh')
         // On Cloudflare's own image the review brings what installs its tools, and

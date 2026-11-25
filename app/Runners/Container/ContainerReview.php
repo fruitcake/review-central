@@ -395,6 +395,24 @@ class ContainerReview
     }
 
     /**
+     * What went wrong, for the log: the exception's name, and the message of the
+     * one at the bottom of its chain, which says why. A disk's "Unable to write
+     * file" alone does not say whether it was the key, the bucket or the size.
+     */
+    protected static function reason(Throwable $exception): string
+    {
+        $cause = $exception;
+
+        while ($cause->getPrevious() !== null) {
+            $cause = $cause->getPrevious();
+        }
+
+        $message = trim((string) preg_replace('/\s+/', ' ', $cause->getMessage()));
+
+        return class_basename($exception).($message === '' ? '.' : ': '.mb_strimwidth($message, 0, 500, '…'));
+    }
+
+    /**
      * Lets the sandbox kept for the branch go, unless the next review is likely
      * to want it: after every review, or only after one that asked for changes,
      * which the author pushes a fix for within minutes more often than not.
@@ -596,7 +614,7 @@ class ContainerReview
         } catch (ReviewStopped $exception) {
             throw $exception;
         } catch (Throwable $exception) {
-            $log?->note("The {$name} step was cut short: ".class_basename($exception).'.');
+            $log?->note("The {$name} step was cut short: ".self::reason($exception));
 
             throw $exception;
         } finally {
