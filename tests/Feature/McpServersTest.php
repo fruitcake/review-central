@@ -22,9 +22,9 @@ use App\Mcp\Tools\ReviewerAnswerTool;
 use App\Mcp\Tools\ReviewInstructionsTool;
 use App\Mcp\Tools\ReviewRulesTool;
 use App\Mcp\Tools\SettleFindingsTool;
-use App\Mcp\Tools\SettleOpenFindingsTool;
 use App\Mcp\Tools\TicketAttachmentTool;
 use App\Mcp\Tools\TicketTool;
+use App\Mcp\Tools\UpdateOpenFindingsTool;
 use App\Models\Connection;
 use App\Models\FindingVerdict;
 use App\Models\OpenFinding;
@@ -886,19 +886,19 @@ it('settles the open findings backlog for an admin: closed with a reason, or che
     $other = $finding($this->elsewhere, 'app/Export.php');
 
     // As the buttons on the backlog: an admin's.
-    AgentServer::actingAs($this->member)->tool(SettleOpenFindingsTool::class, ['repository' => 'acme/shop', 'action' => 'check', 'ids' => [$export->id]])
+    AgentServer::actingAs($this->member)->tool(UpdateOpenFindingsTool::class, ['repository' => 'acme/shop', 'action' => 'check', 'ids' => [$export->id]])
         ->assertHasErrors();
 
     // Only the repository's own.
-    AgentServer::actingAs($this->admin)->tool(SettleOpenFindingsTool::class, ['repository' => 'acme/shop', 'action' => 'close', 'ids' => [$export->id, $other->id], 'reason' => 'Fixed'])
+    AgentServer::actingAs($this->admin)->tool(UpdateOpenFindingsTool::class, ['repository' => 'acme/shop', 'action' => 'close', 'ids' => [$export->id, $other->id], 'reason' => 'Fixed'])
         ->assertHasErrors(["acme/shop has no open finding {$other->id}; `open-findings` lists its findings with their id."]);
     expect($export->fresh()->status)->toBe(OpenFinding::PRESENT);
 
-    AgentServer::actingAs($this->admin)->tool(SettleOpenFindingsTool::class, ['repository' => 'acme/shop', 'action' => 'check', 'ids' => [$export->id, $resolved->id]])
+    AgentServer::actingAs($this->admin)->tool(UpdateOpenFindingsTool::class, ['repository' => 'acme/shop', 'action' => 'check', 'ids' => [$export->id, $resolved->id]])
         ->assertStructuredContentPath('checking', 1);
     Queue::assertPushed(CheckOpenFindings::class, fn (CheckOpenFindings $job): bool => $job->ids === [$export->id]);
 
-    UserServer::actingAs($this->admin)->tool(SettleOpenFindingsTool::class, ['repository' => 'acme/shop', 'action' => 'close', 'ids' => [$import->id, $resolved->id], 'reason' => 'Fixed in pull request 12'])
+    UserServer::actingAs($this->admin)->tool(UpdateOpenFindingsTool::class, ['repository' => 'acme/shop', 'action' => 'close', 'ids' => [$import->id, $resolved->id], 'reason' => 'Fixed in pull request 12'])
         ->assertStructuredContentPath('closed', 1);
 
     expect($import->fresh())->status->toBe(OpenFinding::DISMISSED)->note->toBe('Fixed in pull request 12')->closed_by->toBe($this->admin->name)

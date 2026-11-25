@@ -16,16 +16,16 @@ use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Attributes\Description;
 
 #[Description(<<<'TXT'
-    Settles findings on the open findings backlog of a repository, as the buttons on its page do. Only an admin of the tenant may.
+    Checks or closes findings on the open findings backlog of a repository: those a pull request was merged with, as `open-findings` lists them. As the buttons on the backlog's page do; only an admin of the tenant may. Not for the findings of a review of an open pull request: those take a verdict with `settle-findings`.
 
     `check`: a small model reads each finding's file on the main branch and resolves the finding when the code is gone or fixed. Use it once a fix is on the main branch; it runs in the background, and `open-findings` shows the outcome after.
     `close`: closes the findings under the user's name, with a `reason`, such as "Fixed in pull request 123" or "Accepted: the export stays synchronous". A check never opens them again. Only after the user agreed in this conversation.
 
     Pass the findings by the `id` that `open-findings` gives. Findings that are already resolved or closed are left as they are.
     TXT)]
-class SettleOpenFindingsTool extends ReviewTool
+class UpdateOpenFindingsTool extends ReviewTool
 {
-    protected string $name = 'settle-open-findings';
+    protected string $name = 'update-open-findings';
 
     public function handle(Request $request, RepositoryAccess $access, OpenFindings $backlog): Response|ResponseFactory
     {
