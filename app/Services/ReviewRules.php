@@ -123,6 +123,9 @@ class ReviewRules
         ]);
     }
 
+    /** The longest title a rule can have, as the form allows it. */
+    public const TITLE_LENGTH = 255;
+
     /** The most rows one import takes. */
     public const IMPORT_LIMIT = 1000;
 
@@ -144,9 +147,13 @@ class ReviewRules
 
         try {
             $reader = Reader::createFromString(ltrim($csv, "\u{FEFF}"));
+            // Plain CSV: a quote is escaped by doubling it, so a backslash at the end
+            // of a field does not take the columns after it along.
+            $reader->setEscape('');
             $reader->setHeaderOffset(0);
             $header = array_map(fn (string $name): string => strtolower(trim($name)), $reader->getHeader());
-            $records = iterator_to_array($reader->getRecords($header), false);
+            // Keyed by their offset in the file, which a blank line skipped still counts.
+            $records = iterator_to_array($reader->getRecords($header), true);
         } catch (Throwable $exception) {
             throw new ActionRefused('That is not a CSV this can read: '.$exception->getMessage(), previous: $exception);
         }
@@ -163,9 +170,8 @@ class ReviewRules
         $created = 0;
         $skipped = [];
 
-        foreach ($records as $index => $record) {
-            // The header is row 1.
-            $row = $index + 2;
+        foreach ($records as $offset => $record) {
+            $row = $offset + 1;
             $kind = ReviewRuleKind::tryFrom(strtolower(trim((string) ($record['kind'] ?? ''))));
             $title = self::line((string) ($record['title'] ?? ''));
             $named = trim((string) ($record['repository'] ?? ''));
@@ -176,10 +182,25 @@ class ReviewRules
                 continue;
             }
 
-            $repository = $named === '' ? null : $repositories->first(fn (Repository $repository): bool => strcasecmp($repository->fullName(), $named) === 0);
+            $matches = $named === '' ? collect() : $repositories->filter(fn (Repository $repository): bool => strcasecmp($repository->fullName(), $named) === 0);
 
-            if ($named !== '' && $repository === null) {
+            if ($named !== '' && $matches->isEmpty()) {
                 $skipped[] = "Row {$row}: no repository {$named} here.";
+
+                continue;
+            }
+
+            // Two connections can each have a repository of that name; guessing would give the rule to the wrong one.
+            if ($matches->count() > 1) {
+                $skipped[] = "Row {$row}: {$matches->count()} repositories here are named {$named}; add this rule by hand to the one it is for.";
+
+                continue;
+            }
+
+            $repository = $matches->first();
+
+            if (mb_strlen($title) > self::TITLE_LENGTH) {
+                $skipped[] = "Row {$row}: a title is at most ".self::TITLE_LENGTH.' characters; put the rest in the body.';
 
                 continue;
             }

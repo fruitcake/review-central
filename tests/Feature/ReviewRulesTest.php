@@ -171,3 +171,28 @@ it('imports rules only for an admin, and only from a CSV that names its columns'
         ->and(fn () => app(ReviewRules::class)->import($this->admin, $this->tenant, "type,name\ncheck,A rule\n"))->toThrow(ActionRefused::class, 'needs at least kind and title')
         ->and(ReviewRule::query()->where('tenant_id', $this->tenant->id)->count())->toBe(0);
 });
+
+it('reads a CSV as plain CSV, numbers rows as the file does, and skips a row it cannot place or store rather than guess', function () {
+    $twin = Repository::factory()->create(['tenant_id' => $this->tenant->id, 'workspace' => 'acme', 'slug' => 'twin']);
+    Repository::factory()->create(['tenant_id' => $this->tenant->id, 'workspace' => 'acme', 'slug' => 'twin']);
+
+    $csv = "kind,title,body,repository\n"
+        // A backslash before the closing quote ends the field, as plain CSV has it.
+        ."check,Windows paths,\"Use C:\\\",acme/shop\n"
+        ."\n"
+        ."check,For the twin,,acme/twin\n"
+        .'check,'.str_repeat('x', 256).",,\n"
+        ."check,After the long one,,\n";
+
+    $result = app(ReviewRules::class)->import($this->admin, $this->tenant, $csv);
+
+    expect($result['created'])->toBe(2)
+        // The blank line is row 3, so the rows after it keep the numbers the file shows.
+        ->and($result['skipped'])->toBe([
+            'Row 4: 2 repositories here are named acme/twin; add this rule by hand to the one it is for.',
+            'Row 5: a title is at most 255 characters; put the rest in the body.',
+        ])
+        ->and(ReviewRule::query()->where('title', 'Windows paths')->sole()->only(['body', 'repository_id']))->toBe(['body' => 'Use C:\\', 'repository_id' => $this->repository->id])
+        ->and(ReviewRule::query()->where('title', 'After the long one')->exists())->toBeTrue()
+        ->and(ReviewRule::query()->where('repository_id', $twin->id)->exists())->toBeFalse();
+});
