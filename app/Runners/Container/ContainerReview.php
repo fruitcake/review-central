@@ -336,7 +336,7 @@ class ContainerReview
                         'sandbox_size' => CloudflareSandbox::instance(),
                         'sandbox_seconds' => $this->sandbox->seconds,
                         'sandbox_cost' => $this->sandbox->cost,
-                        'warm_until' => $this->sandbox instanceof CloudflareSandbox && $this->sandbox->keptWarm ? now()->addSeconds($warmth['seconds']) : null,
+                        'warm_until' => $this->sandbox instanceof CloudflareSandbox ? $this->sandbox->warmUntil : null,
                     ]);
             }
 

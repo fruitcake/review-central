@@ -698,6 +698,7 @@ function cloningSandbox(bool $clonesItself = true, ?ArrayObject $warmth = null, 
             $this->told[] = $clone;
             $this->warmth['kept'] = $this->warm;
             $this->keptWarm = $this->warm !== null;
+            $this->warmUntil = $this->warm === null ? null : now()->addSeconds($this->warm['seconds']);
             $this->warm = null;
             $this->seconds = 30;
             $this->during?->__invoke();
