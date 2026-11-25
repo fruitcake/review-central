@@ -185,6 +185,8 @@ class ContainerReview
         // The name of the sandbox kept for the branch, and when it is wanted.
         $warm = null;
         $warmth = ['mode' => CloudflareSandbox::WARM_OFF, 'seconds' => 0];
+        // Whether it got as far as the code: cloned here, or the commit a sandbox clones found.
+        $checkedOut = false;
 
         try {
             // What a sandbox that clones for itself is to clone. The worker then
@@ -216,6 +218,7 @@ class ContainerReview
                 };
             }
 
+            $checkedOut = true;
             $this->takeReviewFiles($directory);
 
             $pipeline = $this->pipelineEnvironment($repository, $branch, $commit, $build) + ($trial?->environment() ?? []);
@@ -378,8 +381,17 @@ class ContainerReview
 
             return false;
         } catch (Throwable $exception) {
-            if ($trial !== null || ! $this->skipClosedBeforeReview($repository, $branch, $build)) {
+            // Only a review that could not get the code: one that had it failed for another reason.
+            $skipped = $trial === null && ! $checkedOut ? $this->skipClosedBeforeReview($repository, $branch, $build) : null;
+
+            if ($skipped === null) {
                 throw $exception;
+            }
+
+            // The commit the run was announced on, which shows it waiting until told how it ended.
+            if ($skipped->commit !== '') {
+                $commit ??= $skipped->commit;
+                $reviewing = true;
             }
 
             return false;
@@ -546,9 +558,9 @@ class ContainerReview
      * to read, which a clone of the branch fails on. One whose branch is still
      * there failed for another reason, and stays failed.
      *
-     * @return bool whether it was closed as skipped
+     * @return ReviewRun|null the run closed as skipped, or null when it was not
      */
-    protected function skipClosedBeforeReview(Repository $repository, string $branch, int $build): bool
+    protected function skipClosedBeforeReview(Repository $repository, string $branch, int $build): ?ReviewRun
     {
         $run = ReviewRun::query()
             ->where('repository_id', $repository->getKey())
@@ -557,20 +569,21 @@ class ContainerReview
             ->first();
 
         if ($run === null || $run->pull_request_id === null || PullRef::id($branch) !== null) {
-            return false;
+            return null;
         }
 
         $state = rescue(fn (): mixed => $repository->sourceControl()->getPullRequest((string) $run->pull_request_id)['state'] ?? null, null, false);
 
         if (! in_array($state, ['MERGED', 'DECLINED'], true)) {
-            return false;
+            return null;
         }
 
-        // Still on the host, the branch could have been read: something else broke.
-        $branchIsGone = rescue(fn (): bool => $this->checkout->remoteCommit($repository, "refs/heads/{$branch}") === '', true, false);
+        // Gone only when the host says so. Still there, or the host not answering,
+        // the branch could have been read: something else broke.
+        $branchIsGone = rescue(fn (): bool => ! $this->checkout->remoteHas($repository, "refs/heads/{$branch}"), false, false);
 
         if (! $branchIsGone) {
-            return false;
+            return null;
         }
 
         $run->status = ReviewRun::STATUS_SKIPPED;
@@ -582,7 +595,7 @@ class ContainerReview
 
         $this->log->writer((int) $repository->getKey(), $build)?->note($run->summary);
 
-        return true;
+        return $run;
     }
 
     protected function finish(Repository $repository, string $branch, string $commit, int $build, bool $reviewing, bool $trial = false): void

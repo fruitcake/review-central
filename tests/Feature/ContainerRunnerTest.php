@@ -1477,19 +1477,23 @@ it('skips a review whose pull request was merged and its branch removed before t
     Http::fake(['api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570' => Http::response(['id' => 570, 'state' => $state])]);
     $checkout = $this->partialMock(Checkout::class);
     $checkout->shouldReceive('clone')->andThrow(new CheckoutFailed('Remote branch feature/export not found.'));
-    $checkout->shouldReceive('remoteCommit')->andThrow(new CheckoutFailed('refs/heads/feature/export is not on the repository\'s host.'));
+    $checkout->shouldReceive('remoteHas')->andReturn(false);
 
     app(ContainerReview::class)->run($this->repository, 'feature/export', null, $build);
 
     expect(ReviewRun::query()->where('build_number', $build)->sole())
         ->status->toBe(ReviewRun::STATUS_SKIPPED)
-        ->summary->toContain($summary);
+        ->summary->toContain($summary)
+        // The commit it was shown waiting on is told how it ended, and the lock goes back.
+        ->and(last(buildStatuses()))->toMatchArray(['a', 'STOPPED'])
+        ->and(last(buildStatuses())[2])->toContain($summary)
+        ->and(ReviewLock::heldBy($this->repository, 'feature/export'))->toBeNull();
 })->with([
     'merged' => ['MERGED', 'the pull request was merged'],
     'declined' => ['DECLINED', 'the pull request was declined'],
 ]);
 
-it('keeps a review failed when its pull request is still open, or its branch still there', function (string $state, bool $branchIsThere) {
+it('keeps a review failed when its pull request is still open, its branch still there, or the host cannot say', function (string $state, ?bool $branchIsThere) {
     fakeOpenPullRequest();
     Queue::fake();
     $build = app(ContainerRunner::class)->start($this->repository, 'feature/export');
@@ -1497,13 +1501,33 @@ it('keeps a review failed when its pull request is still open, or its branch sti
     Http::fake(['api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570' => Http::response(['id' => 570, 'state' => $state])]);
     $checkout = $this->partialMock(Checkout::class);
     $checkout->shouldReceive('clone')->andThrow(new CheckoutFailed('The host did not answer.'));
-    $branchIsThere
-        ? $checkout->shouldReceive('remoteCommit')->andReturn($this->sha)
-        : $checkout->shouldReceive('remoteCommit')->andThrow(new CheckoutFailed('refs/heads/feature/export is not on the repository\'s host.'));
+    $branchIsThere === null
+        ? $checkout->shouldReceive('remoteHas')->andThrow(new CheckoutFailed('Could not resolve host: bitbucket.org'))
+        : $checkout->shouldReceive('remoteHas')->andReturn($branchIsThere);
 
     expect(fn () => app(ContainerReview::class)->run($this->repository, 'feature/export', null, $build))->toThrow(CheckoutFailed::class)
         ->and(ReviewRun::query()->where('build_number', $build)->sole()->status)->not->toBe(ReviewRun::STATUS_SKIPPED);
 })->with([
     'still open' => ['OPEN', false],
     'merged, branch kept' => ['MERGED', true],
+    'merged, the host not answering about the branch' => ['MERGED', null],
 ]);
+
+it('keeps a review failed that had the code when its pull request was merged and its branch removed', function () {
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570' => Http::response(['id' => 570, 'state' => 'MERGED']),
+        'api.bitbucket.org/*' => Http::response([]),
+    ]);
+    fakeSteps(whileReviewing: function () {
+        ReviewRun::query()->create([
+            'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop', 'pull_request_id' => 570,
+            'branch' => 'feature/export', 'commit' => str_repeat('a', 40), 'build_number' => 41, 'status' => ReviewRun::STATUS_RUNNING, 'started_at' => now(),
+        ]);
+
+        throw new RuntimeException('The sandbox timed out.');
+    });
+    $this->partialMock(Checkout::class)->shouldReceive('remoteHas')->andReturn(false);
+
+    expect(fn () => app(ContainerReview::class)->run($this->repository, 'feature/export', null, 41))->toThrow(RuntimeException::class, 'The sandbox timed out.')
+        ->and(ReviewRun::query()->where('build_number', 41)->sole()->status)->not->toBe(ReviewRun::STATUS_SKIPPED);
+});
