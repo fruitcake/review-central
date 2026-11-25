@@ -269,18 +269,18 @@
                         <span class="rc-muted">Estimated from the tokens and the price list.</span>
                     @endif
                     @if ($tokens > 0)
+                        @php($newlyRead = $usage['cache_creation'] + $usage['input'])
                         <div class="rc-bar rc-bar-tall">
                             <div class="rc-fill-primary" style="width: {{ $usage['cache_read'] / $tokens * 100 }}%"></div>
-                            <div class="rc-fill-sky" style="width: {{ $usage['cache_creation'] / $tokens * 100 }}%"></div>
-                            <div class="rc-fill-grey" style="width: {{ $usage['input'] / $tokens * 100 }}%"></div>
+                            <div class="rc-fill-sky" style="width: {{ $newlyRead / $tokens * 100 }}%"></div>
                             <div class="rc-fill-accent" style="width: {{ $usage['output'] / $tokens * 100 }}%"></div>
                         </div>
                         <div class="rc-legend rc-legend-stacked">
-                            <span><i class="rc-fill-primary"></i>Cache read {{ number_format($usage['cache_read']) }}</span>
-                            <span><i class="rc-fill-sky"></i>Cache write {{ number_format($usage['cache_creation']) }}</span>
-                            <span><i class="rc-fill-grey"></i>Input {{ number_format($usage['input']) }}</span>
-                            <span><i class="rc-fill-accent"></i>Output {{ number_format($usage['output']) }}</span>
+                            <span><i class="rc-fill-primary"></i>Read again from cache {{ number_format($usage['cache_read']) }}</span>
+                            <span><i class="rc-fill-sky"></i>Newly read {{ number_format($newlyRead) }}</span>
+                            <span><i class="rc-fill-accent"></i>Thought and written {{ number_format($usage['output']) }}</span>
                         </div>
+                        <span class="rc-muted">Every turn sends the whole conversation again, so most tokens are the same instructions and files read once more. What the reviewer newly read (instructions, diff, files, tool output) and what it thought and wrote are the parts that show how much work it did.</span>
                     @endif
                     @if ($siblings->count() > 1)
                         <div class="rc-note">This pull request so far: <strong>{{ $siblings->count() }} runs · {{ Currency::show($siblings->sum(fn ($sibling) => (float) $sibling->cost)) }}</strong></div>
