@@ -30,6 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # The release notes read each merged pull request's labels and description.
+      pull-requests: read
 
     steps:
       - name: Checkout the tag, with history
