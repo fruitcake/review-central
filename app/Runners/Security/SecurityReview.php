@@ -195,9 +195,8 @@ class SecurityReview
             File::put("{$directory}/.review-instructions/security-prompt.md", $prompt);
         }
 
-        $composer = "{$directory}/composer.json";
         $stacks = ReviewStack::resolve($repository)
-            ?: ReviewStack::fromComposer(is_file($composer) && ! is_link($composer) ? (string) File::get($composer) : null);
+            ?: ReviewStack::fromFiles(fn (string $path): ?string => is_file("{$directory}/{$path}") && ! is_link("{$directory}/{$path}") ? (string) File::get("{$directory}/{$path}") : null);
 
         foreach ($stacks as $stack) {
             $guide = resource_path("review/skill/references/stack-{$stack}.md");

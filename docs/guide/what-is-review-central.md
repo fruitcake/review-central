@@ -40,7 +40,7 @@ A review that finds nothing blocking but names something only a person can settl
 | AI providers | Anthropic and OpenAI, or a gateway that speaks their API, for every reviewer. Gemini, Mistral, Groq, DeepSeek, xAI and OpenRouter for the review from the diff, and for Pi in a trial. |
 | Reviewers | Claude Code, Codex CLI, OpenCodeReview, or the diff alone; Pi in a trial |
 | Sandboxes | Cloudflare sandboxes, the safest; Docker with gVisor on your own server |
-| Stacks with their own guide | Laravel, Magento, Hyvä, Drupal; a tenant can write its own for any other |
+| Stacks with their own guide | Laravel, Magento, Hyvä, Drupal, React Native, Nuxt; a tenant can write its own for any other |
 | Signing in | Email and password, or Google, with the domains whose people may join a tenant |
 
 New source control hosts, ticket trackers and providers are a driver class each: see [Extending](./extending).

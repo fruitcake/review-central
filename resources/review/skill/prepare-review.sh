@@ -58,7 +58,7 @@ echo "  CODEX_REVIEW_MODEL=${CODEX_REVIEW_MODEL:-from the agent config} CODEX_RE
 echo "  PI_REVIEW_MODEL=${PI_REVIEW_MODEL:-by provider} PI_REVIEW_EFFORT=${PI_REVIEW_EFFORT:-Pi's default} PI_REVIEW_PROVIDER=${PI_REVIEW_PROVIDER:-from the model or the keys}"
 echo "  CLAUDE_REVIEW_MODEL=${CLAUDE_REVIEW_MODEL:-the runtime default} CLAUDE_REVIEW_EFFORT=${CLAUDE_REVIEW_EFFORT:-the runtime default} CLAUDE_REVIEW_ADVISOR=${CLAUDE_REVIEW_ADVISOR:-none} CLAUDE_REVIEW_MAX_BUDGET=${CLAUDE_REVIEW_MAX_BUDGET:-10}"
 echo "  OCR_REVIEW_MODEL=${OCR_REVIEW_MODEL:-by provider} OCR_REVIEW_EFFORT=${OCR_REVIEW_EFFORT:-medium} OCR_REVIEW_PROVIDER=${OCR_REVIEW_PROVIDER:-from the model or the keys}"
-echo "  REVIEW_STACK=${REVIEW_STACK:-auto} (auto | none | laravel, magento, hyva, drupal - which stack guides the review reads)"
+echo "  REVIEW_STACK=${REVIEW_STACK:-auto} (auto | none | laravel, magento, hyva, drupal, react-native, nuxt - which stack guides the review reads)"
 echo "  REVIEW_VERIFY=${REVIEW_VERIFY:-false} REVIEW_VERIFY_MODEL=${REVIEW_VERIFY_MODEL:-sonnet for Claude, the review model for Codex} (a second check on each finding that would block)"
 echo "  REVIEW_EXTRA_PASSES=${REVIEW_EXTRA_PASSES:-off for Claude, on for Codex} (the reviewer's own review first, for candidates)"
 echo "  REVIEW_OCR=${REVIEW_OCR:-true} REVIEW_SCAN=${REVIEW_SCAN:-true} REVIEW_FLOOR_GUARD=${REVIEW_FLOOR_GUARD:-true} (OpenCodeReview picks the files, the scan before the review, the floor guard)"

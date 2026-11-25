@@ -5,7 +5,7 @@
 #
 # The review reads the guide for each (stack-<name>.md, from the review server or from
 # references/), so it knows where that stack's wiring, security boundary and release
-# steps are. Known stacks: laravel, magento, hyva and drupal. An empty line means
+# steps are. Known stacks: laravel, magento, hyva, drupal, react-native and nuxt. An empty line means
 # none of them: the review then works from the method and whatever the repository
 # writes down.
 #
@@ -20,12 +20,12 @@
 #
 # The precheck no longer runs it: the review server sends the stack with the context. The
 # review step runs it only when the context has none, from a review server older than that.
-# Detection reads composer.json and the tree, not vendor/, so it works before
+# Detection reads composer.json, package.json and the tree, not vendor/, so it works before
 # anything is installed. Runs under busybox ash and dash, needs
 # only grep, and never fails: what it cannot read, it does not detect.
 set -u
 
-STACKS="laravel magento hyva drupal"
+STACKS="laravel magento hyva drupal react-native nuxt"
 
 asked="${REVIEW_STACK:-auto}"
 asked=$(printf '%s' "$asked" | tr ',;A-Z' '  a-z')
@@ -77,6 +77,16 @@ detect_drupal() {
     || any_file web/modules/custom docroot/modules/custom
 }
 
+# React Native, bare or through Expo, as a dependency of any kind in package.json.
+detect_react_native() {
+  [ -f package.json ] && grep -Eq '"(react-native|expo)"[[:space:]]*:' package.json
+}
+
+# Nuxt, as a dependency of any kind in package.json.
+detect_nuxt() {
+  [ -f package.json ] && grep -Eq '"nuxt"[[:space:]]*:' package.json
+}
+
 found=""
 add() {
   case " $found " in *" $1 "*) ;; *) found="$found $1" ;; esac
@@ -87,7 +97,7 @@ for word in $asked; do
     none) ;;
     auto)
       for stack in $STACKS; do
-        "detect_$stack" 2> /dev/null && add "$stack"
+        "detect_$(printf '%s' "$stack" | tr '-' '_')" 2> /dev/null && add "$stack"
       done
       ;;
     *)
