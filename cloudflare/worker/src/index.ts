@@ -40,7 +40,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
  * after one is told apart. tests/Feature/CloudflareWorkerVersionTest.php fails
  * on a change that leaves it as it was.
  */
-const WORKER_VERSION = "2026-11-24.6";
+const WORKER_VERSION = "2026-11-25.1";
 
 interface Env {
   REVIEW_SANDBOX: DurableObjectNamespace<ReviewSandbox>;
@@ -347,11 +347,20 @@ const INSTANCES: Instance[] = ["lite", "basic", "standard-1", "standard-2", "sta
  */
 const REVIEWER = "1000:1000";
 
+/**
+ * How long a run goes on without anyone reading it, for a caller whose connection
+ * to it was lost to pick it up again with resume().
+ */
+const READER_GRACE_MS = 2 * 60 * 1000;
+
+/** How much of a run's last events is kept for resume(): far more than is sent while a connection is re-made. */
+const EVENTS_KEPT_BYTES = 4 * 1024 * 1024;
+
 /** Six hours is the longest Cloudflare lets an instance sit; a review is done long before. */
 const LONGEST = 6 * 60 * 60;
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (!env.API_TOKEN || !(await sameToken(request.headers.get("Authorization") ?? "", `Bearer ${env.API_TOKEN}`))) {
@@ -416,9 +425,112 @@ export default {
       return json({ error: spec }, 422);
     }
 
-    return sandbox.run(spec);
+    return relay(sandbox, await sandbox.run(spec), ctx);
   },
 } satisfies ExportedHandler<Env>;
+
+/** How often a lost connection to a run is tried again, with this many seconds before each. */
+const RESUME_WAITS = [1, 2, 5, 10, 20];
+
+/** How often one run is picked up again at most: a connection that keeps dropping is not one to keep making. */
+const MOST_RESUMES = 10;
+
+/**
+ * Hands a run's events on to review-central, and makes the connection to the run
+ * again where it was lost: the call into the Durable Object can drop while the
+ * sandbox goes on ("Network connection lost."). review-central reads one stream
+ * throughout; the Durable Object sends what it missed again, by number. Only a
+ * run that is gone, or that cannot be picked up within RESUME_WAITS, ends the
+ * stream without its exit, as before.
+ */
+function relay(sandbox: DurableObjectStub<ReviewSandbox>, first: Response, ctx: ExecutionContext): Response {
+  if (first.status !== 200 || first.body === null) {
+    return first;
+  }
+
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+
+  ctx.waitUntil(
+    (async () => {
+      let body: ReadableStream<Uint8Array> | null = first.body;
+      let last = 0;
+      let ended = false;
+      let pending = "";
+      let resumes = 0;
+      const decoder = new TextDecoder();
+
+      while (body !== null && !ended) {
+        try {
+          for await (const chunk of body) {
+            pending += decoder.decode(chunk, { stream: true });
+            let end: number;
+
+            // Whole events only, so a connection made again carries on after the last of them.
+            while ((end = pending.indexOf("\n\n")) !== -1) {
+              const frame = pending.slice(0, end + 2);
+              pending = pending.slice(end + 2);
+              const id = /^id: (\d+)$/m.exec(frame);
+
+              if (id !== null) {
+                last = Number(id[1]);
+              }
+
+              if (/^event: (exit|error)$/m.test(frame)) {
+                ended = true;
+              }
+
+              try {
+                await writer.write(encoder.encode(frame));
+              } catch {
+                // review-central hung up: on purpose, so the run is stopped now.
+                await sandbox.hangUp().catch(() => undefined);
+
+                return;
+              }
+            }
+          }
+        } catch (error) {
+          console.warn(`The connection to the run was lost after event ${last}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+
+        if (ended || ++resumes > MOST_RESUMES) {
+          break;
+        }
+
+        // Ended without its exit, or lost: picked up again after the last whole event.
+        pending = "";
+        body = null;
+
+        for (const seconds of RESUME_WAITS) {
+          await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+          const resumed = await sandbox.resume(last).catch((error: unknown) => {
+            console.warn(`Could not pick the run up again: ${error instanceof Error ? error.message : String(error)}`);
+
+            return undefined;
+          });
+
+          // The run is gone, or what came after `last` is: nothing to carry on with.
+          if (resumed === null) {
+            console.warn(`The run cannot be picked up again after event ${last}.`);
+            break;
+          }
+
+          if (resumed !== undefined && resumed.body !== null) {
+            console.log(`Picked the run up again after event ${last}.`);
+            body = resumed.body;
+            break;
+          }
+        }
+      }
+
+      await writer.close().catch(() => undefined);
+    })(),
+  );
+
+  return new Response(readable, { headers: first.headers });
+}
 
 /**
  * The way out of a sandbox to an AI provider: a request to the host it was
@@ -513,14 +625,19 @@ export class ReviewSandbox extends DurableObject<Env> {
 
   /**
    * One review: a fresh sandbox, the script, and what it left. The answer is a
-   * stream of server-sent events:
+   * stream of server-sent events, each with the number it has in this run:
    *
-   *   event: note     data: "a line of this Worker's own"
-   *   event: output   data: "a piece of what the script printed"
-   *   event: exit     data: {"exitCode": 0, "seconds": 212, "kept": true, "metrics": {...}}
-   *   event: error    data: "why there was no run"
+   *   id: 12  event: note     data: "a line of this Worker's own"
+   *   id: 13  event: output   data: "a piece of what the script printed"
+   *   id: 14  event: exit     data: {"exitCode": 0, "seconds": 212, "kept": true, "metrics": {...}}
+   *   id: 15  event: error    data: "why there was no run"
    *
    * A piece of output may end anywhere, so it is appended, not read as a line.
+   *
+   * The run does not hang on the stream. The connection to this Durable Object can
+   * be lost while the sandbox goes on, so the run keeps the events it sent last and
+   * waits READER_GRACE_MS for resume() to pick them up again. Only a run nobody
+   * comes back for in that time is stopped, and hangUp() stops one at once.
    */
   async run(spec: RunSpec): Promise<Response> {
     // A warm sandbox serves one run at a time; the caller starts another of its own.
@@ -530,39 +647,37 @@ export class ReviewSandbox extends DurableObject<Env> {
 
     this.busy = true;
     this.attempt = spec.attempt ?? null;
+    this.events = [];
+    this.eventBytes = 0;
+    this.sequence = 0;
+    this.finished = false;
+    this.abandoned = false;
     await this.ctx.storage.deleteAlarm();
 
-    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-    const writer = writable.getWriter();
-    const encoder = new TextEncoder();
-    let open = true;
+    const readable = this.attach();
 
     const send = async (event: string, data: unknown): Promise<void> => {
-      if (!open) {
-        return;
-      }
-
-      try {
-        await writer.write(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-      } catch {
-        // Nobody is reading any more: the review was cut short on the other side.
-        open = false;
-      }
+      const frame = `id: ${++this.sequence}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+      this.remember(this.sequence, frame);
+      await this.deliver(frame);
     };
 
     // A line that says nothing, so a proxy on the way does not take the silence of
-    // a reviewer that is thinking for a dead connection.
+    // a reviewer that is thinking for a dead connection; and the moment to give up
+    // on a run whose reader did not come back.
     const alive = setInterval(() => {
-      if (open) {
-        writer.write(encoder.encode(": keep-alive\n\n")).catch(() => {
-          open = false;
-        });
+      if (this.reader !== null) {
+        void this.deliver(": keep-alive\n\n");
+      } else if (!this.abandoned && this.lostAt !== null && Date.now() - this.lostAt > READER_GRACE_MS) {
+        console.warn(`Nobody came back for the run in ${READER_GRACE_MS / 1000} seconds: stopping it.`);
+        this.abandon();
       }
     }, 5000);
 
     this.ctx.waitUntil(
-      this.review(spec, send, () => open)
+      this.review(spec, send, () => !this.abandoned)
         .catch(async (error: unknown) => {
+          console.error("The run failed:", error instanceof Error ? error.message : String(error));
           await send("error", error instanceof Error ? error.message : String(error));
 
           return false;
@@ -573,7 +688,7 @@ export class ReviewSandbox extends DurableObject<Env> {
           // Kept for the next review of the branch only after a run that went as it
           // should, in a sandbox that kept the reviewer from changing what root
           // owns; otherwise, and without warm, it does not outlive its review.
-          if (warmable && spec.warm && open) {
+          if (warmable && spec.warm && !this.abandoned) {
             await this.keepWarm(spec.warm.seconds).catch(() => this.destroy());
           } else {
             await this.destroy();
@@ -582,7 +697,10 @@ export class ReviewSandbox extends DurableObject<Env> {
         .finally(async () => {
           this.busy = false;
           this.attempt = null;
-          await writer.close().catch(() => undefined);
+          this.finished = true;
+          const reader = this.reader;
+          this.reader = null;
+          await reader?.close().catch(() => undefined);
         }),
     );
 
@@ -591,10 +709,131 @@ export class ReviewSandbox extends DurableObject<Env> {
     });
   }
 
+  /**
+   * The events of this run after the one numbered `after`, and then the rest as
+   * they come: for a caller whose connection to the run was lost. Null when
+   * there is no such run here any more, or the events after `after` are no longer
+   * kept, so what the caller has cannot be continued.
+   */
+  async resume(after: number): Promise<Response | null> {
+    if ((!this.busy && !this.finished) || this.abandoned) {
+      return null;
+    }
+
+    const missed = this.events.filter((event) => event.id > after);
+
+    // What was sent next is no longer kept: continuing would leave a gap.
+    if (after < this.sequence && (missed.length === 0 || missed[0].id !== after + 1)) {
+      return null;
+    }
+
+    console.log(`Picked up again after event ${after}, ${missed.length} event(s) sent again.`);
+
+    const readable = this.attach();
+    const writer = this.reader!;
+
+    for (const event of missed) {
+      void writer.write(this.encoder.encode(event.frame)).catch(() => this.lose(writer));
+    }
+
+    // Ended while nobody read: what is left to say is said, and that is all.
+    if (this.finished) {
+      this.reader = null;
+      void writer.close().catch(() => undefined);
+    }
+
+    return new Response(readable, {
+      headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+    });
+  }
+
+  /** The caller let the run go on purpose: stop it now rather than wait for it to come back. */
+  async hangUp(): Promise<void> {
+    if (this.busy && !this.abandoned) {
+      console.log("The caller hung up: stopping the run.");
+      this.abandon();
+    }
+  }
+
   /** Whether a run is going here, and the attempt it is. */
   private busy = false;
 
   private attempt: string | null = null;
+
+  /** Whether the last run here has ended, its last events still kept for a caller that lost them. */
+  private finished = false;
+
+  /** Whether the run here was let go: nobody came back for it, or the caller hung up. */
+  private abandoned = false;
+
+  /** Where the run's events go now; null while nobody reads. */
+  private reader: WritableStreamDefaultWriter<Uint8Array> | null = null;
+
+  /** When the last reader was lost. */
+  private lostAt: number | null = null;
+
+  /** The run's last events, by number, for resume(). */
+  private events: { id: number; frame: string }[] = [];
+
+  private eventBytes = 0;
+
+  private sequence = 0;
+
+  /** What the script runs now, stopped when the run is let go. */
+  private current: ExecProcess | null = null;
+
+  private readonly encoder = new TextEncoder();
+
+  /** A new reader for the run's events, in place of one that was lost. */
+  private attach(): ReadableStream<Uint8Array> {
+    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+    const old = this.reader;
+    this.reader = writable.getWriter();
+    this.lostAt = null;
+    void old?.close().catch(() => undefined);
+
+    return readable;
+  }
+
+  private async deliver(frame: string): Promise<void> {
+    const writer = this.reader;
+
+    if (writer === null) {
+      return;
+    }
+
+    try {
+      await writer.write(this.encoder.encode(frame));
+    } catch {
+      this.lose(writer);
+    }
+  }
+
+  /** Nobody reads from this writer any more. Its run goes on, for a while, for resume(). */
+  private lose(writer: WritableStreamDefaultWriter<Uint8Array>): void {
+    if (this.reader !== writer) {
+      return;
+    }
+
+    console.warn(`Lost the reader after event ${this.sequence}; the run goes on for ${READER_GRACE_MS / 1000} seconds for it to come back.`);
+    this.reader = null;
+    this.lostAt = Date.now();
+  }
+
+  /** Keeps an event for resume(), letting the oldest go past EVENTS_KEPT_BYTES. */
+  private remember(id: number, frame: string): void {
+    this.events.push({ id, frame });
+    this.eventBytes += frame.length;
+
+    while (this.eventBytes > EVENTS_KEPT_BYTES && this.events.length > 1) {
+      this.eventBytes -= this.events.shift()!.frame.length;
+    }
+  }
+
+  private abandon(): void {
+    this.abandoned = true;
+    this.current?.kill();
+  }
 
   /**
    * Leaves the sandbox running for the next review, and has it destroyed when
@@ -854,20 +1093,31 @@ export class ReviewSandbox extends DurableObject<Env> {
     /** Runs a command and streams what it prints; resolves with its exit code, or 143 when nobody reads any more. */
     const streamed = async (command: string[], options: ContainerExecOptions): Promise<number> => {
       const process = await container.exec(command, { cwd: "/", ...options, stderr: "combined" });
+      this.current = process;
 
-      if (process.stdout !== null) {
-        for await (const chunk of process.stdout as ReadableStream<Uint8Array>) {
-          await send("output", decoder.decode(chunk, { stream: true }));
+      try {
+        if (!wanted()) {
+          process.kill();
 
-          if (!wanted()) {
-            process.kill();
+          return 143;
+        }
 
-            return 143;
+        if (process.stdout !== null) {
+          for await (const chunk of process.stdout as ReadableStream<Uint8Array>) {
+            await send("output", decoder.decode(chunk, { stream: true }));
+
+            if (!wanted()) {
+              process.kill();
+
+              return 143;
+            }
           }
         }
-      }
 
-      return process.exitCode;
+        return await process.exitCode;
+      } finally {
+        this.current = null;
+      }
     };
 
     // No snapshot to be had, and a setup to run: installed here, for this review
