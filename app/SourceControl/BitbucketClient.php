@@ -400,6 +400,44 @@ class BitbucketClient implements FiltersSecrets, OpensPullRequests, SourceContro
         };
     }
 
+    public function filesOnMainBranch(array $directories): ?array
+    {
+        $branch = $this->getRepository()['mainbranch']['name'] ?? null;
+
+        if (! is_string($branch) || $branch === '') {
+            return null;
+        }
+
+        $files = [];
+
+        foreach ($directories as $directory) {
+            $url = $this->url('src/'.rawurlencode($branch).'/'.implode('/', array_map('rawurlencode', explode('/', trim($directory, '/')))).'/').'?'.http_build_query(['max_depth' => 10, 'pagelen' => 100]);
+
+            for ($page = 0; $url !== '' && $page < self::MAX_PAGES; $page++) {
+                $response = $this->request(10)->get($url);
+
+                // Not there on a branch that could be read: no files.
+                if ($response->status() === 404) {
+                    break;
+                }
+
+                if ($response->status() === 403) {
+                    return null;
+                }
+
+                foreach ($response->throw()->json('values') ?? [] as $entry) {
+                    if (is_array($entry) && ($entry['type'] ?? null) === 'commit_file' && is_string($entry['path'] ?? null)) {
+                        $files[] = $entry['path'];
+                    }
+                }
+
+                $url = (string) $response->json('next');
+            }
+        }
+
+        return array_values(array_unique($files));
+    }
+
     public function getFile(string $path): ?string
     {
         $branch = $this->getRepository()['mainbranch']['name'] ?? null;

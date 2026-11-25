@@ -13,6 +13,7 @@ use App\Mcp\Servers\AgentServer;
 use App\Mcp\Servers\UserServer;
 use App\Mcp\Tools\AddReviewRuleTool;
 use App\Mcp\Tools\AskReviewerTool;
+use App\Mcp\Tools\CheckReviewRulesTool;
 use App\Mcp\Tools\OpenFindingsTool;
 use App\Mcp\Tools\PullRequestFeedbackTool;
 use App\Mcp\Tools\PullRequestsTool;
@@ -21,7 +22,6 @@ use App\Mcp\Tools\RequestReviewTool;
 use App\Mcp\Tools\ReviewerAnswerTool;
 use App\Mcp\Tools\ReviewInstructionsTool;
 use App\Mcp\Tools\ReviewRulesTool;
-use App\Mcp\Tools\RuleFilesTool;
 use App\Mcp\Tools\SettleFindingsTool;
 use App\Mcp\Tools\TicketAttachmentTool;
 use App\Mcp\Tools\TicketTool;
@@ -943,42 +943,34 @@ it('lists the user\'s tenants and repositories, each with its open pull requests
         ]);
 });
 
-it('gives the team\'s rules as Boost rule files for the repository, and proposals from findings the team dismissed with a reason', function () {
-    ReviewRule::factory()->create([
-        'tenant_id' => $this->tenant->id, 'repository_id' => $this->repository->id, 'kind' => ReviewRuleKind::Check,
-        'title' => 'Every export is scoped to the company', 'body' => 'An export reads only its own company\'s rows.', 'paths' => ['app/Export*.php'], 'severity' => 'HIGH',
-    ]);
-    ReviewRule::factory()->create(['tenant_id' => $this->tenant->id, 'repository_id' => null, 'kind' => ReviewRuleKind::Convention, 'title' => 'A narrow fillable is not a gap']);
+it('proposes rules from findings the team dismissed with a reason, and none a rule already covers', function () {
     // Dismissed with a reason, and once without; a valid one is no proposal.
     FindingVerdict::query()->create(['review_run_id' => $this->run->id, 'user_id' => $this->admin->id, 'finding_id' => 'F2', 'verdict' => FindingVerdictKind::NotAProblem, 'reason' => FindingVerdictReason::HandledElsewhere, 'note' => 'CsvWriter escapes it']);
     FindingVerdict::query()->create(['review_run_id' => $this->run->id, 'user_id' => $this->admin->id, 'finding_id' => 'F1', 'verdict' => FindingVerdictKind::Valid]);
 
     AgentServer::actingAs($this->member)
-        ->tool(RuleFilesTool::class, ['repository' => 'acme/shop', 'proposals' => true])
+        ->tool(ReviewRulesTool::class, ['repository' => 'acme/shop', 'proposals' => true])
         ->assertOk()
-        ->assertStructuredContentPaths([
-            // The rules for every repository first, as the review reads them.
-            'files.0.path' => '.ai/rules/a-narrow-fillable-is-not-a-gap.md',
-            'files.1.path' => '.ai/rules/every-export-is-scoped-to-the-company.md',
-            'files.1.content' => "---\npaths:\n  - \"app/Export*.php\"\n---\n\n# Every export is scoped to the company\n\nA change that breaks this is a defect, of severity high.\n\nAn export reads only its own company's rows.\n",
-        ])
         ->assertStructuredContentCount(1, 'proposals')
-        // A rule for every repository applies to every file; a proposal names the file and why it was dismissed.
-        ->assertSee(['  - \"**\"', 'Not a defect here', '# Not a defect: Unescaped CSV cell', 'Handled elsewhere', 'CsvWriter escapes it']);
-});
+        ->assertStructuredContentPaths(['proposals.0.finding' => 'Unescaped CSV cell', 'proposals.0.from' => "{$this->run->uuid}:F2"])
+        ->assertSee(['Handled elsewhere', 'CsvWriter escapes it']);
 
-it('gives two rules of the same slug a file each, and proposes no finding a rule for every repository already covers', function () {
-    ReviewRule::factory()->create(['tenant_id' => $this->tenant->id, 'repository_id' => $this->repository->id, 'kind' => ReviewRuleKind::Check, 'title' => 'Exports']);
-    ReviewRule::factory()->create(['tenant_id' => $this->tenant->id, 'repository_id' => $this->repository->id, 'kind' => ReviewRuleKind::Check, 'title' => 'Exports!']);
+    // A rule for every repository made from that finding covers it here too.
     ReviewRule::factory()->create(['tenant_id' => $this->tenant->id, 'repository_id' => null, 'kind' => ReviewRuleKind::Convention, 'title' => 'The writer escapes cells', 'source' => "{$this->run->uuid}:F2"]);
-    FindingVerdict::query()->create(['review_run_id' => $this->run->id, 'user_id' => $this->admin->id, 'finding_id' => 'F2', 'verdict' => FindingVerdictKind::NotAProblem, 'reason' => FindingVerdictReason::HandledElsewhere]);
 
     AgentServer::actingAs($this->member)
-        ->tool(RuleFilesTool::class, ['repository' => 'acme/shop', 'proposals' => true])
+        ->tool(ReviewRulesTool::class, ['repository' => 'acme/shop', 'proposals' => true])
         ->assertOk()
-        ->assertStructuredContentPaths([
-            'files.1.path' => '.ai/rules/exports.md',
-            'files.2.path' => '.ai/rules/exports-2.md',
-        ])
         ->assertStructuredContentCount(0, 'proposals');
+});
+
+it('checks the repository\'s rule files for its rules only for an admin', function () {
+    AgentServer::actingAs($this->member)
+        ->tool(CheckReviewRulesTool::class, ['repository' => 'acme/shop'])
+        ->assertHasErrors();
+
+    AgentServer::actingAs($this->admin)
+        ->tool(CheckReviewRulesTool::class, ['repository' => 'acme/shop'])
+        ->assertOk()
+        ->assertStructuredContentPaths(['archived' => [], 'note' => 'No rule of this repository alone is on, so there is nothing to check.']);
 });
