@@ -4,6 +4,7 @@ namespace App\Filament\App\Resources\ReviewRuns\Pages;
 
 use App\Exceptions\ReviewTrialRefused;
 use App\Filament\App\Resources\ReviewRuns\ReviewRunResource;
+use App\Filament\Concerns\HasMyRepositoriesTab;
 use App\Filament\Concerns\RefreshesOnBroadcast;
 use App\Filament\CurrentTenant;
 use App\Models\OpenPullRequest;
@@ -32,6 +33,7 @@ use Throwable;
 
 class ListReviewRuns extends ListRecords
 {
+    use HasMyRepositoriesTab;
     use RefreshesOnBroadcast;
 
     protected static string $resource = ReviewRunResource::class;
@@ -60,6 +62,7 @@ class ListReviewRuns extends ListRecords
 
         $views = [
             'all' => ['All', fn (Builder $query): Builder => $query->whereIn('status', [...TenantOverview::REVIEWS, ReviewRun::STATUS_QUEUED])],
+            self::MY_REPOSITORIES => ['My repositories', fn (Builder $query): Builder => $this->inMyRepositories()($query)->whereIn('status', [...TenantOverview::REVIEWS, ReviewRun::STATUS_QUEUED])],
             'action' => ['Needs action', fn (Builder $query): Builder => $query->where(fn (Builder $query) => $query
                 ->where(fn (Builder $query) => $query->whereIn('status', [ReviewRun::STATUS_FAILED, ReviewRun::STATUS_TIMEOUT])->whereNull('dismissed_at'))
                 ->orWhere(fn (Builder $query) => $query->where('status', ReviewRun::STATUS_FINISHED)->where('result', 'FAILED')))],

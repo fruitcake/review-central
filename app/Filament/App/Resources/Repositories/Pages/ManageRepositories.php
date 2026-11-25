@@ -3,14 +3,19 @@
 namespace App\Filament\App\Resources\Repositories\Pages;
 
 use App\Filament\App\Resources\Repositories\RepositoryResource;
+use App\Filament\Concerns\HasMyRepositoriesTab;
 use App\Filament\CurrentTenant;
 use App\Models\Repository;
 use App\Services\RepositorySetup;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ManageRecords;
+use Filament\Schemas\Components\Tabs\Tab;
+use Illuminate\Database\Eloquent\Builder;
 
 class ManageRepositories extends ManageRecords
 {
+    use HasMyRepositoriesTab;
+
     protected static string $resource = RepositoryResource::class;
 
     protected function getHeaderActions(): array
@@ -27,5 +32,20 @@ class ManageRepositories extends ManageRecords
                     $data,
                 )),
         ];
+    }
+
+    /**
+     * @return array<string, Tab>
+     */
+    public function getTabs(): array
+    {
+        $views = [
+            'all' => ['All', fn (Builder $query): Builder => $query],
+            self::MY_REPOSITORIES => ['Mine', $this->inMyRepositories('id')],
+        ];
+
+        return array_map(fn (array $view): Tab => Tab::make($view[0])
+            ->badge($view[1](CurrentTenant::get()->repositories()->getQuery())->count())
+            ->modifyQueryUsing($view[1]), $views);
     }
 }
