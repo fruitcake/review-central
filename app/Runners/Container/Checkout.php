@@ -209,6 +209,26 @@ class Checkout
      */
     public function remoteCommit(Repository $repository, string $ref): string
     {
+        return $this->listedCommit($repository, $ref)
+            ?? throw CheckoutFailed::during('ls-remote', "{$ref} is not on the repository's host.");
+    }
+
+    /**
+     * Whether the repository's host has a ref, asked without a clone. False only
+     * when the host answered without it.
+     *
+     * @throws CheckoutFailed when the host cannot be asked
+     */
+    public function remoteHas(Repository $repository, string $ref): bool
+    {
+        return $this->listedCommit($repository, $ref) !== null;
+    }
+
+    /**
+     * @throws CheckoutFailed when the host cannot be asked
+     */
+    protected function listedCommit(Repository $repository, string $ref): ?string
+    {
         $this->guard($ref);
 
         $access = $repository->sourceControl()->cloneAccess();
@@ -222,7 +242,7 @@ class Checkout
             }
         }
 
-        throw CheckoutFailed::during('ls-remote', "{$ref} is not on the repository's host.");
+        return null;
     }
 
     /**

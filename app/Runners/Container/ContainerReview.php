@@ -185,6 +185,8 @@ class ContainerReview
         // The name of the sandbox kept for the branch, and when it is wanted.
         $warm = null;
         $warmth = ['mode' => CloudflareSandbox::WARM_OFF, 'seconds' => 0];
+        // Whether it got as far as the code: cloned here, or the commit a sandbox clones found.
+        $checkedOut = false;
 
         try {
             // What a sandbox that clones for itself is to clone. The worker then
@@ -216,6 +218,7 @@ class ContainerReview
                 };
             }
 
+            $checkedOut = true;
             $this->takeReviewFiles($directory);
 
             $pipeline = $this->pipelineEnvironment($repository, $branch, $commit, $build) + ($trial?->environment() ?? []);
@@ -377,6 +380,21 @@ class ContainerReview
             $this->log->writer((int) $repository->getKey(), $build)?->note("Stopped by {$by}.");
 
             return false;
+        } catch (Throwable $exception) {
+            // Only a review that could not get the code: one that had it failed for another reason.
+            $skipped = $trial === null && ! $checkedOut ? $this->skipClosedBeforeReview($repository, $branch, $build) : null;
+
+            if ($skipped === null) {
+                throw $exception;
+            }
+
+            // The commit the run was announced on, which shows it waiting until told how it ended.
+            if ($skipped->commit !== '') {
+                $commit ??= $skipped->commit;
+                $reviewing = true;
+            }
+
+            return false;
         } finally {
             // Never in the way of the review: a run without them only has none.
             rescue(fn () => $this->metrics->store($repository, $build, $used), null, false);
@@ -532,6 +550,52 @@ class ContainerReview
         $this->queued->close($repository, $build, ReviewRun::STATUS_FAILED, 'The review did not start');
 
         $this->runner->markEnded($repository, $build);
+    }
+
+    /**
+     * Closes a review that failed as skipped when its pull request was merged or
+     * declined while it ran and its branch is gone with it: there was nothing left
+     * to read, which a clone of the branch fails on. One whose branch is still
+     * there failed for another reason, and stays failed.
+     *
+     * @return ReviewRun|null the run closed as skipped, or null when it was not
+     */
+    protected function skipClosedBeforeReview(Repository $repository, string $branch, int $build): ?ReviewRun
+    {
+        $run = ReviewRun::query()
+            ->where('repository_id', $repository->getKey())
+            ->where('build_number', $build)
+            ->whereIn('status', [ReviewRun::STATUS_QUEUED, ReviewRun::STATUS_RUNNING])
+            ->first();
+
+        if ($run === null || $run->pull_request_id === null || PullRef::id($branch) !== null) {
+            return null;
+        }
+
+        $state = rescue(fn (): mixed => $repository->sourceControl()->getPullRequest((string) $run->pull_request_id)['state'] ?? null, null, false);
+
+        if (! in_array($state, ['MERGED', 'DECLINED'], true)) {
+            return null;
+        }
+
+        // Gone only when the host says so. Still there, or the host not answering,
+        // the branch could have been read: something else broke.
+        $branchIsGone = rescue(fn (): bool => ! $this->checkout->remoteHas($repository, "refs/heads/{$branch}"), false, false);
+
+        if (! $branchIsGone) {
+            return null;
+        }
+
+        $run->status = ReviewRun::STATUS_SKIPPED;
+        $run->summary = $state === 'MERGED'
+            ? 'Not reviewed: the pull request was merged, and its branch removed, before the review could read it.'
+            : 'Not reviewed: the pull request was declined, and its branch removed, before the review could read it.';
+        $run->finished_at = now();
+        $run->save();
+
+        $this->log->writer((int) $repository->getKey(), $build)?->note($run->summary);
+
+        return $run;
     }
 
     protected function finish(Repository $repository, string $branch, string $commit, int $build, bool $reviewing, bool $trial = false): void
