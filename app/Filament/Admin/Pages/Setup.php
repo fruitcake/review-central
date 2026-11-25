@@ -19,6 +19,8 @@ use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Cache;
 
+use function Illuminate\Support\defer;
+
 /**
  * Whether this installation is set up to review, with what to do about each
  * thing that is not.
