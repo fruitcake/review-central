@@ -218,16 +218,34 @@ reviewer_reach() {
 # checkout, with each call resolved by type, written by code-index-worker.php. It
 # prints the directory that holds it, or nothing; REACH then goes by name, as
 # without it. What it did goes to stderr, for the run's log.
+# Mago's own release binary, checked against its checksum, and its PHP SDK from the
+# lock in code-index/: nothing is resolved or updated during a review.
 REVIEW_MAGO_VERSION=1.61.0
+reviewer_mago() {
+  _tools="$HOME/.tools/code-index-$REVIEW_MAGO_VERSION"
+  if [ ! -x "$_tools/mago" ] || [ ! -f "$_tools/vendor/autoload.php" ]; then
+    case "$(uname -m)" in
+      x86_64 | amd64) _arch=x86_64 _sum=d515d29fcca5ec7fefef51019de788336ce610c2b38b28a18b9033042106bf74 ;;
+      aarch64 | arm64) _arch=aarch64 _sum=8bff94ca1931394df743c7b68e7ec78f711c34ac2ec118b7df2cbfa2dcda2a91 ;;
+      *) echo "Code index: no Mago build for $(uname -m)." >&2; return 1 ;;
+    esac
+    _name="mago-$REVIEW_MAGO_VERSION-$_arch-unknown-linux-musl"
+    mkdir -p "$_tools" \
+      && curl -fsSL -o "$_tools/mago.tar.gz" "https://github.com/carthage-software/mago/releases/download/$REVIEW_MAGO_VERSION/$_name.tar.gz" \
+      && echo "$_sum  $_tools/mago.tar.gz" | sha256sum -c --quiet - >&2 \
+      && tar -xzf "$_tools/mago.tar.gz" -C "$_tools" --strip-components=1 "$_name/mago" \
+      && rm -f "$_tools/mago.tar.gz" \
+      && cp "$HERE/code-index/composer.json" "$HERE/code-index/composer.lock" "$_tools/" \
+      && (cd "$_tools" && timeout 300 composer install --no-interaction --quiet --no-progress --no-dev --no-scripts --no-plugins) >&2 \
+      || { rm -rf "$_tools"; return 1; }
+  fi
+  echo "$_tools"
+}
+
 reviewer_code_index() {
   _php="$1"
   _started=$(date +%s)
-  _sdk="$HOME/.tools/mago-$REVIEW_MAGO_VERSION"
-  if [ ! -f "$_sdk/vendor/autoload.php" ]; then
-    mkdir -p "$_sdk" \
-      && (cd "$_sdk" && echo '{}' > composer.json && timeout 300 composer require --no-interaction --quiet --no-progress "carthage-software/mago:$REVIEW_MAGO_VERSION") >&2 \
-      || { echo "Code index: Mago could not be installed; REACH goes by name." >&2; return 0; }
-  fi
+  _tools=$(reviewer_mago) || { echo "Code index: Mago could not be installed; REACH goes by name." >&2; return 0; }
   # Without vendor/ a model is known by its base class's name only; with it, by its types.
   if [ -f composer.lock ] && [ ! -d vendor ]; then
     timeout 600 composer install --no-interaction --quiet --no-progress --no-scripts --no-plugins --no-autoloader --ignore-platform-reqs >&2 \
@@ -250,8 +268,8 @@ reviewer_code_index() {
     echo '[analyzer]'
     echo 'plugins = ["code-index"]'
   } > "$_dir/mago.toml"
-  REACH_INDEX="$_dir" REACH_ROOT="$PWD" MAGO_SDK="$_sdk/vendor/autoload.php" \
-    timeout 900 "$_sdk/vendor/bin/mago" --threads 2 --config "$_dir/mago.toml" --workspace "$PWD" analyze --reporting-format count > /dev/null 2> "$_dir/mago.log"
+  REACH_INDEX="$_dir" REACH_ROOT="$PWD" MAGO_SDK="$_tools/vendor/autoload.php" \
+    timeout 900 "$_tools/mago" --threads 2 --config "$_dir/mago.toml" --workspace "$PWD" analyze --reporting-format count > /dev/null 2> "$_dir/mago.log"
   _status=$?
   if [ ! -s "$_dir/edges.tsv" ]; then
     echo "Code index: Mago wrote no index (exit $_status, $(( $(date +%s) - _started ))s); REACH goes by name. $(tail -c 300 "$_dir/mago.log" | tr '\n' ' ')" >&2

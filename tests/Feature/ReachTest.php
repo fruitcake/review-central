@@ -187,3 +187,19 @@ it('lets the sandbox take the code index setting from the server', function () {
     expect((string) file_get_contents(__DIR__.'/../../resources/review/skill/review-settings.sh'))->toContain(' REVIEW_CODE_INDEX ')
         ->and((string) file_get_contents(__DIR__.'/../../resources/review/skill/reviewer-env.sh'))->toContain('reviewer_code_index "$_php"');
 });
+
+it('installs no Mago whose download does not match its checksum', function () {
+    // A curl that hands back something else than the release.
+    File::ensureDirectoryExists("{$this->dir}/bin");
+    File::put("{$this->dir}/bin/curl", "#!/bin/sh\nwhile [ \$# -gt 0 ]; do [ \"\$1\" = -o ] && { echo tampered > \"\$2\"; shift; }; shift; done\n");
+    chmod("{$this->dir}/bin/curl", 0755);
+    $skill = realpath(__DIR__.'/../../resources/review/skill');
+
+    $run = Process::path($this->dir)
+        ->env(['HOME' => "{$this->dir}/home", 'PATH' => "{$this->dir}/bin:".getenv('PATH'), 'HERE' => $skill])
+        ->run(['sh', '-c', ". {$skill}/reviewer-env.sh; HERE={$skill}; reviewer_mago"]);
+
+    expect($run->successful())->toBeFalse()
+        ->and($run->output())->toBe('')
+        ->and(File::exists("{$this->dir}/home/.tools/code-index-1.61.0"))->toBeFalse();
+});
