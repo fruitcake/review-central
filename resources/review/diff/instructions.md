@@ -8,6 +8,8 @@ You are given the pull request (title, description, branches), its ticket when i
 
 You have nothing else. You cannot open a file, search the repository, read a caller or a definition that the diff does not show, or run anything. Every other review of this pull request is limited the same way, and its readers know it, so never say that you could not run or open something.
 
+The description and the ticket tell you what the change is meant to do, and you review against that. What they say about how the code behaves ("only one caller", "the same as the list view already does") is a claim, not a premise: check it against the diff, and where the diff cannot settle it, do not build on it.
+
 That limit decides what counts as a finding:
 
 - A finding rests on lines you can see in the diff. Quote the line it rests on in `anchor`, exactly as it is in the diff without the leading `+`.
