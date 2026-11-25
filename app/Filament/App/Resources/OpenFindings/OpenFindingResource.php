@@ -9,8 +9,8 @@ use App\Filament\App\Resources\ReviewRuns\ReviewRunResource;
 use App\Filament\CurrentTenant;
 use App\Filament\LocalTime;
 use App\Filament\TenantRole;
-use App\Jobs\CheckOpenFindings;
 use App\Models\OpenFinding;
+use App\Services\OpenFindings;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
@@ -153,13 +153,9 @@ class OpenFindingResource extends Resource
      */
     protected static function check(Collection $findings): void
     {
-        $checkable = $findings->filter(fn (OpenFinding $finding): bool => in_array($finding->status, OpenFinding::ACTIVE, true) && $finding->path !== null);
+        $queued = app(OpenFindings::class)->queueCheck($findings);
 
-        foreach ($checkable->groupBy('repository_id') as $repositoryId => $group) {
-            CheckOpenFindings::dispatch((int) $repositoryId, $group->modelKeys());
-        }
-
-        Notification::make()->title($checkable->isEmpty() ? 'Nothing to check' : 'The check is started')->body($checkable->isEmpty() ? 'Only a finding on the backlog with a file can be checked.' : 'This list shows what it finds when it is done.')->success()->send();
+        Notification::make()->title($queued === 0 ? 'Nothing to check' : 'The check is started')->body($queued === 0 ? 'Only a finding on the backlog with a file can be checked.' : 'This list shows what it finds when it is done.')->success()->send();
     }
 
     /**
@@ -167,11 +163,7 @@ class OpenFindingResource extends Resource
      */
     protected static function close(Collection $findings, ?string $reason): void
     {
-        $name = auth()->user()?->name;
-
-        foreach ($findings as $finding) {
-            $finding->update(['status' => OpenFinding::DISMISSED, 'note' => filled($reason) ? $reason : null, 'closed_at' => now(), 'closed_by' => $name]);
-        }
+        app(OpenFindings::class)->close($findings, $reason, auth()->user()?->name);
     }
 
     public static function getPages(): array

@@ -7,6 +7,7 @@ use App\Enums\TicketStyle;
 use App\Filament\Admin\Pages\Settings;
 use App\Filament\TenantRole;
 use App\Jobs\AnswerReviewQuestion;
+use App\Jobs\CheckOpenFindings;
 use App\Jobs\RunContainerReview;
 use App\Mcp\Servers\AgentServer;
 use App\Mcp\Servers\UserServer;
@@ -23,6 +24,7 @@ use App\Mcp\Tools\ReviewRulesTool;
 use App\Mcp\Tools\SettleFindingsTool;
 use App\Mcp\Tools\TicketAttachmentTool;
 use App\Mcp\Tools\TicketTool;
+use App\Mcp\Tools\UpdateOpenFindingsTool;
 use App\Models\Connection;
 use App\Models\FindingVerdict;
 use App\Models\OpenFinding;
@@ -872,6 +874,35 @@ it('lists the open findings backlog of the user\'s repositories, narrowed to a p
     UserServer::actingAs($this->member)->tool(OpenFindingsTool::class, ['tenant' => $this->elsewhere->tenant->slug])
         ->assertStructuredContentCount(1, 'findings')
         ->assertStructuredContentPath('findings.0.repository', 'other/shop');
+});
+
+it('settles the open findings backlog for an admin: closed with a reason, or checked against the main branch', function () {
+    $finding = fn (Repository $repository, ?string $path, string $status = OpenFinding::PRESENT) => OpenFinding::query()->create([
+        'tenant_id' => $repository->tenant_id, 'repository_id' => $repository->id, 'pull_request_id' => 1, 'finding_id' => (string) $path, 'title' => 'A finding', 'path' => $path, 'status' => $status,
+    ]);
+    $export = $finding($this->repository, 'app/Export.php');
+    $import = $finding($this->repository, 'app/Import.php');
+    $resolved = $finding($this->repository, 'app/Old.php', OpenFinding::RESOLVED);
+    $other = $finding($this->elsewhere, 'app/Export.php');
+
+    // As the buttons on the backlog: an admin's.
+    AgentServer::actingAs($this->member)->tool(UpdateOpenFindingsTool::class, ['repository' => 'acme/shop', 'action' => 'check', 'ids' => [$export->id]])
+        ->assertHasErrors();
+
+    // Only the repository's own.
+    AgentServer::actingAs($this->admin)->tool(UpdateOpenFindingsTool::class, ['repository' => 'acme/shop', 'action' => 'close', 'ids' => [$export->id, $other->id], 'reason' => 'Fixed'])
+        ->assertHasErrors(["acme/shop has no open finding {$other->id}; `open-findings` lists its findings with their id."]);
+    expect($export->fresh()->status)->toBe(OpenFinding::PRESENT);
+
+    AgentServer::actingAs($this->admin)->tool(UpdateOpenFindingsTool::class, ['repository' => 'acme/shop', 'action' => 'check', 'ids' => [$export->id, $resolved->id]])
+        ->assertStructuredContentPath('checking', 1);
+    Queue::assertPushed(CheckOpenFindings::class, fn (CheckOpenFindings $job): bool => $job->ids === [$export->id]);
+
+    UserServer::actingAs($this->admin)->tool(UpdateOpenFindingsTool::class, ['repository' => 'acme/shop', 'action' => 'close', 'ids' => [$import->id, $resolved->id], 'reason' => 'Fixed in pull request 12'])
+        ->assertStructuredContentPath('closed', 1);
+
+    expect($import->fresh())->status->toBe(OpenFinding::DISMISSED)->note->toBe('Fixed in pull request 12')->closed_by->toBe($this->admin->name)
+        ->and($resolved->fresh()->status)->toBe(OpenFinding::RESOLVED);
 });
 
 it('lists the pull requests waiting for the user', function () {

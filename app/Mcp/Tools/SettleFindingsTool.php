@@ -22,6 +22,8 @@ use Laravel\Mcp\Server\Attributes\Description;
     The verdicts and reasons are the team's statistics of how good the review is, so give the user's judgement, not your own. A reply is posted in the finding's thread on the pull request: as the user where they connected their own Bitbucket or GitHub account on their profile (on GitHub, for repositories reviewed through the GitHub App), else by Review Central with the user's name above it; each finding's `replied_as` says which. The next review reads it. A finding that was fixed needs no reply: the next review sees the fix. Reply to a finding that is wrong or not worth it, with the evidence (file:line) in one to three sentences.
 
     All verdicts are checked first: one unknown finding or bad reason records nothing. A reply that cannot be posted is reported per finding; the rest still are. Take `review_id` and the finding ids from `pull-request-feedback`.
+
+    Only for a review of a pull request. The backlog of findings merged while still open is checked or closed with `update-open-findings`.
     TXT)]
 class SettleFindingsTool extends ReviewTool
 {
