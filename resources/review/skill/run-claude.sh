@@ -111,6 +111,7 @@ PROMPT=$(mktemp)
   # A saved copy from before the steps were split out still holds them all.
   grep -q '^FOLLOW-UP ROUNDS:' "$SKILL_FILE" || reviewer_prompt_parts claude-code "$CONFIG"
   reviewer_repository_rules
+  reviewer_reach
   reviewer_module_notes
   printf '\n'
   cat "$HERE/structured-output.md"

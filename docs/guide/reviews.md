@@ -94,6 +94,8 @@ A team writes down how its code works, and what counts as a defect there, in the
 
 A rule kept in Review Central can be moved into the repository through an assistant: the agent server's `rules-as-files` gives each one as a Boost rule file, and with `proposals` also rules the team's verdicts on dismissed findings suggest, for the agent to write, index (`php artisan boost:index-rules`) and open a pull request with, once you agreed. In the repository every agent tool reads them, and a rule in a file of its own changes without a merge conflict.
 
+On a Laravel repository the reviewer also gets **REACH**: for each check the change adds or changes (a method named as one, such as `canBook`, `allows` or `moduleAccessError`), the entry points that reach it, and the entry points (controllers, Livewire components, jobs, commands, routes, views) that reach a method of the same class that writes without passing the check. A rule about who may do something has to hold on every path to what it guards, and the path the change never touches is the one a review misses. It is worked out with `git grep` by method name before the review starts, in a few seconds, so it names paths to look at and is never proof by itself.
+
 None of them is needed: without them the reviewer goes by the review instructions and the stack guides alone. They can raise what the reviewer reports, never lower what it needs as evidence or change what it may run.
 
 ## A repository's page
