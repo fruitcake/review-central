@@ -221,7 +221,7 @@ it('keeps one file of guidance for a pull request\'s review, and a tenant\'s own
     // What ships: the method with the lenses in it, and a guide per stack.
     $shipped = collect(File::files(resource_path(ReviewInstructions::BUNDLED_DIRECTORY)))->map->getFilename()->sort()->values()->all();
 
-    expect($shipped)->toBe(['method.md', 'stack-drupal.md', 'stack-hyva.md', 'stack-laravel.md', 'stack-magento.md'])
+    expect($shipped)->toBe(['method.md', 'stack-drupal.md', 'stack-hyva.md', 'stack-laravel.md', 'stack-magento.md', 'stack-nuxt.md', 'stack-react-native.md'])
         ->and(File::get(resource_path(ReviewInstructions::BUNDLED_DIRECTORY.'/method.md')))->toContain('# Pull request review', 'DEFECT LENSES:');
 
     ReviewInstruction::query()->create(['key' => 'stack-laravel', 'title' => 'Laravel', 'stack' => 'laravel', 'position' => 30, 'body' => 'Mind the tenant scope.']);
@@ -246,7 +246,7 @@ it('lets a tenant add a stack of its own, for its repositories and nobody else\'
     ReviewInstruction::query()->create(['tenant_id' => $this->repository->tenant_id, 'key' => 'stack-symfony', 'title' => 'Symfony', 'stack' => 'symfony', 'position' => 30, 'body' => 'Mind the voters.']);
     $other = Repository::factory()->create(['review_stack' => ['symfony', 'laravel']]);
 
-    expect(ReviewStack::known($this->repository->tenant))->toBe(['laravel', 'magento', 'hyva', 'drupal', 'symfony'])
+    expect(ReviewStack::known($this->repository->tenant))->toBe(['laravel', 'magento', 'hyva', 'drupal', 'react-native', 'nuxt', 'symfony'])
         ->and(ReviewStack::known($other->tenant))->toBe(ReviewStack::STACKS);
 
     $this->repository->update(['review_stack' => ['symfony']]);

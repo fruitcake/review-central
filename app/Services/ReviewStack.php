@@ -20,7 +20,7 @@ use Illuminate\Database\Eloquent\Builder;
 class ReviewStack
 {
     /** The stacks a guide ships for, in the order the review reads them, as detect-stack.sh prints them. */
-    public const STACKS = ['laravel', 'magento', 'hyva', 'drupal'];
+    public const STACKS = ['laravel', 'magento', 'hyva', 'drupal', 'react-native', 'nuxt'];
 
     /** What a stack may be called: it names a file, `stack-<name>.md`. */
     public const NAME_PATTERN = '/^[a-z0-9][a-z0-9-]{0,39}$/';
@@ -124,6 +124,38 @@ class ReviewStack
         if (in_array('hyva', $found, true)) {
             $found[] = 'magento';
         }
+
+        return array_values(array_intersect(self::STACKS, $found));
+    }
+
+    /**
+     * The stacks a repository's package.json names, by the rules of the skill's
+     * detect-stack.sh: React Native, bare or through Expo, and Nuxt, each as a
+     * dependency of any kind.
+     *
+     * @return list<string>
+     */
+    public static function fromPackage(?string $package): array
+    {
+        if ($package === null) {
+            return [];
+        }
+
+        return array_keys(array_filter([
+            'react-native' => preg_match('~"(react-native|expo)"\s*:~', $package) === 1,
+            'nuxt' => preg_match('~"nuxt"\s*:~', $package) === 1,
+        ]));
+    }
+
+    /**
+     * The stacks a repository's own files name: its composer.json, then its package.json.
+     *
+     * @param  callable(string): ?string  $read  the file at that path in the repository, or null
+     * @return list<string>
+     */
+    public static function fromFiles(callable $read): array
+    {
+        $found = [...self::fromComposer($read('composer.json')), ...self::fromPackage($read('package.json'))];
 
         return array_values(array_intersect(self::STACKS, $found));
     }

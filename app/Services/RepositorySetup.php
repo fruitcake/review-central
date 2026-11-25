@@ -115,7 +115,10 @@ class RepositorySetup
         $repository = (new Repository(['workspace' => $workspace, 'slug' => $slug]))->setRelation('integration', $connection);
 
         try {
-            return ReviewStack::fromComposer($repository->sourceControl()->getFile('composer.json'));
+            $source = $repository->sourceControl();
+
+            // Each file on its own: one that cannot be read leaves what the other says.
+            return ReviewStack::fromFiles(fn (string $path): ?string => rescue(fn (): ?string => $source->getFile($path)));
         } catch (Throwable $exception) {
             report($exception);
 
