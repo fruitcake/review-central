@@ -107,7 +107,9 @@ class ReviewRunResource extends Resource
                     // Who reviewed and with which model: two reviewers can share one.
                     ->description(fn (ReviewRun $record): ?string => implode(' · ', array_filter([RunPresenter::reviewer($record), $record->model])) ?: null),
                 TextColumn::make('duration_seconds')->label('Duration')
-                    ->formatStateUsing(fn (?int $state): ?string => RunPresenter::duration($state))->placeholder('—'),
+                    ->formatStateUsing(fn (?int $state): ?string => RunPresenter::duration($state))->placeholder('—')
+                    // The sandbox it left for the next review of the branch, while it is there.
+                    ->description(fn (ReviewRun $record): ?string => ($until = $record->warmUntil()) === null ? null : 'Sandbox warm until '.LocalTime::of($until)->format('H:i')),
                 TextColumn::make('cost')->formatStateUsing(fn (mixed $state): string => Currency::show($state))->placeholder('—')->sortable()
                     ->description(fn (ReviewRun $record): ?string => $record->cost_estimated ? 'estimated' : null),
             ])

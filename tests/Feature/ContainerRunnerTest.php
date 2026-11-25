@@ -699,6 +699,7 @@ function cloningSandbox(bool $clonesItself = true, ?ArrayObject $warmth = null, 
             $this->warmth['kept'] = $this->warm;
             $this->keptWarm = $this->warm !== null;
             $this->warm = null;
+            $this->seconds = 30;
             $this->during?->__invoke();
 
             return Process::result();
@@ -714,11 +715,17 @@ function cloningSandbox(bool $clonesItself = true, ?ArrayObject $warmth = null, 
 }
 
 it('keeps the sandbox for the next review of the branch, and lets it go when that review is not likely to come', function (?string $mode, ?string $result, bool $kept, bool $cooled) {
+    $this->freezeTime();
     Http::fake(['api.bitbucket.org/*' => Http::response([])]);
     $this->repository->integration->update(['settings' => ['clone_in_sandbox' => true]]);
     config(['review.cloudflare.warm' => $mode, 'review.cloudflare.warm_minutes' => '10']);
     fakeSteps();
     $warmth = new ArrayObject;
+    // The review before on the branch, whose sandbox this one takes over.
+    $before = ReviewRun::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'feature/export', 'commit' => str_repeat('a', 40), 'build_number' => 40, 'status' => ReviewRun::STATUS_FINISHED, 'result' => 'FAILED', 'started_at' => now()->subMinutes(5), 'warm_until' => now()->addMinutes(10),
+    ]);
     // The precheck is faked, so the run the review files is made here.
     cloningSandbox(warmth: $warmth, during: fn () => ReviewRun::query()->create([
         'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
@@ -730,7 +737,10 @@ it('keeps the sandbox for the next review of the branch, and lets it go when tha
     $name = CloudflareSandbox::warmName((int) $this->repository->getKey(), 'feature/export');
 
     expect($warmth['kept'] ?? null)->toBe($kept ? ['name' => $name, 'seconds' => 600] : null)
-        ->and($warmth['cooled'] ?? null)->toBe($cooled ? $name : null);
+        ->and($warmth['cooled'] ?? null)->toBe($cooled ? $name : null)
+        // The reviews page shows the sandbox as still there for as long as it is.
+        ->and(ReviewRun::query()->where('build_number', 41)->first()->warmUntil()?->timestamp)->toBe($kept && ! $cooled ? now()->addMinutes(10)->timestamp : null)
+        ->and($before->fresh()->warmUntil()?->timestamp)->toBe($kept ? null : now()->addMinutes(10)->timestamp);
 })->with([
     'asked for changes' => [null, 'FAILED', true, false],
     'passed' => [null, 'PASSED', true, true],

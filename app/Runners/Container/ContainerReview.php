@@ -282,6 +282,14 @@ class ContainerReview
             if ($clone !== null && $trial === null && $this->sandbox instanceof CloudflareSandbox && $warmth['mode'] !== CloudflareSandbox::WARM_OFF) {
                 $warm = CloudflareSandbox::warmName((int) $repository->getKey(), $branch);
                 $this->sandbox->keepWarm($warm, $warmth['seconds']);
+
+                // This review takes the branch's sandbox over, or replaces it: the
+                // review that left it no longer has one waiting.
+                ReviewRun::query()
+                    ->where('repository_id', $repository->getKey())
+                    ->where('branch', $branch)
+                    ->whereNotNull('warm_until')
+                    ->update(['warm_until' => null]);
             }
 
             $reviewed = $this->step(
@@ -328,6 +336,7 @@ class ContainerReview
                         'sandbox_size' => CloudflareSandbox::instance(),
                         'sandbox_seconds' => $this->sandbox->seconds,
                         'sandbox_cost' => $this->sandbox->cost,
+                        'warm_until' => $this->sandbox instanceof CloudflareSandbox && $this->sandbox->keptWarm ? now()->addSeconds($warmth['seconds']) : null,
                     ]);
             }
 
@@ -405,6 +414,7 @@ class ContainerReview
         }
 
         $this->sandbox->cool($warm);
+        ReviewRun::query()->where('repository_id', $repository->getKey())->where('build_number', $build)->update(['warm_until' => null]);
         $this->log->writer((int) $repository->getKey(), $build)?->note('The sandbox was let go: the review asked for no changes.');
     }
 
