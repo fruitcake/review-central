@@ -26,6 +26,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property array<int, string>|null $paths globs the rule is limited to; null for every file
  * @property string|null $severity HIGH, MEDIUM or LOW for a broken check; null leaves it to the reviewer
  * @property bool $enabled
+ * @property CarbonInterface|null $archived_at when the check found the rule in a rule file on the repository's main branch, which turned it off
+ * @property string|null $archived_to that file; kept when a person turns the rule on again, which the check then leaves on
+ * @property string|null $archived_note what the check saw, in a sentence
  * @property string|null $source where a rule made from a finding came from: "<run uuid>:<finding id>"
  * @property CarbonInterface|null $created_at
  * @property CarbonInterface|null $updated_at
@@ -50,7 +53,19 @@ class ReviewRule extends Model
             'kind' => ReviewRuleKind::class,
             'paths' => 'array',
             'enabled' => 'boolean',
+            'archived_at' => 'datetime',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        // Turned on again by a person: it is the team's rule here again. The file it
+        // was found in stays, and keeps the check from turning it off once more.
+        static::saving(function (self $rule): void {
+            if ($rule->isDirty('enabled') && $rule->enabled) {
+                $rule->archived_at = null;
+            }
+        });
     }
 
     /**

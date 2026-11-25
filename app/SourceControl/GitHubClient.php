@@ -527,6 +527,40 @@ class GitHubClient implements FiltersSecrets, OpensPullRequests, SourceControl
         };
     }
 
+    public function filesOnMainBranch(array $directories): ?array
+    {
+        $branch = $this->getRepository()['default_branch'] ?? null;
+
+        if (! is_string($branch) || $branch === '') {
+            return null;
+        }
+
+        // The whole tree in one request; a tree too large for one answer is cut off, said by `truncated`.
+        $response = $this->request(30)->get($this->url('git/trees/'.rawurlencode($branch)), ['recursive' => 1]);
+
+        if (in_array($response->status(), [403, 404, 409], true)) {
+            return null;
+        }
+
+        $tree = $response->throw()->json();
+
+        if (($tree['truncated'] ?? false) === true) {
+            return null;
+        }
+
+        $files = [];
+
+        foreach (is_array($tree['tree'] ?? null) ? $tree['tree'] : [] as $entry) {
+            $path = is_array($entry) && ($entry['type'] ?? null) === 'blob' ? ($entry['path'] ?? null) : null;
+
+            if (is_string($path) && array_filter($directories, fn (string $directory): bool => str_starts_with($path, rtrim($directory, '/').'/')) !== []) {
+                $files[] = $path;
+            }
+        }
+
+        return $files;
+    }
+
     public function getFile(string $path): ?string
     {
         $response = $this->request(10)->accept('application/vnd.github.raw')

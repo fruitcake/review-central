@@ -8,10 +8,12 @@ use App\Filament\Concerns\HasMyRepositoriesTab;
 use App\Filament\CurrentTenant;
 use App\Filament\TenantRole;
 use App\Models\User;
+use App\Services\ReviewRuleArchive;
 use App\Services\ReviewRules;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ManageRecords;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -70,6 +72,35 @@ class ManageReviewRules extends ManageRecords
 
                     // What was skipped stays until it is read.
                     ($skipped === 0 ? $notification : $notification->persistent())->send();
+                }),
+            Action::make('checkRepository')
+                ->label('Check the repository')
+                ->icon(Heroicon::OutlinedMagnifyingGlass)
+                ->color('gray')
+                ->visible(fn (): bool => TenantRole::isAdmin())
+                ->modalHeading('Check for rules the repository holds itself')
+                ->modalDescription('Reads the rule files on the repository\'s main branch (.ai/rules, .claude/rules, .github/instructions, .cursor/rules) and turns off each of its own rules found there, since the review reads those files already. Rules for every repository stay on. This runs by itself after each merge as well.')
+                ->schema([
+                    Select::make('repository_id')
+                        ->label('Repository')
+                        ->options(fn (): array => ReviewRuleResource::repositoryOptions())
+                        ->required(),
+                ])
+                ->modalSubmitActionLabel('Check')
+                ->action(function (array $data, ReviewRuleArchive $archive): void {
+                    $repository = CurrentTenant::get()->repositories()->whereKey((int) $data['repository_id'])->first();
+
+                    if ($repository === null) {
+                        return;
+                    }
+
+                    $result = $archive->check($repository, always: true);
+
+                    Notification::make()
+                        ->title($result['archived'] === [] ? 'No rule turned off' : count($result['archived']).' rule(s) turned off')
+                        ->body($result['archived'] === [] ? $result['note'] : Str::limit(implode(' ', array_map(fn (array $rule): string => "\"{$rule['title']}\" is in {$rule['file']}.", $result['archived'])), 600))
+                        ->success()
+                        ->send();
                 }),
             CreateAction::make(),
         ];

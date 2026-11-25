@@ -153,6 +153,17 @@ class ReviewRuleResource extends Resource
                 ToggleColumn::make('enabled')
                     ->label('On')
                     ->disabled(fn (): bool => ! TenantRole::isAdmin()),
+                TextColumn::make('archived_to')
+                    ->label('In the repository')
+                    ->description(fn (ReviewRule $record): ?string => $record->archived_note)
+                    ->tooltip(fn (ReviewRule $record): ?string => match (true) {
+                        $record->archived_at !== null => 'Found on the main branch '.$record->archived_at->diffForHumans().', and turned off here. Turned on again, it stays on.',
+                        $record->archived_to !== null => 'Found on the main branch, and turned on again by hand: the check leaves it on.',
+                        default => null,
+                    })
+                    ->wrap()
+                    ->placeholder('—')
+                    ->toggleable(),
             ])
             ->filters([
                 SelectFilter::make('repository_id')
