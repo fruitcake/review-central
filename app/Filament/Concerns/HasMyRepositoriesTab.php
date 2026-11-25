@@ -47,8 +47,17 @@ trait HasMyRepositoriesTab
 
     public function getDefaultActiveTab(): string|int|null
     {
-        return ! TenantRole::isAdmin() && $this->myRepositoryIds() !== [] && array_key_exists(self::MY_REPOSITORIES, $this->getCachedTabs())
+        return ! TenantRole::isAdmin() && ! $this->opensOnRepository() && $this->myRepositoryIds() !== [] && array_key_exists(self::MY_REPOSITORIES, $this->getCachedTabs())
             ? self::MY_REPOSITORIES
             : parent::getDefaultActiveTab();
+    }
+
+    /**
+     * Whether the list was opened for one repository, as a repository's page links
+     * to it: that one is shown whoever's it is.
+     */
+    protected function opensOnRepository(): bool
+    {
+        return filled(data_get($this->tableFilters, 'repository_id.value')) || filled(data_get($this->tableFilters, 'repository.value'));
     }
 }

@@ -92,6 +92,21 @@ it('leaves a member nothing to choose, and what they chose as an admin, or in a 
     $this->get('/')->assertRedirect('/app/acme/my-work');
 });
 
+it('lands an admin made a member since in the first of their tenants, not the one they chose', function () {
+    $acme = Tenant::factory()->create(['name' => 'Acme', 'slug' => 'acme']);
+    $zeta = Tenant::factory()->create(['name' => 'Zeta', 'slug' => 'zeta']);
+    $user = User::factory()->create(['landing_page' => 'personal', 'landing_tenant_id' => $zeta->id]);
+    $user->tenants()->attach($acme);
+    $user->tenants()->attach($zeta, ['role' => TenantRole::ADMIN]);
+    $this->actingAs($user);
+
+    $this->get('/')->assertRedirect('/app/zeta/my-work');
+
+    $user->tenants()->updateExistingPivot($zeta, ['role' => TenantRole::MEMBER]);
+
+    $this->get('/')->assertRedirect('/app/acme/my-work');
+});
+
 it('tells a user without a tenant so, instead of answering 404', function () {
     $user = User::factory()->create(['email' => 'new@example.com']);
 

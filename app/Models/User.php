@@ -4,6 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Enums\LandingPage;
+use App\Services\Landing;
 use Carbon\CarbonInterface;
 use Database\Factories\UserFactory;
 use Filament\Facades\Filament;
@@ -154,14 +155,17 @@ class User extends Authenticatable implements FilamentUser, HasDefaultTenant, Ha
     }
 
     /**
-     * The tenant they chose to land in while they may still open it, or else the
+     * The tenant they chose to land in while they may still choose and open it, or else the
      * first of getTenants(), without loading the others.
      */
     public function getDefaultTenant(Panel $panel): ?Tenant
     {
         $tenants = $this->is_admin ? Tenant::query() : $this->tenants();
 
-        return ($this->landing_tenant_id === null ? null : (clone $tenants)->whereKey($this->landing_tenant_id)->first())
+        // A choice counts while they have one: not for an admin made a member since.
+        $chosen = $this->landing_tenant_id !== null && app(Landing::class)->canChoose($this) ? $this->landing_tenant_id : null;
+
+        return ($chosen === null ? null : (clone $tenants)->whereKey($chosen)->first())
             ?? $tenants->orderBy('name')->first();
     }
 

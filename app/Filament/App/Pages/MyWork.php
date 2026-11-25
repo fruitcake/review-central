@@ -64,9 +64,13 @@ class MyWork extends Page
         $relevant = app(RelevantRepositories::class);
         $repositoryIds = $relevant->for($user, $tenant);
 
+        $turn = OpenPullRequest::query()->whereKey(PullRequestResource::withUser($user))->with('repository.tenant')->latest('updated_at')->get();
+        $opened = $relevant->openedBy($user, $tenant);
+        PullRequestResource::withNewestRuns($turn->concat($opened));
+
         return [
-            'turn' => OpenPullRequest::query()->whereKey(PullRequestResource::withUser($user))->with('repository.tenant')->latest('updated_at')->get(),
-            'opened' => $relevant->openedBy($user, $tenant),
+            'turn' => $turn,
+            'opened' => $opened,
             'repositories' => $tenant->repositories()
                 ->whereKey($repositoryIds)
                 ->withCount([

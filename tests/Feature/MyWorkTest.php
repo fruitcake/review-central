@@ -14,7 +14,10 @@ use App\Models\ReviewRule;
 use App\Models\Tenant;
 use App\Models\User;
 use Filament\Facades\Filament;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Livewire\Livewire;
 
 use function Pest\Livewire\livewire;
 
@@ -115,4 +118,30 @@ it('keeps the rules for every repository and the open findings of their own unde
     livewire(ListOpenFindings::class)
         ->assertCanSeeTableRecords([$ownFinding])
         ->assertCanNotSeeTableRecords([$otherFinding]);
+});
+
+it('shows a member the repository a repository\'s page links to, also one that is not theirs', function () {
+    ($this->openTenant)($this->member);
+
+    Livewire::withQueryParams(['filters' => ['repository_id' => ['value' => $this->others->id]]])
+        ->test(ListPullRequests::class)
+        ->assertSet('activeTab', 'active')
+        ->assertCanSeeTableRecords([$this->notTheirs]);
+});
+
+it('reads the newest reviews of the member\'s pull requests in one query, however many there are', function () {
+    foreach (range(10, 14) as $id) {
+        ($this->pullRequest)($this->authored, $id, ['author' => 'Sam', 'author_nickname' => 'sam']);
+    }
+    ($this->openTenant)($this->member);
+
+    $queries = 0;
+    DB::listen(function (QueryExecuted $query) use (&$queries): void {
+        $queries += str_contains($query->sql, 'from "review_runs"') ? 1 : 0;
+    });
+
+    livewire(MyWork::class)->assertSee('Change 14');
+
+    // Whose turn it is, the newest runs, the latest reviews: not one per row.
+    expect($queries)->toBeLessThanOrEqual(4);
 });
