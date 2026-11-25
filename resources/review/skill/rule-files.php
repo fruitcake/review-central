@@ -26,16 +26,21 @@ if ($base === null || $commit === null) {
 /** All of the rule files' text the prompt gets at most; the rest are named for reading. */
 const BUDGET = 60000;
 
+/** What git prints, as it prints it: file names may hold any byte, so they are read NUL-delimited. */
 $git = function (array $arguments): ?string {
-    $command = 'git '.implode(' ', array_map('escapeshellarg', $arguments)).' 2>/dev/null';
-    $output = [];
-    exec($command, $output, $status);
+    $output = shell_exec('git '.implode(' ', array_map('escapeshellarg', $arguments)).' 2>/dev/null; echo "\n$?"');
 
-    return $status === 0 ? implode("\n", $output) : null;
+    if (! is_string($output) || ! preg_match('/\n(\d+)\n$/', $output, $status) || $status[1] !== '0') {
+        return null;
+    }
+
+    return substr($output, 0, -strlen($status[0]));
 };
 
+$names = fn (?string $listing): array => array_values(array_filter(explode("\0", (string) $listing), fn (string $name): bool => $name !== ''));
+
 $mergeBase = trim((string) $git(['merge-base', $base, $commit])) ?: $base;
-$changed = array_values(array_filter(explode("\n", (string) $git(['diff', '--name-only', "{$mergeBase}...{$commit}"]))));
+$changed = $names($git(['diff', '-z', '--name-only', "{$mergeBase}...{$commit}"]));
 
 if ($changed === []) {
     exit(0);
@@ -79,7 +84,8 @@ $globs = function (string $text, string $kind) {
     $items = [];
 
     if ($inline !== '') {
-        $items = preg_split('/\s*,\s*/', trim($inline, "[] \t")) ?: [];
+        // On commas outside braces: src/**/*.{ts,tsx} is one glob.
+        $items = preg_split('/\s*,\s*(?![^{]*\})/', trim($inline, "[] \t")) ?: [];
     }
 
     if (preg_match_all('/^[ \t]+-[ \t]*(.+)$/m', $field[2], $listed) > 0) {
@@ -88,12 +94,14 @@ $globs = function (string $text, string $kind) {
 
     $items = array_values(array_filter(array_map(fn (string $item): string => trim($item, " \t\"'"), $items), fn (string $item): bool => $item !== ''));
 
-    return $items === [] ? null : $items;
+    // An empty Cursor glob leaves the rule to the agent's choice, as no glob does.
+    return $items === [] ? ($kind === 'cursor' ? false : null) : $items;
 };
 
 /** A glob as the agent tools read it: ** across folders, * and ? within one. */
 $matches = function (string $glob, string $path): bool {
-    $glob = ltrim($glob, './');
+    // Only a ./ or / prefix: the dot of .github/ belongs to the folder.
+    $glob = (string) preg_replace('#^(?:\./|/)+#', '', $glob);
     $pattern = '';
 
     for ($i = 0, $length = strlen($glob); $i < $length; $i++) {
@@ -126,7 +134,7 @@ $matches = function (string $glob, string $path): bool {
 };
 
 // The rules as the destination branch has them now, as REVIEW.md is read.
-$listed = array_values(array_filter(explode("\n", (string) $git(['ls-tree', '-r', '--name-only', $base, '--', '.ai/rules', '.claude/rules', '.github/instructions', '.cursor/rules']))));
+$listed = $names($git(['ls-tree', '-r', '-z', '--name-only', $base, '--', '.ai/rules', '.claude/rules', '.github/instructions', '.cursor/rules']));
 $applies = [];
 
 foreach ($listed as $path) {

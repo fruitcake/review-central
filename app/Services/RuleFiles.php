@@ -36,12 +36,15 @@ class RuleFiles
         $taken = [];
 
         return ReviewRules::for($repository)
-            ->map(fn (ReviewRule $rule): array => [
-                'path' => $this->path($rule->title, $taken),
-                'rule_id' => (int) $rule->getKey(),
-                'scope' => $rule->repository_id === null ? 'every repository of the tenant' : 'this repository',
-                'content' => $this->content($rule->paths ?: [], $rule->title, $rule->kind, $rule->body, $rule->kind === ReviewRuleKind::Check ? $rule->severity : null),
-            ])
+            // By reference: two titles of the same slug get a file each.
+            ->map(function (ReviewRule $rule) use (&$taken): array {
+                return [
+                    'path' => $this->path($rule->title, $taken),
+                    'rule_id' => (int) $rule->getKey(),
+                    'scope' => $rule->repository_id === null ? 'every repository of the tenant' : 'this repository',
+                    'content' => $this->content($rule->paths ?: [], $rule->title, $rule->kind, $rule->body, $rule->kind === ReviewRuleKind::Check ? $rule->severity : null),
+                ];
+            })
             ->values()
             ->all();
     }
@@ -55,7 +58,8 @@ class RuleFiles
      */
     public function proposals(Repository $repository): array
     {
-        $covered = ReviewRule::query()->where('repository_id', $repository->getKey())->whereNotNull('source')->pluck('source')->all();
+        // A rule for every repository of the tenant covers its finding here too.
+        $covered = ReviewRule::query()->for($repository)->whereNotNull('source')->pluck('source')->all();
         $taken = array_map(fn (array $file): string => $file['path'], $this->rules($repository));
 
         return FindingVerdict::query()
