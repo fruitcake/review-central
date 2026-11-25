@@ -100,7 +100,8 @@ jobs:
           # What to do when updating first, read from what changed since the release
           # before (.github/release-notes.sh), then the notes GitHub writes from the
           # pull requests.
-          previous="$(git describe --tags --abbrev=0 --match '20[0-9][0-9].*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          # For a stable release, the stable release before it, not a candidate.
+          previous="$(.github/release-notes.sh --previous "$GITHUB_REF_NAME")"
           notes="$RUNNER_TEMP/notes.md"
           .github/release-notes.sh "$GITHUB_REF_NAME" "$previous" > "$notes"
           echo >> "$notes"

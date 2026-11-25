@@ -6,12 +6,31 @@
 # pull request labelled `upgrade`, for what the files do not tell.
 #
 #   .github/release-notes.sh 2026.11.25 [2026.11.24]
+#   .github/release-notes.sh --previous 2026.11.25    the release it is compared with
 #
 # Needs git with the tags, and gh signed in for the pull requests.
 set -euo pipefail
 
+# The release before, among those the tag contains. For a stable release only a
+# stable one: its users never got a release candidate, so what changed in one is
+# theirs to do too.
+previous_release() {
+  local tag="$1" candidate
+  for candidate in $(git tag --merged "${tag}^" --list '20[0-9][0-9].*' --sort=-v:refname 2>/dev/null); do
+    if [[ "$tag" == *-* || "$candidate" != *-* ]]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+}
+
+if [ "${1:-}" = "--previous" ]; then
+  previous_release "$2"
+  exit 0
+fi
+
 tag="$1"
-previous="${2:-$(git describe --tags --abbrev=0 --match '20[0-9][0-9].*' "${tag}^" 2>/dev/null || true)}"
+previous="${2:-$(previous_release "$tag")}"
 
 if [ -z "$previous" ]; then
   echo "## Updating to ${tag}"
@@ -27,7 +46,10 @@ changed="$(git diff --name-only "$range")"
 by() {
   local numbers
   numbers="$(git log --first-parent --merges --format=%s "$range" -- "$@" | sed -nE 's/^Merge pull request #([0-9]+).*/#\1/p' | sort -t'#' -k2 -n -u | paste -sd, - | sed 's/,/, /g')"
-  [ -n "$numbers" ] && printf ' (%s)' "$numbers"
+  # A change committed without a pull request is still listed, without one.
+  if [ -n "$numbers" ]; then
+    printf ' (%s)' "$numbers"
+  fi
 }
 
 touched() {
@@ -60,9 +82,11 @@ fi
 # What a pull request says to do, from its description.
 notes=()
 for number in $(git log --first-parent --merges --format=%s "$range" | sed -nE 's/^Merge pull request #([0-9]+).*/\1/p' | sort -n -u); do
-  pull="$(gh pr view "$number" --json labels,body,title 2>/dev/null || true)"
+  # A pull request that cannot be read stops the notes: what it says to do would
+  # be missing from them without a word. A second try for a passing hiccup.
+  pull="$(gh pr view "$number" --json labels,body,title 2>/dev/null || { sleep 5; gh pr view "$number" --json labels,body,title; })"
 
-  if [ -z "$pull" ] || ! jq -e '[.labels[].name] | index("upgrade")' <<< "$pull" > /dev/null; then
+  if ! jq -e '[.labels[].name] | index("upgrade")' <<< "$pull" > /dev/null; then
     continue
   fi
 
