@@ -374,6 +374,19 @@ it('tries a pull request from its diff without posting anything, also one that w
     Http::assertNotSent(fn (Request $request): bool => $request->method() !== 'GET' && str_contains($request->url(), 'bitbucket.org'));
 });
 
+it('skips a trial of a commit the pull request has moved on from, whose diff it no longer has', function () {
+    Queue::fake();
+    fakeHost($this->diff);
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+
+    $build = app(DiffRunner::class)->startTrial($this->repository, 'feature/export', new Trial(pullRequestId: 570, destination: 'main', commit: str_repeat('b', 40)));
+    app(DiffReview::class)->run($this->repository, 'feature/export', null, $build, null, new Trial(pullRequestId: 570, destination: 'main', commit: str_repeat('b', 40)));
+
+    expect(ReviewRun::query()->sole()->only(['status', 'summary']))->toMatchArray(['status' => ReviewRun::STATUS_SKIPPED])
+        ->and(ReviewRun::query()->sole()->summary)->toContain('moved on from bbbbbbbbbbbb');
+    Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'api.anthropic.com'));
+});
+
 it('closes a trial whose job died without telling the pull request or touching its lock', function () {
     fakeHost($this->diff);
     $run = ReviewRun::query()->create([

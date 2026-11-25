@@ -153,6 +153,15 @@ interface SourceControl
     public function getPullRequestDiff(string $id): string;
 
     /**
+     * The diff a pull request from $commit into $destination shows, as unified diff
+     * text: from where the two met to $commit. An open pull request's diff at one of
+     * its earlier commits.
+     *
+     * @throws RequestException
+     */
+    public function getCommitDiff(string $destination, string $commit): string;
+
+    /**
      * The repository as its host describes it, or null when the token cannot see it.
      *
      * @return array<string, mixed>|null

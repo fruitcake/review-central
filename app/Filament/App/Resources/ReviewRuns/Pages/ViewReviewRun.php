@@ -105,8 +105,12 @@ class ViewReviewRun extends ViewRecord
                 ->color('gray')
                 ->visible(fn (): bool => TenantRole::isAdmin() && $this->record->pull_request_id !== null)
                 ->modalHeading('Compare this review with other setups')
-                ->modalDescription('Each row reviews this pull request as it is now, as a trial: recorded here and kept off the pull request. They show side by side with this review, and one model can then judge their findings together. Each costs what a review costs.')
+                ->modalDescription('Each row reviews this pull request as a trial: recorded here and kept off the pull request. They show side by side with this review, and one model can then judge their findings together. Each costs what a review costs.')
                 ->schema([
+                    Toggle::make('at_run_commit')
+                        ->label(fn (): string => 'At this review\'s commit, '.substr((string) $this->record->commit, 0, 12))
+                        ->default(true)
+                        ->helperText('Each setup reviews the code this review read, even when the pull request has moved on since. Off, each reviews the pull request as it is now. An earlier commit is always reviewed as though nobody had, and not from the diff alone.'),
                     ReviewRunResource::ignoreExistingField(),
                     Repeater::make('rows')
                         ->label('Setups')
@@ -121,7 +125,7 @@ class ViewReviewRun extends ViewRecord
                 ->action(function (array $data, ReviewComparisons $comparisons): void {
                     $rows = array_map(ReviewRunResource::trialOptions(...), array_values($data['rows'] ?? []));
                     $user = auth()->user();
-                    $comparison = $comparisons->start($this->record, $rows, (bool) ($data['ignore_existing'] ?? true), $user instanceof User ? $user : null);
+                    $comparison = $comparisons->start($this->record, $rows, (bool) ($data['ignore_existing'] ?? true), $user instanceof User ? $user : null, (bool) ($data['at_run_commit'] ?? false));
 
                     $this->redirect(ReviewComparisonResource::getUrl('view', ['record' => $comparison]));
                 }),

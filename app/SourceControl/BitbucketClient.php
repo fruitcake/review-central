@@ -283,6 +283,12 @@ class BitbucketClient implements FiltersSecrets, OpensPullRequests, SourceContro
         return $this->request(60)->accept('text/plain')->get($this->url("pullrequests/{$id}/diff"))->throw()->body();
     }
 
+    public function getCommitDiff(string $destination, string $commit): string
+    {
+        // Source first; Bitbucket diffs against where the two met unless told otherwise.
+        return $this->request(60)->accept('text/plain')->get($this->url('diff/'.rawurlencode($commit).'..'.rawurlencode($destination)))->throw()->body();
+    }
+
     public function setBuildStatus(string $commit, BuildState $state, string $url, string $description): void
     {
         $this->request(15)->post($this->url("commit/{$commit}/statuses/build"), [

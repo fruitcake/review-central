@@ -86,6 +86,11 @@ final class ReadOnlyClient implements SourceControl
         return $this->client->getPullRequestDiff($id);
     }
 
+    public function getCommitDiff(string $destination, string $commit): string
+    {
+        return $this->client->getCommitDiff($destination, $commit);
+    }
+
     public function getRepository(): ?array
     {
         return $this->client->getRepository();

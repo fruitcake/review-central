@@ -21,6 +21,7 @@ use App\Runners\DiffRunner;
 use App\Runners\QueuedRuns;
 use App\Runners\RunConclusion;
 use App\Services\PullRequestClassifier;
+use App\Services\ReviewContext;
 use App\Services\ReviewFiling;
 use App\Services\ReviewInstructions;
 use App\Services\ReviewOpening;
@@ -86,6 +87,20 @@ class DiffReview
                 $log?->note("No open pull request from {$branch}; nothing to review.");
                 // Merged or declined while it waited: nothing went wrong.
                 $this->queued->close($repository, $build, ReviewRun::STATUS_SKIPPED, 'Nothing to review');
+
+                return;
+            }
+
+            // The diff on the host is the pull request's as it is now: a trial asked
+            // for a commit that is no longer its head cannot be reviewed from it.
+            $asked = $trial?->commit;
+
+            if ($asked !== null && ! ReviewContext::isSameCommit($asked, (string) ($pullRequest['source']['commit']['hash'] ?? ''))) {
+                $summary = 'Not reviewed: the pull request moved on from '.substr($asked, 0, 12).' before this review started, and the diff alone only has its diff as it is now.';
+                $log?->note($summary);
+                // Said on the run as well: a comparison shows its column with it.
+                ReviewRun::query()->where('repository_id', $repository->getKey())->where('build_number', $build)->update(['summary' => $summary]);
+                $this->queued->close($repository, $build, ReviewRun::STATUS_SKIPPED, $summary);
 
                 return;
             }
@@ -158,6 +173,11 @@ class DiffReview
                 // As though nobody had reviewed: two setups are compared on the same
                 // work. The ticket stays, which is the brief and not the history.
                 $context = ['comments' => [], 'findings' => [], 'last_reviewed_commit' => null, 'changes' => [], 'before_release' => [], 'manual_review' => [], 'handover' => null] + $context;
+
+                // An earlier review's summary in the description steers as much as its findings.
+                if (is_string($context['pull_request']['description'] ?? null)) {
+                    $context['pull_request']['description'] = ReviewContext::authorDescription($context['pull_request']['description']);
+                }
             }
 
             // Nothing of a trial reaches the pull request, its commit's status included.

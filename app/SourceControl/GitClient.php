@@ -64,6 +64,11 @@ class GitClient implements SourceControl
         throw new LogicException('A git server has no pull requests, so there is no diff to review. Its repositories need Docker or a Cloudflare sandbox, for the security review.');
     }
 
+    public function getCommitDiff(string $destination, string $commit): string
+    {
+        throw new LogicException('A git server has no pull requests, so there is no diff to compare reviews on.');
+    }
+
     public function getRepository(): ?array
     {
         return null;

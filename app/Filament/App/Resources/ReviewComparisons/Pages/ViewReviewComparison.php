@@ -48,7 +48,7 @@ class ViewReviewComparison extends ViewRecord
                 ->color('gray')
                 ->visible(fn (): bool => $this->record->reviewRun !== null && count($this->record->rows) < ReviewComparison::MAX_ROWS)
                 ->modalHeading('Add setups to this comparison')
-                ->modalDescription(fn (): string => 'Each row reviews the pull request as it is now, as a trial, and shows as a column of its own. Up to '.(ReviewComparison::MAX_ROWS - count($this->record->rows)).' more. An analysis made before keeps to the reviews it read: analyse again to judge the new ones too.')
+                ->modalDescription(fn (): string => 'Each row reviews the pull request '.($this->record->commit() === null ? 'as it is now' : 'at commit '.substr($this->record->commit(), 0, 12).', as the comparison does').', as a trial, and shows as a column of its own. Up to '.(ReviewComparison::MAX_ROWS - count($this->record->rows)).' more. An analysis made before keeps to the reviews it read: analyse again to judge the new ones too.')
                 ->schema([
                     ReviewRunResource::ignoreExistingField(),
                     Repeater::make('rows')

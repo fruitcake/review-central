@@ -187,6 +187,42 @@ it('refuses an open pull request from a fork on Bitbucket, whose branch is nowhe
         ->toThrow(ReviewTrialRefused::class, 'comes from a fork');
 });
 
+it('tries an open pull request at an earlier commit of its branch, and keeps its head when that is asked for', function () {
+    $earlier = str_repeat('b', 40);
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/12' => Http::response([
+            'id' => 12, 'state' => 'OPEN',
+            'source' => ['branch' => ['name' => 'feature/export'], 'commit' => ['hash' => str_repeat('a', 12)]],
+            'destination' => ['branch' => ['name' => 'main']],
+        ]),
+        'api.bitbucket.org/2.0/repositories/acme/shop/commit/bbbbbbbbbbbb*' => Http::response(['hash' => $earlier]),
+        'api.bitbucket.org/2.0/repositories/acme/shop/commit/aaaaaaaaaaaa*' => Http::response(['hash' => str_repeat('a', 40)]),
+        '*' => Http::response([], 404),
+    ]);
+
+    app(ReviewTrial::class)->start($this->tenant, 'https://bitbucket.org/acme/shop/pull-requests/12', ['commit' => 'bbbbbbbbbbbb']);
+    app(ReviewTrial::class)->start($this->tenant, 'https://bitbucket.org/acme/shop/pull-requests/12', ['commit' => str_repeat('a', 40)]);
+
+    // Each clones the commit asked for: the head too, which a push before the job starts would move.
+    Queue::assertPushed(fn (RunContainerReview $job): bool => $job->commit === $earlier && $job->trial?->commit === $earlier);
+    Queue::assertPushed(fn (RunContainerReview $job): bool => $job->commit === str_repeat('a', 40) && $job->trial?->commit === str_repeat('a', 40));
+});
+
+it('refuses an earlier commit it cannot review there', function (array $options, array $pullRequest, string $message) {
+    fakePullRequest($pullRequest);
+
+    expect(fn () => app(ReviewTrial::class)->start($this->tenant, 'https://bitbucket.org/acme/shop/pull-requests/12', $options))
+        ->toThrow(ReviewTrialRefused::class, $message);
+
+    Queue::assertNothingPushed();
+})->with([
+    'not a hash' => [['commit' => '--upload-pack=x'], [], 'is not a commit hash'],
+    'merged' => [['commit' => str_repeat('b', 12)], ['state' => 'MERGED', 'merge_commit' => ['hash' => str_repeat('d', 12)]], 'Only an open pull request is reviewed at an earlier commit'],
+    'from the diff' => [['commit' => str_repeat('b', 12), 'runner' => 'diff'], [], 'cannot review an earlier commit'],
+    'with what was said since' => [['commit' => str_repeat('b', 12), 'ignore_existing' => false], [], 'cannot read what is on the pull request'],
+    'gone' => [['commit' => str_repeat('b', 12)], [], 'no commit bbbbbbbbbbbb'],
+]);
+
 it('tries an open Bitbucket pull request from the repository itself, however its name is written', function () {
     fakePullRequest([
         'source' => ['branch' => ['name' => 'feature/export'], 'commit' => ['hash' => str_repeat('a', 12)], 'repository' => ['full_name' => 'Acme/shop']],
