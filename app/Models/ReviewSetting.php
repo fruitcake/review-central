@@ -33,6 +33,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $ocr "true" or "false": whether OpenCodeReview picks the files and a checklist per file for Claude Code, Codex and Pi; on when null
  * @property string|null $scan "true" or "false": whether secrets and composer audit are checked before the reviewer starts; on when null
  * @property string|null $floor_guard "true" or "false": whether the reviewer runs the floor guard on loosened checks; on when null
+ * @property string|null $code_index "true" or "false": whether REACH follows a code index Mago builds; off when null
  * @property string|null $turn_notes "true" or "false": whether a small model writes what the one at turn has to do; the team's alone
  * @property string|null $turn_model The model it writes with: a tier or a name; the provider's cheapest when none
  * @property string|null $strategy off, record or apply: whether pull requests are classified, and whether that decides their effort and model

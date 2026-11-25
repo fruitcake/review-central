@@ -1,0 +1,279 @@
+<?php
+
+/**
+ * A Mago analyzer extension that writes the reviewed project's call graph, for
+ * reach.php to follow instead of method names. Mago resolves each call by the
+ * type of what it is called on, so `$lesson->pay()` reaches Lesson::pay and not
+ * every pay() there is. Run by reviewer-env.sh, never on its own:
+ *
+ *   REACH_INDEX=<directory> MAGO_SDK=<vendor/autoload.php of carthage-software/mago> mago analyze
+ *
+ * It writes three files to REACH_INDEX, every name in lower case:
+ *   edges.tsv      caller, callee: `class::method` each, or `file:<path>` for code outside any class
+ *   classes.tsv    class, the file it is declared in
+ *   ancestors.tsv  class, a parent class or interface of it
+ *
+ * Eloquent's static calls are typed the way Larastan reads them: Model::find()
+ * gives the model, Model::where() a builder of it. Without that, every call on a
+ * model fetched with one of them would be missing.
+ */
+
+declare(strict_types=1);
+
+use Mago\Sdk\Analyzer\AfterAnalysisContext;
+use Mago\Sdk\Analyzer\AfterAnalysisHook;
+use Mago\Sdk\Analyzer\Codebase;
+use Mago\Sdk\Analyzer\InvocationKind;
+use Mago\Sdk\Analyzer\Metadata\MemberIdentifier;
+use Mago\Sdk\Analyzer\MethodReturnTypeProvider;
+use Mago\Sdk\Analyzer\MethodTarget;
+use Mago\Sdk\Analyzer\Plugin;
+use Mago\Sdk\Analyzer\PluginDefinition;
+use Mago\Sdk\Analyzer\PluginRegistry;
+use Mago\Sdk\Analyzer\ReferenceKind;
+use Mago\Sdk\Analyzer\ReferenceOrigin;
+use Mago\Sdk\Analyzer\ReturnTypeProviderContext;
+use Mago\Sdk\Analyzer\Type;
+use Mago\Sdk\Analyzer\Type\ClassLikeStringType;
+use Mago\Sdk\Analyzer\Type\NamedObjectType;
+use Mago\Sdk\Extension;
+use Mago\Sdk\Worker;
+
+require (string) getenv('MAGO_SDK');
+
+const ELOQUENT_MODEL = 'illuminate\database\eloquent\model';
+
+/** Whether a class is an Eloquent model, also where vendor/ is missing and the base class is only a name. */
+function code_index_is_model(Codebase $codebase, string $class): bool
+{
+    $names = array_merge([$class], $codebase->getClassAncestors($class));
+
+    foreach ($names as $name) {
+        if (strtolower($name) === ELOQUENT_MODEL) {
+            return true;
+        }
+
+        $metadata = $codebase->getClass($name);
+
+        foreach (array_merge($metadata?->parentClasses ?? [], $metadata?->unresolvedHierarchyDependencies ?? []) as $parent) {
+            if (strtolower(ltrim((string) $parent, '\\')) === ELOQUENT_MODEL) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+final class CodeIndex implements AfterAnalysisHook, Plugin
+{
+    public function getDefinition(): PluginDefinition
+    {
+        return new PluginDefinition('code-index', 'code-index', 'Writes the project\'s call graph for the review.');
+    }
+
+    public function register(PluginRegistry $registry): void
+    {
+        $registry->registerAfterAnalysisHook($this);
+        $registry->registerMethodReturnTypeProvider(new EloquentStatics);
+    }
+
+    public function afterAnalysis(AfterAnalysisContext $context): void
+    {
+        $directory = rtrim((string) getenv('REACH_INDEX'), '/');
+        $root = rtrim((string) getenv('REACH_ROOT'), '/');
+        $own = [];
+
+        foreach ($context->analysis->files as $file) {
+            $own[$file->file] = true;
+        }
+
+        // The project's own class-likes, read from its files: the codebase's list also
+        // holds vendor's, and can be longer than one answer may be.
+        $names = [];
+
+        foreach (array_keys($own) as $file) {
+            $names = array_merge($names, self::declared(str_starts_with($file, '/') ? $file : "{$root}/{$file}"));
+        }
+
+        $codebase = $context->codebase;
+        $origins = [];
+        $classes = fopen("{$directory}/classes.tsv", 'w');
+        $ancestors = fopen("{$directory}/ancestors.tsv", 'w');
+
+        foreach (array_chunk(array_values(array_unique($names)), 200) as $chunk) {
+            foreach ($codebase->getMultipleClasses($chunk) as $class) {
+                if ($class === null || $class->name === '' || str_contains($class->name, '@')) {
+                    continue;
+                }
+
+                $name = strtolower($class->name);
+                fwrite($classes, $name."\t".self::relative((string) $class->location->file, $root)."\n");
+
+                foreach (array_unique(array_merge($class->parentClasses, $class->parentInterfaces)) as $ancestor) {
+                    fwrite($ancestors, $name."\t".strtolower(ltrim((string) $ancestor, '\\'))."\n");
+                }
+
+                foreach ($class->methods as $method) {
+                    if ($method !== '') {
+                        $origins[] = ReferenceOrigin::symbol(new MemberIdentifier($class->name, $method));
+                    }
+                }
+            }
+        }
+
+        fclose($classes);
+        fclose($ancestors);
+
+        foreach (array_keys($own) as $file) {
+            $origins[] = ReferenceOrigin::file($file);
+        }
+
+        $edges = fopen("{$directory}/edges.tsv", 'w');
+
+        // The host answers at most 65536 items at once.
+        foreach (array_chunk($origins, 50) as $chunk) {
+            foreach ($this->referencesFrom($context, $chunk) as $references) {
+                foreach ($references as $reference) {
+                    if ($reference->kind !== ReferenceKind::Body || ! $reference->target instanceof MemberIdentifier) {
+                        continue;
+                    }
+
+                    $source = $reference->source->symbol;
+                    $from = $source instanceof MemberIdentifier ? $source->class.'::'.$source->member : 'file:'.self::relative((string) $reference->source->file, $root);
+                    fwrite($edges, strtolower($from)."\t".strtolower($reference->target->class.'::'.$reference->target->member)."\n");
+                }
+            }
+        }
+
+        fclose($edges);
+    }
+
+    /**
+     * The references from these origins; one the host refuses is left out rather than failing the rest.
+     *
+     * @param  list<ReferenceOrigin>  $origins
+     * @return array<int, array<int, mixed>>
+     */
+    private function referencesFrom(AfterAnalysisContext $context, array $origins): array
+    {
+        try {
+            return $context->analysis->references->getMultipleReferencesFrom($origins);
+        } catch (Throwable) {
+            if (count($origins) === 1) {
+                return [];
+            }
+
+            return array_merge(...array_map(fn (ReferenceOrigin $origin): array => $this->referencesFrom($context, [$origin]), $origins));
+        }
+    }
+
+    /**
+     * The classes, interfaces, traits and enums a file declares, by full name.
+     *
+     * @return list<string>
+     */
+    private static function declared(string $path): array
+    {
+        $tokens = @token_get_all((string) @file_get_contents($path)) ?: [];
+        $namespace = '';
+        $names = [];
+
+        foreach ($tokens as $i => $token) {
+            if (! is_array($token)) {
+                continue;
+            }
+
+            if ($token[0] === T_NAMESPACE) {
+                $namespace = '';
+
+                for ($j = $i + 1; isset($tokens[$j]) && $tokens[$j] !== ';' && $tokens[$j] !== '{'; $j++) {
+                    if (is_array($tokens[$j]) && in_array($tokens[$j][0], [T_NAME_QUALIFIED, T_STRING], true)) {
+                        $namespace .= $tokens[$j][1];
+                    }
+                }
+            }
+
+            if (! in_array($token[0], [T_CLASS, T_INTERFACE, T_TRAIT, T_ENUM], true)) {
+                continue;
+            }
+
+            // Not Foo::class, and not an anonymous class.
+            $previous = $i - 1;
+
+            while (isset($tokens[$previous]) && is_array($tokens[$previous]) && $tokens[$previous][0] === T_WHITESPACE) {
+                $previous--;
+            }
+
+            if (isset($tokens[$previous]) && is_array($tokens[$previous]) && in_array($tokens[$previous][0], [T_DOUBLE_COLON, T_NEW], true)) {
+                continue;
+            }
+
+            for ($j = $i + 1; isset($tokens[$j]); $j++) {
+                if (is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) {
+                    $names[] = ltrim($namespace.'\\'.$tokens[$j][1], '\\');
+
+                    break;
+                }
+
+                if (! is_array($tokens[$j]) || $tokens[$j][0] !== T_WHITESPACE) {
+                    break;
+                }
+            }
+        }
+
+        return $names;
+    }
+
+    private static function relative(string $file, string $root): string
+    {
+        return $root !== '' && str_starts_with($file, "{$root}/") ? substr($file, strlen($root) + 1) : $file;
+    }
+}
+
+/** Eloquent's static forwarding, as Larastan reads it: Model::find() is a model, Model::where() a builder of it. */
+final class EloquentStatics implements MethodReturnTypeProvider
+{
+    private const MODEL = ['find', 'findorfail', 'findornew', 'first', 'firstorfail', 'firstornew', 'firstorcreate', 'firstwhere', 'sole', 'create', 'forcecreate', 'make', 'updateorcreate'];
+
+    private const BUILDER = ['query', 'where', 'wherein', 'wherenotin', 'wherenull', 'wherenotnull', 'wherehas', 'wherebelongsto', 'with', 'withcount', 'withtrashed', 'onlytrashed', 'orderby', 'orderbydesc', 'latest', 'oldest', 'select', 'wherekey', 'has', 'doesnthave', 'withoutglobalscope', 'withoutglobalscopes', 'lockforupdate', 'newquery'];
+
+    public function getTargets(): array
+    {
+        // By name, on any class: a model's own base class may route them through a docblock mixin.
+        return array_map(MethodTarget::anyClass(...), array_merge(self::MODEL, self::BUILDER));
+    }
+
+    public function getReturnType(ReturnTypeProviderContext $context): ?Type
+    {
+        $invocation = $context->invocation;
+
+        if ($invocation->kind !== InvocationKind::StaticMethod) {
+            return null;
+        }
+
+        $class = null;
+
+        foreach ($invocation->receiverType?->atomicTypes ?? [] as $atomic) {
+            if ($atomic instanceof NamedObjectType) {
+                $class = $atomic->name;
+            } elseif ($atomic instanceof ClassLikeStringType && $atomic->literal !== null) {
+                $class = $atomic->literal;
+            }
+        }
+
+        if ($class === null || strtolower($class) === ELOQUENT_MODEL || ! code_index_is_model($context->codebase, $class)) {
+            return null;
+        }
+
+        $name = strtolower($invocation->name);
+
+        return match (true) {
+            in_array($name, self::MODEL, true) => Type::namedObject($class),
+            in_array($name, self::BUILDER, true) => Type::namedObject('Illuminate\Database\Eloquent\Builder', Type::namedObject($class)),
+            default => null,
+        };
+    }
+}
+
+(new Worker(new Extension(identifier: 'review-central/code-index', name: 'Code index', version: '1.0.0', analyzerPlugins: [new CodeIndex])))->run();

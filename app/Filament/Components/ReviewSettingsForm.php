@@ -139,6 +139,15 @@ class ReviewSettingsForm
             self::module($defaults, 'ocr', 'OpenCodeReview picks the files', 'For Claude Code, Codex and Pi: OpenCodeReview says which changed files to review and gives a checklist per file. Off, the reviewer reviews every changed file against the repository\'s own rules and the stack guide. OpenCodeReview as the reviewer is not affected.'),
             self::module($defaults, 'scan', 'Scan before the review', 'Before the reviewer starts, added lines are checked for secrets and composer.lock against Packagist\'s advisories, and the reviewer weighs what they find.'),
             self::module($defaults, 'floor_guard', 'Floor guard', 'The reviewer lists every place the change made a check easier to pass, such as a skipped test, a suppression or an assertion that went away, and weighs each one.'),
+            Select::make('code_index')
+                ->label('Code index')
+                ->options(['true' => 'On', 'false' => 'Off'])
+                ->placeholder(match ($defaults?->code_index) {
+                    'true' => 'Default: on',
+                    'false' => 'Default: off',
+                    default => 'Off',
+                })
+                ->helperText('For Laravel: before the review, Mago analyses the checkout and the reach of a changed check follows the calls it resolves by type, rather than every method of the same name. More precise, at about 20 seconds and 3 GB of memory per review; it runs composer install when the checkout has no vendor/. Without the memory, or when it fails, the reach goes by name as before. To try in a trial first.'),
             Select::make('verify')
                 ->label('Second check')
                 ->options(['true' => 'On', 'false' => 'Off'])
@@ -630,7 +639,7 @@ class ReviewSettingsForm
     public static function state(?ReviewSetting $setting): array
     {
         return $setting === null ? [] : collect($setting->attributesToArray())
-            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'ocr', 'scan', 'floor_guard', 'max_rounds', 'fail_on', 'pull_request_budget', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model', 'findings_check'])
+            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'ocr', 'scan', 'floor_guard', 'code_index', 'max_rounds', 'fail_on', 'pull_request_budget', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model', 'findings_check'])
             ->all();
     }
 }

@@ -244,11 +244,113 @@ $reach = function (string $name, ?string $class) use ($callers): array {
     return $entries;
 };
 
+// The code index, when the review built one (REVIEW_CODE_INDEX): calls resolved by the
+// type of what they are called on, so a path is one the code takes, not one a name allows.
+$indexed = null;
+$directory = (string) getenv('REACH_INDEX');
+
+if ($directory !== '' && @filesize("{$directory}/edges.tsv") > 0) {
+    $indexed = ['callers' => [], 'files' => [], 'ancestors' => []];
+
+    foreach (['edges' => 'callers', 'classes' => 'files', 'ancestors' => 'ancestors'] as $file => $field) {
+        foreach (@file("{$directory}/{$file}.tsv", FILE_IGNORE_NEW_LINES) ?: [] as $row) {
+            [$left, $right] = array_pad(explode("\t", $row, 2), 2, '');
+
+            match ($field) {
+                'callers' => $indexed['callers'][$right][$left] = true,
+                'files' => $indexed['files'][$left] = $right,
+                'ancestors' => $indexed['ancestors'][$left][] = $right,
+            };
+        }
+    }
+}
+
+/** A file's class by its full name, in lower case as the index has it. */
+$fullClassOf = function (string $file): ?string {
+    $text = (string) @file_get_contents($file);
+
+    if (preg_match('/^\s*(?:final\s+|abstract\s+|readonly\s+)*(?:class|trait|interface|enum)\s+(\w+)/m', $text, $class) !== 1) {
+        return null;
+    }
+
+    $namespace = preg_match('/^\s*namespace\s+([\w\\\\]+)\s*;/m', $text, $match) === 1 ? $match[1].'\\' : '';
+
+    return strtolower($namespace.$class[1]);
+};
+
+/** The entry points that reach a method in the index, each with how many calls it is away. */
+$reachIndexed = function (string $symbol) use (&$indexed, $functions): array {
+    $entries = [];
+    $queue = [[$symbol, 0]];
+    $seen = [$symbol => true];
+
+    while ($queue !== [] && count($seen) < 5000) {
+        [$current, $depth] = array_shift($queue);
+        [$class, $method] = explode('::', $current, 2);
+        // A call through a parent or an interface can land on this class's method.
+        $targets = array_merge([$current], array_map(fn (string $ancestor): string => "{$ancestor}::{$method}", $indexed['ancestors'][$class] ?? []));
+
+        foreach ($targets as $target) {
+            $through = $target === $current ? null : explode('::', $target, 2)[0];
+
+            foreach (array_keys($indexed['callers'][$target] ?? []) as $source) {
+                $sourceClass = str_starts_with($source, 'file:') ? null : explode('::', $source, 2)[0];
+
+                // A sibling calling the method it inherits from the same parent calls its
+                // own, not this class's: only a call from outside that family can land here.
+                if ($through !== null && $sourceClass !== null && $sourceClass !== $class
+                    && in_array($through, $indexed['ancestors'][$sourceClass] ?? [], true)
+                    && ! in_array($sourceClass, $indexed['ancestors'][$class] ?? [], true)) {
+                    continue;
+                }
+
+                if (str_starts_with($source, 'file:')) {
+                    $file = substr($source, 5);
+                    $key = $file;
+                } else {
+                    [$sourceClass, $sourceMethod] = explode('::', $source, 2);
+                    $file = $indexed['files'][$sourceClass] ?? null;
+
+                    if ($file === null) {
+                        continue;
+                    }
+
+                    // The method as it is written, for the reader.
+                    $name = $sourceMethod;
+
+                    foreach ($functions($file) as $function) {
+                        if (strtolower($function['name']) === $sourceMethod) {
+                            $name = $function['name'];
+
+                            break;
+                        }
+                    }
+
+                    $key = "{$file}::{$name}";
+                }
+
+                if (preg_match(ENTRY, $file) === 1) {
+                    $entries[$key] ??= $depth + 1;
+                }
+
+                if ($depth + 1 < DEPTH && ! str_starts_with($source, 'file:') && ! isset($seen[$source])) {
+                    $seen[$source] = true;
+                    $queue[] = [$source, $depth + 1];
+                }
+            }
+        }
+    }
+
+    return $entries;
+};
+
 $out = [];
 
 foreach ($checks as $key => $check) {
     $class = $classOf($check['file']);
-    $entries = $reach($check['name'], $class);
+    $fullClass = $indexed === null ? null : $fullClassOf($check['file']);
+    $reaches = fn (string $method): array => $fullClass === null ? $reach($method, $class) : $reachIndexed($fullClass.'::'.strtolower($method));
+    $entries = $reaches($check['name']);
     $lines = @file($check['file']) ?: [];
     $without = [];
 
@@ -260,7 +362,7 @@ foreach ($checks as $key => $check) {
             continue;
         }
 
-        foreach (array_diff_key($reach($function['name'], $class), $entries) as $entry => $distance) {
+        foreach (array_diff_key($reaches($function['name']), $entries) as $entry => $distance) {
             $without[$entry]['via'][] = $function['name'];
             $without[$entry]['distance'] = min($without[$entry]['distance'] ?? PHP_INT_MAX, $distance);
         }
@@ -291,5 +393,8 @@ if (strlen($text) > BUDGET) {
 }
 
 echo "\nREACH:\n\n";
-echo "Worked out from the code before you started, by method name: a call to ->name( is taken to reach every method of that name, so this is a floor that can also name a path that does not apply. Verify each before you rely on it. For each check this change adds or changes, it lists the entry points (controllers, Livewire components, jobs, commands, routes, views) that reach it, and the entry points that reach a method of the same class that writes without passing the check. Where the change brings in a rule about who may do something, decide for each of those whether the rule has to hold there too: one that skips it is this change's finding, though the path is old.\n\n";
+echo $indexed !== null
+    ? 'Worked out from the code before you started, from a code index that resolves each call by the type of what it is called on: a path listed is one the code takes. A call on a value whose type is not known (mixed) is not in the index, so a path can be missing; search for one you expect.'
+    : 'Worked out from the code before you started, by method name: a call to ->name( is taken to reach every method of that name, so this is a floor that can also name a path that does not apply. Verify each before you rely on it.';
+echo " For each check this change adds or changes, it lists the entry points (controllers, Livewire components, jobs, commands, routes, views) that reach it, and the entry points that reach a method of the same class that writes without passing the check. Where the change brings in a rule about who may do something, decide for each of those whether the rule has to hold there too: one that skips it is this change's finding, though the path is old.\n\n";
 echo $text."\n";

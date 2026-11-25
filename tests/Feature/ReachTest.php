@@ -145,3 +145,45 @@ it('says nothing when only a property after an unchanged check changes', functio
 
     expect(($this->reach)())->toBe('');
 });
+
+it('follows the code index when the review built one, with calls through a parent and not a sibling\'s own', function () {
+    ($this->put)('app/Models/Lesson.php', str_replace('return null;', "return \$this->invited(\$member) ? null : 'Not invited';", File::get("{$this->dir}/app/Models/Lesson.php")));
+    ($this->git)('commit', '-qam', 'Only invited members');
+
+    // As code-index-worker.php writes it: calls resolved by type, every name in lower case.
+    $index = "{$this->dir}/.index";
+    File::ensureDirectoryExists($index);
+    File::put("{$index}/edges.tsv", implode("\n", [
+        "bookingcontroller::store\tlesson::hasregistererror",
+        "lesson::hasregistererror\tlesson::moduleaccesserror",
+        "bookingcontroller::store\tlesson::createparticipant",
+        "paymentservice::pay\tlesson::createparticipant",
+        "paymentcontroller::pay\tpaymentservice::pay",
+        // Through the parent: from outside the family it can land on Lesson's; from a sibling it is the sibling's own.
+        "invoicecontroller::store\trecord::createparticipant",
+        "course::enrol\trecord::createparticipant",
+        "coursecontroller::store\tcourse::enrol",
+    ])."\n");
+    File::put("{$index}/classes.tsv", implode("\n", [
+        "lesson\tapp/Models/Lesson.php", "bookingcontroller\tapp/Http/Controllers/BookingController.php",
+        "paymentservice\tapp/Services/PaymentService.php", "paymentcontroller\tapp/Http/Controllers/PaymentController.php",
+        "invoicecontroller\tapp/Http/Controllers/InvoiceController.php", "course\tapp/Models/Course.php",
+        "coursecontroller\tapp/Http/Controllers/CourseController.php",
+    ])."\n");
+    File::put("{$index}/ancestors.tsv", "lesson\trecord\ncourse\trecord\n");
+
+    $reach = Process::path($this->dir)->env(['REACH_INDEX' => $index])
+        ->run(['php', realpath(__DIR__.'/../../resources/review/skill/reach.php'), 'main', 'HEAD'])->throw()->output();
+
+    expect($reach)
+        ->toContain('from a code index that resolves each call by the type')
+        ->toContain('- `app/Http/Controllers/PaymentController.php::pay`, through `createParticipant`')
+        ->toContain('- `app/Http/Controllers/InvoiceController.php::store`, through `createParticipant`')
+        ->not->toContain('CourseController')
+        ->not->toContain('`app/Http/Controllers/BookingController.php::store`, through');
+});
+
+it('lets the sandbox take the code index setting from the server', function () {
+    expect((string) file_get_contents(__DIR__.'/../../resources/review/skill/review-settings.sh'))->toContain(' REVIEW_CODE_INDEX ')
+        ->and((string) file_get_contents(__DIR__.'/../../resources/review/skill/reviewer-env.sh'))->toContain('reviewer_code_index "$_php"');
+});
