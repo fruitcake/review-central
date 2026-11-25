@@ -102,7 +102,8 @@ final class CodeIndex implements AfterAnalysisHook, Plugin
         $ancestors = fopen("{$directory}/ancestors.tsv", 'w');
 
         foreach (array_chunk(array_values(array_unique($names)), 200) as $chunk) {
-            foreach ($codebase->getMultipleClasses($chunk) as $class) {
+            // Class-likes, not classes only: a trait's methods are origins of their own.
+            foreach ($codebase->getMultipleClassLikes($chunk) as $class) {
                 if ($class === null || $class->name === '' || str_contains($class->name, '@')) {
                     continue;
                 }
@@ -268,11 +269,36 @@ final class EloquentStatics implements MethodReturnTypeProvider
 
         $name = strtolower($invocation->name);
 
+        // find([1, 2]) and the like give a collection of the model, find(1) the model.
+        if (in_array($name, ['find', 'findorfail', 'findornew'], true) && self::isMany($invocation->arguments[0]->type ?? null)) {
+            return Type::namedObject('Illuminate\Database\Eloquent\Collection', Type::int(), Type::namedObject($class));
+        }
+
         return match (true) {
             in_array($name, self::MODEL, true) => Type::namedObject($class),
             in_array($name, self::BUILDER, true) => Type::namedObject('Illuminate\Database\Eloquent\Builder', Type::namedObject($class)),
             default => null,
         };
+    }
+
+    /** Whether an id argument is several ids: an array, or a collection or other Arrayable. */
+    private static function isMany(?Type $type): bool
+    {
+        foreach ($type?->atomicTypes ?? [] as $atomic) {
+            if (! $atomic instanceof NamedObjectType) {
+                if (preg_match('/^(array|list|non-empty-(array|list))\b/i', (string) $atomic) === 1) {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (preg_match('/(Collection|Arrayable)$/i', $atomic->name) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 

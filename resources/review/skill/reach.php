@@ -279,7 +279,7 @@ $fullClassOf = function (string $file): ?string {
 };
 
 /** The entry points that reach a method in the index, each with how many calls it is away. */
-$reachIndexed = function (string $symbol) use (&$indexed, $functions): array {
+$reachIndexed = function (string $symbol) use (&$indexed, $functions, $enclosing): array {
     $entries = [];
     $queue = [[$symbol, 0]];
     $seen = [$symbol => true];
@@ -306,7 +306,18 @@ $reachIndexed = function (string $symbol) use (&$indexed, $functions): array {
 
                 if (str_starts_with($source, 'file:')) {
                     $file = substr($source, 5);
-                    $key = $file;
+                    $keys = [];
+
+                    // Code outside any class, such as a route file's closures, is one origin in the
+                    // index: each call site is told apart by the closure it is in, as by name.
+                    foreach (@file($file) ?: [] as $number => $text) {
+                        if (preg_match('/(->|::)'.preg_quote(explode('::', $target, 2)[1], '/').'\s*\(/i', $text) === 1 && preg_match('#^\s*(\*|//|/\*|\#)#', $text) !== 1) {
+                            $caller = $enclosing($file, $number + 1);
+                            $keys[] = $caller === null ? "{$file}:".($number + 1) : "{$file}::{$caller}";
+                        }
+                    }
+
+                    $keys = $keys === [] ? [$file] : array_unique($keys);
                 } else {
                     [$sourceClass, $sourceMethod] = explode('::', $source, 2);
                     $file = $indexed['files'][$sourceClass] ?? null;
@@ -326,11 +337,13 @@ $reachIndexed = function (string $symbol) use (&$indexed, $functions): array {
                         }
                     }
 
-                    $key = "{$file}::{$name}";
+                    $keys = ["{$file}::{$name}"];
                 }
 
                 if (preg_match(ENTRY, $file) === 1) {
-                    $entries[$key] ??= $depth + 1;
+                    foreach ($keys as $key) {
+                        $entries[$key] ??= $depth + 1;
+                    }
                 }
 
                 if ($depth + 1 < DEPTH && ! str_starts_with($source, 'file:') && ! isset($seen[$source])) {

@@ -219,9 +219,11 @@ reviewer_reach() {
 # prints the directory that holds it, or nothing; REACH then goes by name, as
 # without it. What it did goes to stderr, for the run's log.
 # Mago's own release binary, checked against its checksum, and its PHP SDK from the
-# lock in code-index/: nothing is resolved or updated during a review.
+# lock in code-index/: nothing is resolved or updated during a review. Composer runs
+# on the PHP the worker runs on ($1), not on the checkout's, which can be older.
 REVIEW_MAGO_VERSION=1.61.0
 reviewer_mago() {
+  _php="$1"
   _tools="$HOME/.tools/code-index-$REVIEW_MAGO_VERSION"
   if [ ! -x "$_tools/mago" ] || [ ! -f "$_tools/vendor/autoload.php" ]; then
     case "$(uname -m)" in
@@ -236,7 +238,7 @@ reviewer_mago() {
       && tar -xzf "$_tools/mago.tar.gz" -C "$_tools" --strip-components=1 "$_name/mago" \
       && rm -f "$_tools/mago.tar.gz" \
       && cp "$HERE/code-index/composer.json" "$HERE/code-index/composer.lock" "$_tools/" \
-      && (cd "$_tools" && timeout 300 composer install --no-interaction --quiet --no-progress --no-dev --no-scripts --no-plugins) >&2 \
+      && (cd "$_tools" && timeout 300 "$_php" "$(command -v composer)" install --no-interaction --quiet --no-progress --no-dev --no-scripts --no-plugins) >&2 \
       || { rm -rf "$_tools"; return 1; }
   fi
   echo "$_tools"
@@ -245,7 +247,7 @@ reviewer_mago() {
 reviewer_code_index() {
   _php="$1"
   _started=$(date +%s)
-  _tools=$(reviewer_mago) || { echo "Code index: Mago could not be installed; REACH goes by name." >&2; return 0; }
+  _tools=$(reviewer_mago "$_php") || { echo "Code index: Mago could not be installed; REACH goes by name." >&2; return 0; }
   # Without vendor/ a model is known by its base class's name only; with it, by its types.
   if [ -f composer.lock ] && [ ! -d vendor ]; then
     timeout 600 composer install --no-interaction --quiet --no-progress --no-scripts --no-plugins --no-autoloader --ignore-platform-reqs >&2 \

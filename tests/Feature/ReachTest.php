@@ -197,9 +197,39 @@ it('installs no Mago whose download does not match its checksum', function () {
 
     $run = Process::path($this->dir)
         ->env(['HOME' => "{$this->dir}/home", 'PATH' => "{$this->dir}/bin:".getenv('PATH'), 'HERE' => $skill])
-        ->run(['sh', '-c', ". {$skill}/reviewer-env.sh; HERE={$skill}; reviewer_mago"]);
+        ->run(['sh', '-c', ". {$skill}/reviewer-env.sh; HERE={$skill}; reviewer_mago php"]);
 
     expect($run->successful())->toBeFalse()
         ->and($run->output())->toBe('')
         ->and(File::exists("{$this->dir}/home/.tools/code-index-1.61.0"))->toBeFalse();
+});
+
+it('tells two route closures in one file apart with the code index too', function () {
+    ($this->put)('routes/web.php', <<<'PHP'
+        <?php
+
+        Route::post('/book/{lesson}', function (Lesson $lesson) {
+            abort_if($lesson->hasRegisterError(auth()->user()), 403);
+            $lesson->createParticipant(auth()->user());
+        });
+
+        Route::post('/pay/{lesson}', function (Lesson $lesson) {
+            $lesson->createParticipant(auth()->user());
+        });
+        PHP);
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Routes');
+    ($this->put)('app/Models/Lesson.php', str_replace('return null;', "return \$this->invited(\$member) ? null : 'Not invited';", File::get("{$this->dir}/app/Models/Lesson.php")));
+    ($this->git)('commit', '-qam', 'Only invited members');
+
+    // The index knows a route file's closures only as the file.
+    $index = "{$this->dir}/.index";
+    File::ensureDirectoryExists($index);
+    File::put("{$index}/edges.tsv", "file:routes/web.php\tlesson::hasregistererror\nlesson::hasregistererror\tlesson::moduleaccesserror\nfile:routes/web.php\tlesson::createparticipant\n");
+    File::put("{$index}/classes.tsv", "lesson\tapp/Models/Lesson.php\n");
+    File::put("{$index}/ancestors.tsv", '');
+
+    expect(Process::path($this->dir)->env(['REACH_INDEX' => $index])->run(['php', realpath(__DIR__.'/../../resources/review/skill/reach.php'), 'main', 'HEAD'])->throw()->output())
+        ->toContain('- `routes/web.php::(closure at line 8)`, through `createParticipant`')
+        ->not->toContain('- `routes/web.php::(closure at line 3)`, through');
 });
