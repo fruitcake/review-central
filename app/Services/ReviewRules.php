@@ -12,6 +12,8 @@ use App\Models\ReviewRun;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Collection;
+use League\Csv\Reader;
+use Throwable;
 
 /**
  * A team's own rules, as the reviewer reads them: one more instruction file,
@@ -119,6 +121,120 @@ class ReviewRules
             'enabled' => true,
             'source' => $from === null ? null : "{$from->uuid}:{$findingId}",
         ]);
+    }
+
+    /** The longest title a rule can have, as the form allows it. */
+    public const TITLE_LENGTH = 255;
+
+    /** The most rows one import takes. */
+    public const IMPORT_LIMIT = 1000;
+
+    /**
+     * Adds the rules in a CSV, as add() would one by one: a header row, then a
+     * row per rule with `kind` (check or convention) and `title`, and optionally
+     * `body`, `paths` (globs, separated by ; or a new line), `severity` and
+     * `repository` (workspace/name, or empty for every repository of the
+     * tenant). A row add() refuses, or one already there with the same kind,
+     * title and repository, is skipped and said why.
+     *
+     * @return array{created: int, skipped: list<string>}
+     *
+     * @throws ActionRefused when the user may not, or the file is no such CSV
+     */
+    public function import(User $user, Tenant $tenant, string $csv): array
+    {
+        app(RepositoryAccess::class)->mustManage($user, $tenant);
+
+        try {
+            $reader = Reader::createFromString(ltrim($csv, "\u{FEFF}"));
+            // Plain CSV: a quote is escaped by doubling it, so a backslash at the end
+            // of a field does not take the columns after it along.
+            $reader->setEscape('');
+            $reader->setHeaderOffset(0);
+            $header = array_map(fn (string $name): string => strtolower(trim($name)), $reader->getHeader());
+            // Keyed by their offset in the file, which a blank line skipped still counts.
+            $records = iterator_to_array($reader->getRecords($header), true);
+        } catch (Throwable $exception) {
+            throw new ActionRefused('That is not a CSV this can read: '.$exception->getMessage(), previous: $exception);
+        }
+
+        if (! in_array('kind', $header, true) || ! in_array('title', $header, true)) {
+            throw new ActionRefused('The first row names the columns, and needs at least kind and title.');
+        }
+
+        if (count($records) > self::IMPORT_LIMIT) {
+            throw new ActionRefused('At most '.self::IMPORT_LIMIT.' rules in one file.');
+        }
+
+        $repositories = $tenant->repositories()->get();
+        $created = 0;
+        $skipped = [];
+
+        foreach ($records as $offset => $record) {
+            $row = $offset + 1;
+            $kind = ReviewRuleKind::tryFrom(strtolower(trim((string) ($record['kind'] ?? ''))));
+            $title = self::line((string) ($record['title'] ?? ''));
+            $named = trim((string) ($record['repository'] ?? ''));
+
+            if ($kind === null) {
+                $skipped[] = "Row {$row}: kind is check or convention.";
+
+                continue;
+            }
+
+            $matches = $named === '' ? collect() : $repositories->filter(fn (Repository $repository): bool => strcasecmp($repository->fullName(), $named) === 0);
+
+            if ($named !== '' && $matches->isEmpty()) {
+                $skipped[] = "Row {$row}: no repository {$named} here.";
+
+                continue;
+            }
+
+            // Two connections can each have a repository of that name; guessing would give the rule to the wrong one.
+            if ($matches->count() > 1) {
+                $skipped[] = "Row {$row}: {$matches->count()} repositories here are named {$named}; add this rule by hand to the one it is for.";
+
+                continue;
+            }
+
+            $repository = $matches->first();
+
+            if (mb_strlen($title) > self::TITLE_LENGTH) {
+                $skipped[] = "Row {$row}: a title is at most ".self::TITLE_LENGTH.' characters; put the rest in the body.';
+
+                continue;
+            }
+
+            $exists = $tenant->reviewRules()
+                ->where('kind', $kind)
+                ->where('title', $title)
+                ->where('repository_id', $repository?->getKey())
+                ->exists();
+
+            if ($exists) {
+                $skipped[] = "Row {$row}: \"{$title}\" is there already.";
+
+                continue;
+            }
+
+            try {
+                $this->add(
+                    $user,
+                    $tenant,
+                    $repository,
+                    $kind,
+                    $title,
+                    (string) ($record['body'] ?? '') ?: null,
+                    preg_split('/[;\r\n]+/', (string) ($record['paths'] ?? '')) ?: [],
+                    trim((string) ($record['severity'] ?? '')) ?: null,
+                );
+                $created++;
+            } catch (ActionRefused $exception) {
+                $skipped[] = "Row {$row}: {$exception->getMessage()}";
+            }
+        }
+
+        return ['created' => $created, 'skipped' => $skipped];
     }
 
     /**

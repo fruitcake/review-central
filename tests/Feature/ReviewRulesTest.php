@@ -2,6 +2,7 @@
 
 use App\Enums\FindingVerdictKind;
 use App\Enums\ReviewRuleKind;
+use App\Exceptions\ActionRefused;
 use App\Filament\App\Resources\ReviewRules\Pages\ManageReviewRules;
 use App\Filament\App\Resources\ReviewRules\ReviewRuleResource;
 use App\Filament\App\Resources\ReviewRuns\Pages\ViewReviewRun;
@@ -11,8 +12,10 @@ use App\Models\Repository;
 use App\Models\ReviewRule;
 use App\Models\ReviewRun;
 use App\Models\User;
+use App\Services\ReviewRules;
 use Filament\Actions\CreateAction;
 use Filament\Facades\Filament;
+use Illuminate\Http\UploadedFile;
 
 use function Pest\Livewire\livewire;
 
@@ -123,4 +126,73 @@ it('names each repository so that two of the same name cannot be mixed up, in th
 
     // The list names the repository as the form does.
     livewire(ManageReviewRules::class)->assertSee("acme/shop (GitHub #{$alike->connection_id})");
+});
+
+it('imports rules from a CSV, for one repository or for all, and says which rows it skipped and why', function () {
+    ($this->as)($this->admin);
+    ReviewRule::factory()->create(['tenant_id' => $this->tenant->id, 'repository_id' => null, 'kind' => ReviewRuleKind::Convention, 'title' => 'A narrow fillable is not a gap']);
+
+    $csv = "\u{FEFF}kind,title,body,paths,severity,repository\n"
+        ."check,Every payment path checks who may book,\"Paying books the member.\n\nCheck it there too.\",app/Services/Payment*.php;app/Http/Controllers/Api/**,HIGH,acme/shop\n"
+        .'convention,A narrow fillable is not a gap,"Forms write through setters.",,,'."\n"
+        .'check,Unknown repository,,,,elsewhere/app'."\n"
+        .'rule,Not a kind,,,,'."\n"
+        .'check,Wrong severity,,,URGENT,'."\n";
+
+    livewire(ManageReviewRules::class)
+        ->callAction('import', ['file' => UploadedFile::fake()->createWithContent('rules.csv', $csv)])
+        ->assertHasNoActionErrors()
+        ->assertNotified('One rule imported');
+
+    $rule = ReviewRule::query()->where('title', 'Every payment path checks who may book')->sole();
+
+    expect($rule->only(['tenant_id', 'repository_id', 'kind', 'paths', 'severity']))->toBe([
+        'tenant_id' => $this->tenant->id, 'repository_id' => $this->repository->id, 'kind' => ReviewRuleKind::Check,
+        'paths' => ['app/Services/Payment*.php', 'app/Http/Controllers/Api/**'], 'severity' => 'HIGH',
+    ])
+        ->and($rule->body)->toBe("Paying books the member.\n\nCheck it there too.")
+        // The one already there, an unknown repository, an unknown kind and a wrong severity are skipped, each said why.
+        ->and(ReviewRule::query()->where('tenant_id', $this->tenant->id)->count())->toBe(2)
+        ->and(app(ReviewRules::class)->import($this->admin, $this->tenant, $csv)['skipped'])->toBe([
+            'Row 2: "Every payment path checks who may book" is there already.',
+            'Row 3: "A narrow fillable is not a gap" is there already.',
+            'Row 4: no repository elsewhere/app here.',
+            'Row 5: kind is check or convention.',
+            'Row 6: A severity is HIGH, MEDIUM or LOW, or left out for the reviewer to judge.',
+        ]);
+});
+
+it('imports rules only for an admin, and only from a CSV that names its columns', function () {
+    ($this->as)($this->member);
+
+    livewire(ManageReviewRules::class)->assertActionHidden('import');
+
+    expect(fn () => app(ReviewRules::class)->import($this->member, $this->tenant, "kind,title\ncheck,A rule\n"))->toThrow(ActionRefused::class)
+        ->and(fn () => app(ReviewRules::class)->import($this->admin, $this->tenant, "type,name\ncheck,A rule\n"))->toThrow(ActionRefused::class, 'needs at least kind and title')
+        ->and(ReviewRule::query()->where('tenant_id', $this->tenant->id)->count())->toBe(0);
+});
+
+it('reads a CSV as plain CSV, numbers rows as the file does, and skips a row it cannot place or store rather than guess', function () {
+    $twin = Repository::factory()->create(['tenant_id' => $this->tenant->id, 'workspace' => 'acme', 'slug' => 'twin']);
+    Repository::factory()->create(['tenant_id' => $this->tenant->id, 'workspace' => 'acme', 'slug' => 'twin']);
+
+    $csv = "kind,title,body,repository\n"
+        // A backslash before the closing quote ends the field, as plain CSV has it.
+        ."check,Windows paths,\"Use C:\\\",acme/shop\n"
+        ."\n"
+        ."check,For the twin,,acme/twin\n"
+        .'check,'.str_repeat('x', 256).",,\n"
+        ."check,After the long one,,\n";
+
+    $result = app(ReviewRules::class)->import($this->admin, $this->tenant, $csv);
+
+    expect($result['created'])->toBe(2)
+        // The blank line is row 3, so the rows after it keep the numbers the file shows.
+        ->and($result['skipped'])->toBe([
+            'Row 4: 2 repositories here are named acme/twin; add this rule by hand to the one it is for.',
+            'Row 5: a title is at most 255 characters; put the rest in the body.',
+        ])
+        ->and(ReviewRule::query()->where('title', 'Windows paths')->sole()->only(['body', 'repository_id']))->toBe(['body' => 'Use C:\\', 'repository_id' => $this->repository->id])
+        ->and(ReviewRule::query()->where('title', 'After the long one')->exists())->toBeTrue()
+        ->and(ReviewRule::query()->where('repository_id', $twin->id)->exists())->toBeFalse();
 });
