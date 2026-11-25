@@ -63,30 +63,84 @@ $functions = function (string $file) use (&$functionsOf): array {
         return $functionsOf[$file];
     }
 
-    $lines = @file($file) ?: [];
+    // From the tokens, so a method ends at its own closing brace, not at whatever is declared next.
+    $tokens = @token_get_all((string) @file_get_contents($file)) ?: [];
     $found = [];
 
-    foreach ($lines as $index => $line) {
-        if (preg_match('/^\s*(?:(?:public|protected|private|static|final|abstract)\s+)*function\s+(\w+)\s*\(/', $line, $match) === 1) {
-            $found[] = ['name' => $match[1], 'start' => $index + 1, 'end' => count($lines)];
+    for ($i = 0, $count = count($tokens); $i < $count; $i++) {
+        if (! is_array($tokens[$i]) || $tokens[$i][0] !== T_FUNCTION) {
+            continue;
         }
-    }
 
-    for ($i = 0; $i < count($found) - 1; $i++) {
-        $found[$i]['end'] = $found[$i + 1]['start'] - 1;
+        $start = $tokens[$i][2];
+        $name = null;
+
+        // The name, unless it is a closure; then the body, unless it is abstract.
+        for ($j = $i + 1; $j < $count; $j++) {
+            if (is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) {
+                $name = $tokens[$j][1];
+
+                break;
+            }
+
+            if ($tokens[$j] === '(') {
+                break;
+            }
+        }
+
+        // A closure is kept by where it starts: a route file's entry points are closures.
+        $name ??= "(closure at line {$start})";
+
+        $depth = 0;
+        $line = $start;
+
+        for ($j++; $j < $count; $j++) {
+            if (is_array($tokens[$j])) {
+                $line = $tokens[$j][2] + substr_count($tokens[$j][1], "\n");
+
+                if (in_array($tokens[$j][0], [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true)) {
+                    $depth++;
+                }
+
+                continue;
+            }
+
+            if ($tokens[$j] === ';' && $depth === 0) {
+                break;
+            }
+
+            if ($tokens[$j] === '{') {
+                $depth++;
+            } elseif ($tokens[$j] === '}' && --$depth === 0) {
+                $found[] = ['name' => $name, 'start' => $start, 'end' => $line];
+
+                break;
+            }
+        }
     }
 
     return $functionsOf[$file] = $found;
 };
 
+/** The method a line is in, or else the innermost closure, or null outside both. */
 $enclosing = function (string $file, int $line) use ($functions): ?string {
+    $closure = null;
+
     foreach ($functions($file) as $function) {
-        if ($line >= $function['start'] && $line <= $function['end']) {
+        if ($line < $function['start'] || $line > $function['end']) {
+            continue;
+        }
+
+        if (! str_starts_with($function['name'], '(closure')) {
             return $function['name'];
+        }
+
+        if ($closure === null || $function['start'] >= $closure['start']) {
+            $closure = $function;
         }
     }
 
-    return null;
+    return $closure['name'] ?? null;
 };
 
 $classOf = function (string $file): ?string {
@@ -136,7 +190,12 @@ $callers = function (string $name, ?string $class) use (&$callersOf, &$mentions,
     $found = [];
 
     foreach (array_filter(explode("\n", $sh(['grep', '-n', '-E', '(->|::)'.$name.'\(', '--', 'app', 'routes', 'resources/views']))) as $hit) {
-        if (preg_match('/^([^:]+):(\d+):/', $hit, $match) !== 1) {
+        if (preg_match('/^([^:]+):(\d+):(.*)$/', $hit, $match) !== 1) {
+            continue;
+        }
+
+        // A name in a comment or a docblock is no call.
+        if (preg_match('#^\s*(\*|//|/\*|\#)#', $match[3]) === 1) {
             continue;
         }
 
@@ -149,8 +208,12 @@ $callers = function (string $name, ?string $class) use (&$callersOf, &$mentions,
             }
         }
 
-        $caller = str_ends_with($match[1], '.php') && ! str_starts_with($match[1], 'routes/') && ! str_starts_with($match[1], 'resources/') ? ($enclosing($match[1], (int) $match[2]) ?? '(file)') : '(file)';
-        $found["{$match[1]}::{$caller}"] = ['file' => $match[1], 'name' => $caller];
+        $caller = str_ends_with($match[1], '.php') && ! str_ends_with($match[1], '.blade.php') ? $enclosing($match[1], (int) $match[2]) : null;
+
+        // A route closure is its own entry point, so a checked one does not hide an
+        // unchecked one in the same file; a call in no function at all, by its line.
+        $key = $caller === null ? "{$match[1]}:{$match[2]}" : "{$match[1]}::{$caller}";
+        $found[$key] = ['file' => $match[1], 'name' => $caller === null || str_starts_with($caller, '(closure') ? '(file)' : $caller];
     }
 
     return $callersOf[$key] = $found;
@@ -193,7 +256,7 @@ foreach ($checks as $key => $check) {
     foreach ($functions($check['file']) as $function) {
         $body = implode('', array_slice($lines, $function['start'] - 1, $function['end'] - $function['start'] + 1));
 
-        if ($function['name'] === $check['name'] || in_array($function['name'], COMMON, true) || preg_match(WRITES, $body) !== 1) {
+        if ($function['name'] === $check['name'] || str_starts_with($function['name'], '(closure') || in_array($function['name'], COMMON, true) || preg_match(WRITES, $body) !== 1) {
             continue;
         }
 

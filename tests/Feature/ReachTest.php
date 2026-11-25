@@ -112,3 +112,36 @@ it('gives every reviewer the reach of a Laravel change', function () {
         expect((string) file_get_contents(__DIR__."/../../resources/review/skill/{$script}"))->toContain('reviewer_reach');
     }
 });
+
+it('tells two route closures in one file apart, so a checked one does not hide an unchecked one', function () {
+    ($this->put)('routes/web.php', <<<'PHP'
+        <?php
+
+        Route::post('/book/{lesson}', function (Lesson $lesson) {
+            abort_if($lesson->hasRegisterError(auth()->user()), 403);
+            $lesson->createParticipant(auth()->user());
+        });
+
+        Route::post('/pay/{lesson}', function (Lesson $lesson) {
+            $lesson->createParticipant(auth()->user());
+        });
+        PHP);
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Routes');
+    ($this->put)('app/Models/Lesson.php', str_replace('return null;', "return \$this->invited(\$member) ? null : 'Not invited';", File::get("{$this->dir}/app/Models/Lesson.php")));
+    ($this->git)('commit', '-qam', 'Only invited members');
+
+    expect(($this->reach)())
+        ->toContain('- `routes/web.php::(closure at line 8)`, through `createParticipant`')
+        ->not->toContain('- `routes/web.php::(closure at line 3)`, through');
+});
+
+it('says nothing when only a property after an unchanged check changes', function () {
+    $lesson = fn (string $table): string => "<?php\n\nclass Lesson\n{\n    public function moduleAccessError(\$member)\n    {\n        return null;\n    }\n\n    protected \$table = '{$table}';\n}\n";
+    ($this->put)('app/Models/Lesson.php', $lesson('lessons'));
+    ($this->git)('commit', '-qam', 'Base');
+    ($this->put)('app/Models/Lesson.php', $lesson('group_lessons'));
+    ($this->git)('commit', '-qam', 'Rename the table');
+
+    expect(($this->reach)())->toBe('');
+});
