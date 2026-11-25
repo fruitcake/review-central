@@ -8,6 +8,7 @@ use App\Connections\LlmDriver;
 use App\Llm\Agents\RuleMatcher;
 use App\Models\Repository;
 use App\Models\ReviewRule;
+use App\Runners\DiffRunner;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Cache;
 use Throwable;
@@ -55,6 +56,11 @@ class ReviewRuleArchive
 
         if ($rules->isEmpty()) {
             return self::outcome('No rule of this repository alone is on, so there is nothing to check.');
+        }
+
+        // Its reviews read the diff alone, never the repository's rule files: a rule turned off would be gone.
+        if (! self::readsRuleFiles($repository)) {
+            return self::outcome('This repository\'s reviews read only the diff, not its rule files, so its rules stay on.');
         }
 
         $connection = LlmConnections::small($repository->tenant);
@@ -144,7 +150,8 @@ class ReviewRuleArchive
             foreach (array_slice(array_values(array_filter($paths, self::isRuleFile(...))), 0, self::FILES) as $path) {
                 $text = $source->fileOnMainBranch($path);
 
-                if (is_string($text)) {
+                // Only what the review gives the reviewer can stand in for a rule.
+                if (is_string($text) && self::reviewReads($path, $text)) {
                     $files[$path] = $text;
                 }
             }
@@ -160,12 +167,46 @@ class ReviewRuleArchive
     }
 
     /**
-     * Whether an agent tool reads the file as a rule: Markdown, Cursor's .mdc, and
-     * not Boost's index of them.
+     * Whether the review reads the repository's rule files: the diff runner does not.
+     */
+    public static function readsRuleFiles(Repository $repository): bool
+    {
+        return ! $repository->runner() instanceof DiffRunner;
+    }
+
+    /**
+     * Whether the file is a rule file in a format the review reads, by its path,
+     * as resources/review/skill/rule-files.php names them.
      */
     public static function isRuleFile(string $path): bool
     {
-        return (str_ends_with($path, '.md') || str_ends_with($path, '.mdc')) && basename($path) !== 'index.md';
+        return match (true) {
+            str_starts_with($path, '.ai/rules/') => str_ends_with($path, '.md') && basename($path) !== 'index.md',
+            str_starts_with($path, '.claude/rules/') => str_ends_with($path, '.md'),
+            str_starts_with($path, '.github/instructions/') => str_ends_with($path, '.instructions.md'),
+            str_starts_with($path, '.cursor/rules/') => str_ends_with($path, '.mdc') || str_ends_with($path, '.md'),
+            default => false,
+        };
+    }
+
+    /**
+     * Whether the review gives the file to the reviewer when it applies: not a
+     * Cursor rule without globs, which Cursor's agent picks by its description and
+     * the review leaves out.
+     */
+    public static function reviewReads(string $path, string $text): bool
+    {
+        if (! str_starts_with($path, '.cursor/rules/')) {
+            return true;
+        }
+
+        if (preg_match('/\A\xEF?\xBB?\xBF?---\r?\n(.*?)\r?\n---/s', $text, $match) !== 1) {
+            return false;
+        }
+
+        return preg_match('/^alwaysApply:\s*true\s*$/mi', $match[1]) === 1
+            || preg_match('/^globs:[ \t]*["\'\[]*[^\s"\'\],]/m', $match[1]) === 1
+            || preg_match('/^globs:[ \t]*\r?\n[ \t]+-[ \t]*\S/m', $match[1]) === 1;
     }
 
     /**

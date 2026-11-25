@@ -35,7 +35,7 @@ class CheckReviewRules implements ShouldBeUnique, ShouldQueue
      */
     public static function afterMerge(Repository $repository): void
     {
-        if (ReviewRule::query()->where('repository_id', $repository->getKey())->where('enabled', true)->whereNull('archived_to')->exists()) {
+        if (ReviewRuleArchive::readsRuleFiles($repository) && ReviewRule::query()->where('repository_id', $repository->getKey())->where('enabled', true)->whereNull('archived_to')->exists()) {
             self::dispatch((int) $repository->getKey());
         }
     }

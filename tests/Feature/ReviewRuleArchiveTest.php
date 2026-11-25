@@ -22,9 +22,9 @@ beforeEach(function () {
 
     $this->bitbucket = fn (array $listing = []) => Http::fake([
         'api.bitbucket.org/2.0/repositories/acme/shop' => Http::response(['mainbranch' => ['name' => 'main']]),
-        'api.bitbucket.org/2.0/repositories/acme/shop/src/main/.ai/rules/*' => Http::response(['values' => $listing]),
         'api.bitbucket.org/2.0/repositories/acme/shop/src/main/.ai/rules/exports.md' => Http::response("---\npaths:\n  - \"app/Export*.php\"\n---\n\n# Every export is scoped to the company\n"),
         'api.bitbucket.org/2.0/repositories/acme/shop/src/main/.ai/rules/index.md' => Http::response('# Project Rules Index'),
+        'api.bitbucket.org/2.0/repositories/acme/shop/src/main/.ai/rules/?*' => Http::response(['values' => $listing]),
         'api.bitbucket.org/2.0/repositories/acme/shop/src/main/*' => Http::response('', 404),
     ]);
 });
@@ -97,6 +97,44 @@ it('leaves a rule on that a person turned on again after it was found', function
     expect($rule->refresh()->archived_at)->toBeNull()
         ->and($rule->archived_to)->toBe('.ai/rules/exports.md')
         ->and(app(ReviewRuleArchive::class)->check($this->repository, always: true)['note'])->toBe('No rule of this repository alone is on, so there is nothing to check.')
+        ->and($rule->refresh()->enabled)->toBeTrue();
+});
+
+it('takes only a rule file the review gives the reviewer as the rule\'s place', function () {
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/shop' => Http::response(['mainbranch' => ['name' => 'main']]),
+        'api.bitbucket.org/2.0/repositories/acme/shop/src/main/.github/instructions/*' => Http::response(['values' => [['type' => 'commit_file', 'path' => '.github/instructions/notes.md']]]),
+        // Cursor's agent picks a rule without globs by its description; the review leaves it out.
+        'api.bitbucket.org/2.0/repositories/acme/shop/src/main/.cursor/rules/exports.mdc' => Http::response("---\ndescription: Exports\nglobs:\nalwaysApply: false\n---\n\nEvery export is scoped to the company.\n"),
+        'api.bitbucket.org/2.0/repositories/acme/shop/src/main/.cursor/rules/scoped.mdc' => Http::response("---\nglobs: app/Export*.php\n---\n\nEvery export is scoped to the company.\n"),
+        'api.bitbucket.org/2.0/repositories/acme/shop/src/main/.cursor/rules/*' => Http::response(['values' => [
+            ['type' => 'commit_file', 'path' => '.cursor/rules/exports.mdc'],
+            ['type' => 'commit_file', 'path' => '.cursor/rules/scoped.mdc'],
+        ]]),
+        'api.bitbucket.org/2.0/repositories/acme/shop/src/main/*' => Http::response('', 404),
+    ]);
+    $rule = ($this->rule)('Every export is scoped to the company');
+    RuleMatcher::fake([['rules' => [['id' => (string) $rule->id, 'verdict' => 'in_repository', 'file' => '.cursor/rules/exports.mdc', 'note' => 'Says the same.']]]]);
+
+    app(ReviewRuleArchive::class)->check($this->repository);
+
+    expect($rule->refresh()->enabled)->toBeTrue();
+    RuleMatcher::assertPrompted(fn ($prompt): bool => str_contains($prompt->prompt, '## .cursor/rules/scoped.mdc')
+        && ! str_contains($prompt->prompt, 'exports.mdc')
+        && ! str_contains($prompt->prompt, 'notes.md'));
+});
+
+it('leaves the rules on for a repository whose reviews read only the diff', function () {
+    $this->repository->update(['review_runner' => 'diff']);
+    Queue::fake();
+    ($this->bitbucket)([['type' => 'commit_file', 'path' => '.ai/rules/exports.md']]);
+    $rule = ($this->rule)('Every export is scoped to the company');
+    RuleMatcher::fake()->preventStrayPrompts();
+
+    CheckReviewRules::afterMerge($this->repository);
+
+    Queue::assertNotPushed(CheckReviewRules::class);
+    expect(app(ReviewRuleArchive::class)->check($this->repository, always: true)['note'])->toBe('This repository\'s reviews read only the diff, not its rule files, so its rules stay on.')
         ->and($rule->refresh()->enabled)->toBeTrue();
 });
 
