@@ -1468,3 +1468,42 @@ it('still knows a waiting review was stopped when its job starts long after, onc
     expect(collect($steps)->filter(fn (array $step): bool => in_array($step['command'][0], ['git', 'docker'], true))->all())->toBe([])
         ->and(app(ReviewStops::class)->requested($this->repository, 41))->toBe('Robin Reviewer');
 });
+
+it('skips a review whose pull request was merged and its branch removed before the review could read it', function (string $state, string $summary) {
+    fakeOpenPullRequest();
+    Queue::fake();
+    $build = app(ContainerRunner::class)->start($this->repository, 'feature/export');
+
+    Http::fake(['api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570' => Http::response(['id' => 570, 'state' => $state])]);
+    $checkout = $this->partialMock(Checkout::class);
+    $checkout->shouldReceive('clone')->andThrow(new CheckoutFailed('Remote branch feature/export not found.'));
+    $checkout->shouldReceive('remoteCommit')->andThrow(new CheckoutFailed('refs/heads/feature/export is not on the repository\'s host.'));
+
+    app(ContainerReview::class)->run($this->repository, 'feature/export', null, $build);
+
+    expect(ReviewRun::query()->where('build_number', $build)->sole())
+        ->status->toBe(ReviewRun::STATUS_SKIPPED)
+        ->summary->toContain($summary);
+})->with([
+    'merged' => ['MERGED', 'the pull request was merged'],
+    'declined' => ['DECLINED', 'the pull request was declined'],
+]);
+
+it('keeps a review failed when its pull request is still open, or its branch still there', function (string $state, bool $branchIsThere) {
+    fakeOpenPullRequest();
+    Queue::fake();
+    $build = app(ContainerRunner::class)->start($this->repository, 'feature/export');
+
+    Http::fake(['api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570' => Http::response(['id' => 570, 'state' => $state])]);
+    $checkout = $this->partialMock(Checkout::class);
+    $checkout->shouldReceive('clone')->andThrow(new CheckoutFailed('The host did not answer.'));
+    $branchIsThere
+        ? $checkout->shouldReceive('remoteCommit')->andReturn($this->sha)
+        : $checkout->shouldReceive('remoteCommit')->andThrow(new CheckoutFailed('refs/heads/feature/export is not on the repository\'s host.'));
+
+    expect(fn () => app(ContainerReview::class)->run($this->repository, 'feature/export', null, $build))->toThrow(CheckoutFailed::class)
+        ->and(ReviewRun::query()->where('build_number', $build)->sole()->status)->not->toBe(ReviewRun::STATUS_SKIPPED);
+})->with([
+    'still open' => ['OPEN', false],
+    'merged, branch kept' => ['MERGED', true],
+]);

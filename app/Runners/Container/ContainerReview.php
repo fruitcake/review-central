@@ -377,6 +377,12 @@ class ContainerReview
             $this->log->writer((int) $repository->getKey(), $build)?->note("Stopped by {$by}.");
 
             return false;
+        } catch (Throwable $exception) {
+            if ($trial !== null || ! $this->skipClosedBeforeReview($repository, $branch, $build)) {
+                throw $exception;
+            }
+
+            return false;
         } finally {
             // Never in the way of the review: a run without them only has none.
             rescue(fn () => $this->metrics->store($repository, $build, $used), null, false);
@@ -532,6 +538,51 @@ class ContainerReview
         $this->queued->close($repository, $build, ReviewRun::STATUS_FAILED, 'The review did not start');
 
         $this->runner->markEnded($repository, $build);
+    }
+
+    /**
+     * Closes a review that failed as skipped when its pull request was merged or
+     * declined while it ran and its branch is gone with it: there was nothing left
+     * to read, which a clone of the branch fails on. One whose branch is still
+     * there failed for another reason, and stays failed.
+     *
+     * @return bool whether it was closed as skipped
+     */
+    protected function skipClosedBeforeReview(Repository $repository, string $branch, int $build): bool
+    {
+        $run = ReviewRun::query()
+            ->where('repository_id', $repository->getKey())
+            ->where('build_number', $build)
+            ->whereIn('status', [ReviewRun::STATUS_QUEUED, ReviewRun::STATUS_RUNNING])
+            ->first();
+
+        if ($run === null || $run->pull_request_id === null || PullRef::id($branch) !== null) {
+            return false;
+        }
+
+        $state = rescue(fn (): mixed => $repository->sourceControl()->getPullRequest((string) $run->pull_request_id)['state'] ?? null, null, false);
+
+        if (! in_array($state, ['MERGED', 'DECLINED'], true)) {
+            return false;
+        }
+
+        // Still on the host, the branch could have been read: something else broke.
+        $branchIsGone = rescue(fn (): bool => $this->checkout->remoteCommit($repository, "refs/heads/{$branch}") === '', true, false);
+
+        if (! $branchIsGone) {
+            return false;
+        }
+
+        $run->status = ReviewRun::STATUS_SKIPPED;
+        $run->summary = $state === 'MERGED'
+            ? 'Not reviewed: the pull request was merged, and its branch removed, before the review could read it.'
+            : 'Not reviewed: the pull request was declined, and its branch removed, before the review could read it.';
+        $run->finished_at = now();
+        $run->save();
+
+        $this->log->writer((int) $repository->getKey(), $build)?->note($run->summary);
+
+        return true;
     }
 
     protected function finish(Repository $repository, string $branch, string $commit, int $build, bool $reviewing, bool $trial = false): void
