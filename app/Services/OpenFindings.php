@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Connections\LlmDriver;
 use App\Enums\FindingVerdictKind;
+use App\Jobs\CheckOpenFindings;
 use App\Llm\Agents\FindingChecker;
 use App\Models\FindingVerdict;
 use App\Models\OpenFinding;
@@ -69,6 +70,42 @@ class OpenFindings
                 'checked_at' => $finding->checked_at?->toIso8601String(),
             ], fn (mixed $value): bool => $value !== null))
             ->all();
+    }
+
+    /**
+     * Closes findings that are still active, by someone who says why: fixed
+     * elsewhere, accepted, not a problem. A check never opens them again.
+     *
+     * @param  Collection<int, OpenFinding>  $findings
+     * @return int how many were closed
+     */
+    public function close(Collection $findings, ?string $reason, ?string $by): int
+    {
+        $closed = 0;
+
+        foreach ($findings->filter(fn (OpenFinding $finding): bool => in_array($finding->status, OpenFinding::ACTIVE, true)) as $finding) {
+            $closed += (int) $finding->update(['status' => OpenFinding::DISMISSED, 'note' => filled($reason) ? $reason : null, 'closed_at' => now(), 'closed_by' => $by]);
+        }
+
+        return $closed;
+    }
+
+    /**
+     * Queues a check against the main branch of the findings that can be checked:
+     * active, and in a file. One job per repository.
+     *
+     * @param  Collection<int, OpenFinding>  $findings
+     * @return int how many were queued
+     */
+    public function queueCheck(Collection $findings): int
+    {
+        $checkable = $findings->filter(fn (OpenFinding $finding): bool => in_array($finding->status, OpenFinding::ACTIVE, true) && $finding->path !== null);
+
+        foreach ($checkable->groupBy('repository_id') as $repositoryId => $group) {
+            CheckOpenFindings::dispatch((int) $repositoryId, $group->map(fn (OpenFinding $finding): int => (int) $finding->getKey())->values()->all());
+        }
+
+        return $checkable->count();
     }
 
     /**
