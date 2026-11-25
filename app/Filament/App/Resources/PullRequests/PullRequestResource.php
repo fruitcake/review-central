@@ -110,12 +110,7 @@ class PullRequestResource extends Resource
                 'latest_review' => self::runsOf()->select('uuid')->latest('started_at')->latest('id')->limit(1),
                 'reviews_count' => self::runsOf()->whereNotIn('status', self::NOT_A_REVIEW)->selectRaw('count(*)'),
                 'reviews_cost' => self::runsOf()->selectRaw('sum(cost)'),
-            ])->afterQuery(function (SupportCollection $records): void {
-                // The page's rows, not a plucked column: their newest runs in one query rather than two per row.
-                $rows = $records->filter(fn (mixed $record): bool => $record instanceof OpenPullRequest);
-                $runs = self::latestRuns(array_values(array_map(fn (OpenPullRequest $record): int => $record->id, $rows->all())));
-                $rows->each(fn (OpenPullRequest $record): OpenPullRequest => $record->setRelation(self::NEWEST_RUN, $runs->get(self::pairOf($record))));
-            }))
+            ])->afterQuery(fn (SupportCollection $records) => self::withNewestRuns($records)))
             ->defaultSort('updated_at', 'desc')
             ->columns([
                 TextColumn::make('title')
@@ -396,6 +391,21 @@ class PullRequestResource extends Resource
             ->filter(fn (Model $record): bool => $record instanceof OpenPullRequest
                 && PullRequestTurn::of($record, $runs->get(self::pairOf($record)), lookUp: false)->isFor($user))
             ->modelKeys();
+    }
+
+    /**
+     * Gives each of these pull requests its newest run, or null where it has none,
+     * in one query rather than two per row: for whose turn it is and where its
+     * review stands.
+     *
+     * @param  SupportCollection<int, mixed>  $records
+     */
+    public static function withNewestRuns(SupportCollection $records): void
+    {
+        // The rows, not a plucked column.
+        $rows = $records->filter(fn (mixed $record): bool => $record instanceof OpenPullRequest);
+        $runs = self::latestRuns(array_values(array_map(fn (OpenPullRequest $record): int => $record->id, $rows->all())));
+        $rows->each(fn (OpenPullRequest $record): OpenPullRequest => $record->setRelation(self::NEWEST_RUN, $runs->get(self::pairOf($record))));
     }
 
     /**

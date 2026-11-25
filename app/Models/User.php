@@ -3,6 +3,8 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Enums\LandingPage;
+use App\Services\Landing;
 use Carbon\CarbonInterface;
 use Database\Factories\UserFactory;
 use Filament\Facades\Filament;
@@ -31,11 +33,13 @@ use Laravel\Passport\HasApiTokens;
  * @property string $password
  * @property bool $is_admin
  * @property array<int, string>|null $source_accounts Who they are on hosts they connected no account of: a nickname, login or account ID each
+ * @property LandingPage|null $landing_page Where they chose to land after signing in; null for where their role sends them
+ * @property int|null $landing_tenant_id The tenant they chose to land in, and open the tenant panel on
  * @property string|null $remember_token
  * @property CarbonInterface|null $created_at
  * @property CarbonInterface|null $updated_at
  */
-#[Fillable(['name', 'email', 'password', 'is_admin', 'source_accounts'])]
+#[Fillable(['name', 'email', 'password', 'is_admin', 'source_accounts', 'landing_page', 'landing_tenant_id'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable implements FilamentUser, HasDefaultTenant, HasTenants, OAuthenticatable
 {
@@ -59,6 +63,7 @@ class User extends Authenticatable implements FilamentUser, HasDefaultTenant, Ha
             'password' => 'hashed',
             'is_admin' => 'boolean',
             'source_accounts' => 'array',
+            'landing_page' => LandingPage::class,
         ];
     }
 
@@ -150,11 +155,18 @@ class User extends Authenticatable implements FilamentUser, HasDefaultTenant, Ha
     }
 
     /**
-     * The first of getTenants(), without loading the others.
+     * The tenant they chose to land in while they may still choose and open it, or else the
+     * first of getTenants(), without loading the others.
      */
     public function getDefaultTenant(Panel $panel): ?Tenant
     {
-        return ($this->is_admin ? Tenant::query() : $this->tenants())->orderBy('name')->first();
+        $tenants = $this->is_admin ? Tenant::query() : $this->tenants();
+
+        // A choice counts while they have one: not for an admin made a member since.
+        $chosen = $this->landing_tenant_id !== null && app(Landing::class)->canChoose($this) ? $this->landing_tenant_id : null;
+
+        return ($chosen === null ? null : (clone $tenants)->whereKey($chosen)->first())
+            ?? $tenants->orderBy('name')->first();
     }
 
     public function canAccessTenant(Model $tenant): bool

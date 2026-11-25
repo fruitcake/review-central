@@ -36,6 +36,8 @@ it('lets a member read and start reviews, and keeps the keys and settings to the
     ['repositories', true],
     ['review-questions', true],
     ['review-rules', true],
+    ['my-work', true],
+    ['review-comparisons', false],
     ['source-control', false],
     ['ai-providers', false],
     ['tickets', false],

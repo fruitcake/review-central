@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\App\Resources\PullRequests\Pages;
 
 use App\Filament\App\Resources\PullRequests\PullRequestResource;
+use App\Filament\Concerns\HasMyRepositoriesTab;
 use App\Models\OpenPullRequest;
 use App\Models\User;
 use Filament\Resources\Pages\ListRecords;
@@ -14,11 +15,13 @@ use Illuminate\Database\Eloquent\Builder;
 
 class ListPullRequests extends ListRecords
 {
+    use HasMyRepositoriesTab;
+
     protected static string $resource = PullRequestResource::class;
 
     public function getSubheading(): string|Htmlable|null
     {
-        return 'The open pull requests of this team\'s repositories, as their webhooks told of them since, with whose turn each one is. One a repository does not review by itself, from a fork or from an account this team does not trust, waits here for someone to start it. "With me" goes by the accounts on your profile. Merged and declined ones stay '.OpenPullRequest::CLOSED_DAYS.' days.';
+        return 'The open pull requests of this team\'s repositories, as their webhooks told of them since, with whose turn each one is. One a repository does not review by itself, from a fork or from an account this team does not trust, waits here for someone to start it. "With me" goes by the accounts on your profile, as does "My repositories": those you opened or were asked to review a pull request of. Merged and declined ones stay '.OpenPullRequest::CLOSED_DAYS.' days.';
     }
 
     public function getTabs(): array
@@ -31,6 +34,7 @@ class ListPullRequests extends ListRecords
             'active' => ['Active', fn (Builder $query): Builder => $query->where('draft', false)],
             // Whose turn is read from the reviewers and the AI review, not a column.
             'mine' => ['With me', fn (Builder $query): Builder => $query->whereKey($mine())],
+            self::MY_REPOSITORIES => ['My repositories', fn (Builder $query): Builder => $this->inMyRepositories()($query)->where('draft', false)],
             'waiting' => ['Waiting for approval', fn (Builder $query): Builder => $query->where('awaiting_approval', true)],
             'draft' => ['Draft', fn (Builder $query): Builder => $query->where('draft', true)],
             'all' => ['All open', fn (Builder $query): Builder => $query],

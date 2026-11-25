@@ -120,6 +120,14 @@ class Repository extends Model
     }
 
     /**
+     * @return HasMany<OpenFinding, $this>
+     */
+    public function openFindings(): HasMany
+    {
+        return $this->hasMany(OpenFinding::class);
+    }
+
+    /**
      * Its newest review, whatever came of it.
      *
      * @return HasOne<ReviewRun, $this>

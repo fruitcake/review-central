@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace App\Filament\Auth;
 
+use App\Enums\LandingPage;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\Landing;
 use App\Services\PersonalConnections;
 use Filament\Actions\Action;
 use Filament\Auth\Pages\EditProfile as BaseEditProfile;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
@@ -90,10 +93,36 @@ class EditProfile extends BaseEditProfile
                     ->placeholder('A nickname, login or account ID')
                     ->nestedRecursiveRules(['string', 'max:120'])
                     ->helperText('Your nickname or login on a host whose account you did not connect, as its pull requests name you: "With me" under Pull requests lists the ones whose turn is yours. They only tell which pull requests are yours, and give no access. Without any account, your name here is matched to the name the host shows.'),
+                self::landingSection(),
                 $this->getPasswordFormComponent(),
                 $this->getPasswordConfirmationFormComponent(),
                 $this->getCurrentPasswordFormComponent(),
                 self::assistantsSection(),
+            ]);
+    }
+
+    /**
+     * Where an admin lands after signing in, and in which tenant. A member lands
+     * on what waits for them, in the first of their tenants.
+     */
+    private static function landingSection(): Section
+    {
+        $user = fn (): ?User => Filament::auth()->user() instanceof User ? Filament::auth()->user() : null;
+
+        return Section::make('After signing in')
+            ->visible(fn (): bool => ($current = $user()) !== null && app(Landing::class)->canChoose($current))
+            ->schema([
+                Select::make('landing_page')
+                    ->label('Start on')
+                    ->options(fn (): array => LandingPage::options(withPlatform: (bool) $user()?->is_admin))
+                    ->enum(LandingPage::class)
+                    ->placeholder(fn (): string => $user()?->is_admin ? LandingPage::Platform->label() : 'As your role in the tenant: its dashboard for an admin'),
+                Select::make('landing_tenant_id')
+                    ->label('In')
+                    ->options(fn (): array => ($current = $user()) === null ? [] : $current->getTenants(Filament::getPanel('app'))->pluck('name', 'id')->all())
+                    ->searchable()
+                    ->placeholder('The first, by name')
+                    ->helperText('The tenant you land in, and that the panel opens on.'),
             ]);
     }
 

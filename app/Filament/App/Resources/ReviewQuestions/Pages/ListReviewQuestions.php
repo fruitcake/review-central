@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\App\Resources\ReviewQuestions\Pages;
 
 use App\Filament\App\Resources\ReviewQuestions\ReviewQuestionResource;
+use App\Filament\Concerns\HasMyRepositoriesTab;
 use App\Filament\CurrentTenant;
 use App\Models\ReviewQuestion;
 use Filament\Resources\Pages\ListRecords;
@@ -14,6 +15,8 @@ use Illuminate\Database\Eloquent\Builder;
 
 class ListReviewQuestions extends ListRecords
 {
+    use HasMyRepositoriesTab;
+
     protected static string $resource = ReviewQuestionResource::class;
 
     public function getSubheading(): string|Htmlable|null
@@ -25,6 +28,7 @@ class ListReviewQuestions extends ListRecords
     {
         $views = [
             'all' => ['All', fn (Builder $query): Builder => $query],
+            self::MY_REPOSITORIES => ['My repositories', $this->inMyRepositories()],
             'pending' => ['Being answered', fn (Builder $query): Builder => $query->whereIn('status', [ReviewQuestion::STATUS_ASKED, ReviewQuestion::STATUS_UNSURE])],
             'answered' => ['Answered', fn (Builder $query): Builder => $query->where('status', ReviewQuestion::STATUS_ANSWERED)],
             'unanswered' => ['No answer', fn (Builder $query): Builder => $query->whereIn('status', [ReviewQuestion::STATUS_FAILED, ReviewQuestion::STATUS_IGNORED])],
