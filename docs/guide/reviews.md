@@ -87,10 +87,12 @@ A team writes down how its code works, and what counts as a defect there, in the
 | File | What it is for |
 |---|---|
 | `CLAUDE.md` or `AGENTS.md` at the root | The codebase's conventions, for any coding agent. One in a subdirectory holds the rules for the files under it, and the nearer one wins. |
-| `.ai/rules/` | Rule files per area, with an `index.md` that maps file globs to them. For OpenCodeReview, a rule file can also name its globs in a `paths:` front matter, and goes with the review of each file it matches. |
+| Rule files with globs | One topic per file, with the files it is for in its front matter, in the formats coding agents share: Laravel Boost's `.ai/rules/*.md` and Claude Code's `.claude/rules/**/*.md` (`paths:`), GitHub Copilot's `.github/instructions/*.instructions.md` (`applyTo:`) and Cursor's `.cursor/rules/*.mdc` (`globs:`, or `alwaysApply: true`). The review gives the reviewer every one whose globs match a file the pull request changes, read from the destination branch so a pull request cannot loosen them; one without globs applies to every file. A rule file the pull request itself adds or changes is reviewed as part of it. |
 | `REVIEW.md` at the root | Instructions for review only: what to report, at what severity, which paths to leave alone, checks to make on every pull request. Read from the destination branch, so a pull request cannot change the rules it is reviewed against. |
 | `.ai/review-conventions.md` | Patterns judged false positives before, one per line, which the reviewer does not report again. A review lists candidates for it under **Suggested convention entries** at the end of its summary, to paste in when a person agrees. |
 | `.opencodereview/rule.json` | OpenCodeReview's own rules, read from the destination branch. |
+
+A rule kept in Review Central can be moved into the repository through an assistant: the agent server's `rules-as-files` gives each one as a Boost rule file, and with `proposals` also rules the team's verdicts on dismissed findings suggest, for the agent to write, index (`php artisan boost:index-rules`) and open a pull request with, once you agreed. In the repository every agent tool reads them, and a rule in a file of its own changes without a merge conflict.
 
 None of them is needed: without them the reviewer goes by the review instructions and the stack guides alone. They can raise what the reviewer reports, never lower what it needs as evidence or change what it may run.
 

@@ -21,6 +21,7 @@ use App\Mcp\Tools\RequestReviewTool;
 use App\Mcp\Tools\ReviewerAnswerTool;
 use App\Mcp\Tools\ReviewInstructionsTool;
 use App\Mcp\Tools\ReviewRulesTool;
+use App\Mcp\Tools\RuleFilesTool;
 use App\Mcp\Tools\SettleFindingsTool;
 use App\Mcp\Tools\TicketAttachmentTool;
 use App\Mcp\Tools\TicketTool;
@@ -940,4 +941,28 @@ it('lists the user\'s tenants and repositories, each with its open pull requests
             'repositories.0.open_pull_requests' => 1,
             'repositories.0.last_review.id' => $this->run->uuid,
         ]);
+});
+
+it('gives the team\'s rules as Boost rule files for the repository, and proposals from findings the team dismissed with a reason', function () {
+    ReviewRule::factory()->create([
+        'tenant_id' => $this->tenant->id, 'repository_id' => $this->repository->id, 'kind' => ReviewRuleKind::Check,
+        'title' => 'Every export is scoped to the company', 'body' => 'An export reads only its own company\'s rows.', 'paths' => ['app/Export*.php'], 'severity' => 'HIGH',
+    ]);
+    ReviewRule::factory()->create(['tenant_id' => $this->tenant->id, 'repository_id' => null, 'kind' => ReviewRuleKind::Convention, 'title' => 'A narrow fillable is not a gap']);
+    // Dismissed with a reason, and once without; a valid one is no proposal.
+    FindingVerdict::query()->create(['review_run_id' => $this->run->id, 'user_id' => $this->admin->id, 'finding_id' => 'F2', 'verdict' => FindingVerdictKind::NotAProblem, 'reason' => FindingVerdictReason::HandledElsewhere, 'note' => 'CsvWriter escapes it']);
+    FindingVerdict::query()->create(['review_run_id' => $this->run->id, 'user_id' => $this->admin->id, 'finding_id' => 'F1', 'verdict' => FindingVerdictKind::Valid]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(RuleFilesTool::class, ['repository' => 'acme/shop', 'proposals' => true])
+        ->assertOk()
+        ->assertStructuredContentPaths([
+            // The rules for every repository first, as the review reads them.
+            'files.0.path' => '.ai/rules/a-narrow-fillable-is-not-a-gap.md',
+            'files.1.path' => '.ai/rules/every-export-is-scoped-to-the-company.md',
+            'files.1.content' => "---\npaths:\n  - \"app/Export*.php\"\n---\n\n# Every export is scoped to the company\n\nA change that breaks this is a defect, of severity high.\n\nAn export reads only its own company's rows.\n",
+        ])
+        ->assertStructuredContentCount(1, 'proposals')
+        // A rule for every repository applies to every file; a proposal names the file and why it was dismissed.
+        ->assertSee(['  - \"**\"', 'Not a defect here', '# Not a defect: Unescaped CSV cell', 'Handled elsewhere', 'CsvWriter escapes it']);
 });

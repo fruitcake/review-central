@@ -179,6 +179,17 @@ reviewer_prompt_parts() {
   fi
 }
 
+# The repository's own rule files that apply to this change (rule-files.php),
+# read from the destination branch, for every reviewer and whatever copy of
+# SKILL.md it reads. Nothing when there are none, or no git to ask.
+reviewer_repository_rules() {
+  _destination="${BITBUCKET_PR_DESTINATION_BRANCH:-}"
+  [ -n "$_destination" ] || _destination=$(jq -r '.pull_request.destination_branch // empty' review-context.json 2>/dev/null)
+  [ -n "$_destination" ] || return 0
+  command -v php > /dev/null 2>&1 || return 0
+  php "$HERE/rule-files.php" "origin/$_destination" "${BITBUCKET_COMMIT:-HEAD}" 2>/dev/null || true
+}
+
 # The same steps for a reviewer that reads SKILL.md as a file rather than being
 # handed it: said to belong to it, and left out where the file it reads still
 # holds them.
