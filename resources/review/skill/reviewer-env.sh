@@ -271,7 +271,7 @@ reviewer_code_index() {
     echo 'plugins = ["code-index"]'
   } > "$_dir/mago.toml"
   REACH_INDEX="$_dir" REACH_ROOT="$PWD" MAGO_SDK="$_tools/vendor/autoload.php" \
-    timeout 900 "$_tools/mago" --threads 2 --config "$_dir/mago.toml" --workspace "$PWD" analyze --reporting-format count > /dev/null 2> "$_dir/mago.log"
+    timeout 300 "$_tools/mago" --threads 2 --config "$_dir/mago.toml" --workspace "$PWD" analyze --reporting-format count > /dev/null 2> "$_dir/mago.log"
   _status=$?
   if [ ! -s "$_dir/edges.tsv" ]; then
     echo "Code index: Mago wrote no index (exit $_status, $(( $(date +%s) - _started ))s); REACH goes by name. $(tail -c 300 "$_dir/mago.log" | tr '\n' ' ')" >&2
