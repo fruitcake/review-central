@@ -181,6 +181,17 @@ interface SourceControl
     public function fileOnMainBranch(string $path): string|false|null;
 
     /**
+     * The files under these directories on the repository's main branch, at any
+     * depth, as paths from the repository's root; null when they could not be
+     * listed, such as when access is refused. A directory that is not there adds
+     * none.
+     *
+     * @param  array<int, string>  $directories
+     * @return array<int, string>|null
+     */
+    public function filesOnMainBranch(array $directories): ?array;
+
+    /**
      * Shows a review among the builds of a commit, which is where a pull request
      * says that one is running and how it ended. The same call again replaces it.
      *

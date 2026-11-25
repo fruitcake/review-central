@@ -13,6 +13,7 @@ use App\Mcp\Servers\AgentServer;
 use App\Mcp\Servers\UserServer;
 use App\Mcp\Tools\AddReviewRuleTool;
 use App\Mcp\Tools\AskReviewerTool;
+use App\Mcp\Tools\CheckReviewRulesTool;
 use App\Mcp\Tools\OpenFindingsTool;
 use App\Mcp\Tools\PullRequestFeedbackTool;
 use App\Mcp\Tools\PullRequestsTool;
@@ -940,4 +941,36 @@ it('lists the user\'s tenants and repositories, each with its open pull requests
             'repositories.0.open_pull_requests' => 1,
             'repositories.0.last_review.id' => $this->run->uuid,
         ]);
+});
+
+it('proposes rules from findings the team dismissed with a reason, and none a rule already covers', function () {
+    // Dismissed with a reason, and once without; a valid one is no proposal.
+    FindingVerdict::query()->create(['review_run_id' => $this->run->id, 'user_id' => $this->admin->id, 'finding_id' => 'F2', 'verdict' => FindingVerdictKind::NotAProblem, 'reason' => FindingVerdictReason::HandledElsewhere, 'note' => 'CsvWriter escapes it']);
+    FindingVerdict::query()->create(['review_run_id' => $this->run->id, 'user_id' => $this->admin->id, 'finding_id' => 'F1', 'verdict' => FindingVerdictKind::Valid]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(ReviewRulesTool::class, ['repository' => 'acme/shop', 'proposals' => true])
+        ->assertOk()
+        ->assertStructuredContentCount(1, 'proposals')
+        ->assertStructuredContentPaths(['proposals.0.finding' => 'Unescaped CSV cell', 'proposals.0.from' => "{$this->run->uuid}:F2"])
+        ->assertSee(['Handled elsewhere', 'CsvWriter escapes it']);
+
+    // A rule for every repository made from that finding covers it here too.
+    ReviewRule::factory()->create(['tenant_id' => $this->tenant->id, 'repository_id' => null, 'kind' => ReviewRuleKind::Convention, 'title' => 'The writer escapes cells', 'source' => "{$this->run->uuid}:F2"]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(ReviewRulesTool::class, ['repository' => 'acme/shop', 'proposals' => true])
+        ->assertOk()
+        ->assertStructuredContentCount(0, 'proposals');
+});
+
+it('checks the repository\'s rule files for its rules only for an admin', function () {
+    AgentServer::actingAs($this->member)
+        ->tool(CheckReviewRulesTool::class, ['repository' => 'acme/shop'])
+        ->assertHasErrors();
+
+    AgentServer::actingAs($this->admin)
+        ->tool(CheckReviewRulesTool::class, ['repository' => 'acme/shop'])
+        ->assertOk()
+        ->assertStructuredContentPaths(['archived' => [], 'note' => 'No rule of this repository alone is on, so there is nothing to check.']);
 });

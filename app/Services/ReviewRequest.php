@@ -10,6 +10,7 @@ use App\Enums\ReviewsFrom;
 use App\Exceptions\ActionRefused;
 use App\Exceptions\RepositoryNotFound;
 use App\Filament\App\Resources\PullRequests\PullRequestResource;
+use App\Jobs\CheckReviewRules;
 use App\Models\OpenPullRequest;
 use App\Models\Repository;
 use App\Models\ReviewRun;
@@ -241,6 +242,8 @@ class ReviewRequest
             // First, so a failure leaves the pull request listed for the next sync.
             if (($data['state'] ?? null) === 'MERGED') {
                 app(OpenFindings::class)->record($repository, (int) $data['id'], is_string($data['merge_commit']['hash'] ?? null) ? $data['merge_commit']['hash'] : null, is_string($data['destination']['branch']['name'] ?? null) ? $data['destination']['branch']['name'] : null);
+                // It may have brought rules into the repository's own rule files.
+                CheckReviewRules::afterMerge($repository);
             }
 
             OpenPullRequest::close($key['repository_id'], $key['pull_request_id'], ($data['state'] ?? null) === 'MERGED', self::timestamp($data['updated_on'] ?? null));
@@ -343,6 +346,7 @@ class ReviewRequest
         if ($data === null || ($data['state'] ?? null) !== 'OPEN') {
             if (($data['state'] ?? null) === 'MERGED') {
                 app(OpenFindings::class)->record($repository, $pullRequestId, is_string($data['merge_commit']['hash'] ?? null) ? $data['merge_commit']['hash'] : null, is_string($data['destination']['branch']['name'] ?? null) ? $data['destination']['branch']['name'] : null);
+                CheckReviewRules::afterMerge($repository);
             }
 
             // None at all, as for one the host deleted: nothing to keep of it.

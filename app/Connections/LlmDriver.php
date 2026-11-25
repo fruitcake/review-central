@@ -72,6 +72,12 @@ interface LlmDriver extends ConnectionDriver
     public function checks(Connection $connection, string $text): AgentResponse;
 
     /**
+     * Whether a team's review rules are in the repository's own rule files, from a
+     * small model: the RuleMatcher's structured output, with the tokens and model it took.
+     */
+    public function matchesRules(Connection $connection, string $text): AgentResponse;
+
+    /**
      * Several reviews of one pull request judged together, by the model asked for:
      * the Comparer's structured output, with the tokens and model it took.
      *

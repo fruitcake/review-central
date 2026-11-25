@@ -179,6 +179,27 @@ reviewer_prompt_parts() {
   fi
 }
 
+# The repository's own rule files that apply to this change (rule-files.php),
+# read from the destination branch, for every reviewer and whatever copy of
+# SKILL.md it reads. Nothing when there are none, or no git to ask.
+reviewer_repository_rules() {
+  _destination="${BITBUCKET_PR_DESTINATION_BRANCH:-}"
+  [ -n "$_destination" ] || _destination=$(jq -r '.pull_request.destination_branch // empty' review-context.json 2>/dev/null)
+  [ -n "$_destination" ] || return 0
+  _php=$(reviewer_php) || return 0
+  "$_php" "$HERE/rule-files.php" "origin/$_destination" "${BITBUCKET_COMMIT:-HEAD}" 2>/dev/null || true
+}
+
+# The PHP the review's own scripts run with: the newest PHP 8 installed, not the
+# one prepare-review.sh put first on the PATH for the project, which can be 7.x.
+reviewer_php() {
+  for _version in 8.5 8.4 8.3 8.2 8.1 8.0; do
+    command -v "php$_version" 2> /dev/null && return 0
+  done
+  command -v php > /dev/null 2>&1 || return 1
+  php -r 'exit(PHP_MAJOR_VERSION >= 8 ? 0 : 1);' 2> /dev/null && command -v php
+}
+
 # The same steps for a reviewer that reads SKILL.md as a file rather than being
 # handed it: said to belong to it, and left out where the file it reads still
 # holds them.
