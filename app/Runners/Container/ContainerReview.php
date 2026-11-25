@@ -12,12 +12,14 @@ use App\Models\ReviewRun;
 use App\Runners\ContainerRunner;
 use App\Runners\QueuedRuns;
 use App\Runners\RunConclusion;
+use App\Services\Broadcasts;
 use App\Services\ReviewCredentials;
 use App\Services\ReviewStops;
 use App\Services\RunMetrics;
 use App\SourceControl\GitDriver;
 use App\SourceControl\PullRef;
 use Illuminate\Contracts\Process\ProcessResult;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -285,11 +287,7 @@ class ContainerReview
 
                 // This review takes the branch's sandbox over, or replaces it: the
                 // review that left it no longer has one waiting.
-                ReviewRun::query()
-                    ->where('repository_id', $repository->getKey())
-                    ->where('branch', $branch)
-                    ->whereNotNull('warm_until')
-                    ->update(['warm_until' => null]);
+                $this->forgetWarm(ReviewRun::query()->where('repository_id', $repository->getKey())->where('branch', $branch));
             }
 
             $reviewed = $this->step(
@@ -414,8 +412,22 @@ class ContainerReview
         }
 
         $this->sandbox->cool($warm);
-        ReviewRun::query()->where('repository_id', $repository->getKey())->where('build_number', $build)->update(['warm_until' => null]);
+        $this->forgetWarm(ReviewRun::query()->where('repository_id', $repository->getKey())->where('build_number', $build));
         $this->log->writer((int) $repository->getKey(), $build)?->note('The sandbox was let go: the review asked for no changes.');
+    }
+
+    /**
+     * Takes the warm sandbox off the runs that showed one, and tells the open
+     * pages: one refreshed when the review ended would show it until its time.
+     *
+     * @param  Builder<ReviewRun>  $runs
+     */
+    protected function forgetWarm(Builder $runs): void
+    {
+        foreach ($runs->whereNotNull('warm_until')->get() as $run) {
+            $run->update(['warm_until' => null]);
+            Broadcasts::runChanged($run);
+        }
     }
 
     /**

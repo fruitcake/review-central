@@ -1,5 +1,6 @@
 <?php
 
+use App\Events\ReviewRunChanged;
 use App\Exceptions\CheckoutFailed;
 use App\Exceptions\ReviewStepFailed;
 use App\Exceptions\ReviewStopped;
@@ -29,6 +30,7 @@ use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Http\Client\Request;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
@@ -733,9 +735,17 @@ it('keeps the sandbox for the next review of the branch, and lets it go when tha
         'branch' => 'feature/export', 'commit' => str_repeat('b', 40), 'build_number' => 41, 'status' => ReviewRun::STATUS_FINISHED, 'result' => $result, 'started_at' => now(),
     ]));
 
+    // Open pages are told each time a run stops showing a sandbox.
+    config(['broadcasting.default' => 'pusher']);
+    Event::fake([ReviewRunChanged::class]);
+
     app(ContainerReview::class)->run($this->repository, 'feature/export', null, 41);
 
     $name = CloudflareSandbox::warmName((int) $this->repository->getKey(), 'feature/export');
+    $told = fn (ReviewRun $run): int => Event::dispatched(ReviewRunChanged::class, fn (ReviewRunChanged $event): bool => $event->run === $run->uuid)->count();
+    $run = ReviewRun::query()->where('build_number', 41)->first();
+    // Once when the run was made, and again when its sandbox was let go.
+    expect($told($before))->toBe($kept ? 1 : 0)->and($told($run))->toBe($cooled ? 2 : 1);
 
     expect($warmth['kept'] ?? null)->toBe($kept ? ['name' => $name, 'seconds' => 600] : null)
         ->and($warmth['cooled'] ?? null)->toBe($cooled ? $name : null)
