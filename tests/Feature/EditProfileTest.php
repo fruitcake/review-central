@@ -1,8 +1,10 @@
 <?php
 
+use App\Filament\Admin\Pages\Settings;
 use App\Filament\Auth\EditProfile;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\PlatformSettings;
 use Filament\Auth\Notifications\VerifyEmailChange;
 use Filament\Facades\Filament;
 use Illuminate\Support\Facades\Notification;
@@ -64,4 +66,31 @@ it('changes the email only once the new address has opened the link mailed to it
     $this->get($link);
 
     expect($user->fresh()->email)->toBe('new-hire@acme.test');
+});
+
+it('tells people the name to give the MCP server: the one the administrator set, else the app name as a slug', function () {
+    $tenant = Tenant::factory()->create(['slug' => 'acme']);
+    $user = User::factory()->create();
+    $user->tenants()->attach($tenant);
+    $settings = app(PlatformSettings::class);
+
+    $this->actingAs($user)->get('/app/acme/profile')
+        ->assertSee('claude mcp add --transport http review-central '.url('mcp/agent'));
+
+    $settings->save([PlatformSettings::APP_NAME => 'Acme Review']);
+    $this->get('/app/acme/profile')->assertSee('claude mcp add --transport http acme-review '.url('mcp/agent'));
+
+    $settings->save([PlatformSettings::MCP_NAME => 'acme-review-central']);
+    $this->get('/app/acme/profile')
+        ->assertSee('claude mcp add --transport http acme-review-central '.url('mcp/agent'))
+        ->assertSee('named acme-review-central');
+
+    // The administrator sets it, in a form clients accept.
+    $this->actingAs(User::factory()->create(['is_admin' => true]));
+    Filament::setCurrentPanel(Filament::getPanel('admin'));
+
+    livewire(Settings::class)
+        ->fillForm([PlatformSettings::MCP_NAME => 'Acme Review!'])
+        ->call('save')
+        ->assertHasFormErrors([PlatformSettings::MCP_NAME]);
 });

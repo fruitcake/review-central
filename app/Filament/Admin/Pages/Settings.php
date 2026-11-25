@@ -33,6 +33,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Support\HtmlString;
+use Illuminate\Support\Str;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 
 /**
@@ -72,6 +73,7 @@ class Settings extends Page
             PlatformSettings::CLOUDFLARE_WARM_MINUTES => $settings->get(PlatformSettings::CLOUDFLARE_WARM_MINUTES),
             PlatformSettings::R2_ACCESS_KEY_ID => $settings->text(PlatformSettings::R2_ACCESS_KEY_ID),
             PlatformSettings::MCP_REDIRECTS => $settings->text(PlatformSettings::MCP_REDIRECTS),
+            PlatformSettings::MCP_NAME => $settings->text(PlatformSettings::MCP_NAME),
             // Secrets are never sent back to the browser.
             PlatformSettings::CLOUDFLARE_API_TOKEN => null,
             PlatformSettings::R2_SECRET_ACCESS_KEY => null,
@@ -158,6 +160,12 @@ class Settings extends Page
                     ->collapsible()
                     ->collapsed(fn (): bool => app(PlatformSettings::class)->text(PlatformSettings::MCP_REDIRECTS) === null)
                     ->schema([
+                        TextInput::make(PlatformSettings::MCP_NAME)
+                            ->label('MCP server name')
+                            ->placeholder(fn (): string => Str::slug(app(PlatformSettings::class)->appName()) ?: 'review-central')
+                            ->regex(PlatformSettings::MCP_NAME_PATTERN)
+                            ->validationMessages(['regex' => 'Lowercase letters, digits, dashes and underscores, starting with a letter or digit, at most 48.'])
+                            ->helperText('What people name this server in their assistant, as the profile page tells them: an agent\'s tools are then called mcp__<name>__…. Give each installation its own, such as acme-review, so someone connected to two can tell them apart. Empty is the app name as a slug.'),
                         Textarea::make(PlatformSettings::MCP_REDIRECTS)
                             ->label('Extra MCP redirect domains')
                             ->rows(3)

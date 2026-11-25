@@ -9,6 +9,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Services\Landing;
 use App\Services\PersonalConnections;
+use App\Services\PlatformSettings;
 use Filament\Actions\Action;
 use Filament\Auth\Pages\EditProfile as BaseEditProfile;
 use Filament\Facades\Filament;
@@ -219,10 +220,10 @@ class EditProfile extends BaseEditProfile
                     ->state(url('mcp/user'))
                     ->copyable()
                     ->fontFamily('mono')
-                    ->helperText('In Claude: Settings → Connectors → Add custom connector. Your tenants, the open pull requests and whose turn each is, the reviews and their findings.'),
+                    ->helperText(fn (): string => 'In Claude: Settings → Connectors → Add custom connector, named '.app(PlatformSettings::class)->mcpName().'. Your tenants, the open pull requests and whose turn each is, the reviews and their findings.'),
                 TextEntry::make('mcp_agent')
                     ->label('For a coding agent, such as Claude Code')
-                    ->state('claude mcp add --transport http review-central '.url('mcp/agent'))
+                    ->state(fn (): string => 'claude mcp add --transport http '.app(PlatformSettings::class)->mcpName().' '.url('mcp/agent'))
                     ->copyable()
                     ->fontFamily('mono')
                     ->helperText('Run it in the checkout. The agent reads the ticket and the review\'s instructions, can review a change before it is pushed, and settle a review\'s findings.'),
