@@ -40,7 +40,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
  * after one is told apart. tests/Feature/CloudflareWorkerVersionTest.php fails
  * on a change that leaves it as it was.
  */
-const WORKER_VERSION = "2026-11-25.1";
+const WORKER_VERSION = "2026-11-25.2";
 
 interface Env {
   REVIEW_SANDBOX: DurableObjectNamespace<ReviewSandbox>;
@@ -425,7 +425,10 @@ export default {
       return json({ error: spec }, 422);
     }
 
-    return relay(sandbox, await sandbox.run(spec), ctx);
+    // Names this run, so a relay of an earlier one in the same sandbox cannot pick up or stop this one.
+    const token = crypto.randomUUID();
+
+    return relay(() => env.REVIEW_SANDBOX.getByName(run[1]), token, await sandbox.run(spec, token), ctx);
   },
 } satisfies ExportedHandler<Env>;
 
@@ -443,7 +446,7 @@ const MOST_RESUMES = 10;
  * run that is gone, or that cannot be picked up within RESUME_WAITS, ends the
  * stream without its exit, as before.
  */
-function relay(sandbox: DurableObjectStub<ReviewSandbox>, first: Response, ctx: ExecutionContext): Response {
+function relay(stub: () => DurableObjectStub<ReviewSandbox>, token: string, first: Response, ctx: ExecutionContext): Response {
   if (first.status !== 200 || first.body === null) {
     return first;
   }
@@ -485,7 +488,7 @@ function relay(sandbox: DurableObjectStub<ReviewSandbox>, first: Response, ctx: 
                 await writer.write(encoder.encode(frame));
               } catch {
                 // review-central hung up: on purpose, so the run is stopped now.
-                await sandbox.hangUp().catch(() => undefined);
+                await stub().hangUp(token).catch(() => undefined);
 
                 return;
               }
@@ -505,7 +508,8 @@ function relay(sandbox: DurableObjectStub<ReviewSandbox>, first: Response, ctx: 
 
         for (const seconds of RESUME_WAITS) {
           await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
-          const resumed = await sandbox.resume(last).catch((error: unknown) => {
+          // A fresh stub each time: one whose call threw cannot be used again.
+          const resumed = await stub().resume(token, last).catch((error: unknown) => {
             console.warn(`Could not pick the run up again: ${error instanceof Error ? error.message : String(error)}`);
 
             return undefined;
@@ -639,7 +643,7 @@ export class ReviewSandbox extends DurableObject<Env> {
    * waits READER_GRACE_MS for resume() to pick them up again. Only a run nobody
    * comes back for in that time is stopped, and hangUp() stops one at once.
    */
-  async run(spec: RunSpec): Promise<Response> {
+  async run(spec: RunSpec, token: string | null = null): Promise<Response> {
     // A warm sandbox serves one run at a time; the caller starts another of its own.
     if (this.busy) {
       return json({ error: "This sandbox is running a review." }, 409);
@@ -647,6 +651,7 @@ export class ReviewSandbox extends DurableObject<Env> {
 
     this.busy = true;
     this.attempt = spec.attempt ?? null;
+    this.token = token;
     this.events = [];
     this.eventBytes = 0;
     this.sequence = 0;
@@ -715,8 +720,9 @@ export class ReviewSandbox extends DurableObject<Env> {
    * there is no such run here any more, or the events after `after` are no longer
    * kept, so what the caller has cannot be continued.
    */
-  async resume(after: number): Promise<Response | null> {
-    if ((!this.busy && !this.finished) || this.abandoned) {
+  async resume(token: string, after: number): Promise<Response | null> {
+    // Another run's relay, of one that ended here before this one started.
+    if (token !== this.token || (!this.busy && !this.finished) || this.abandoned) {
       return null;
     }
 
@@ -748,8 +754,8 @@ export class ReviewSandbox extends DurableObject<Env> {
   }
 
   /** The caller let the run go on purpose: stop it now rather than wait for it to come back. */
-  async hangUp(): Promise<void> {
-    if (this.busy && !this.abandoned) {
+  async hangUp(token: string): Promise<void> {
+    if (token === this.token && this.busy && !this.abandoned) {
       console.log("The caller hung up: stopping the run.");
       this.abandon();
     }
@@ -759,6 +765,9 @@ export class ReviewSandbox extends DurableObject<Env> {
   private busy = false;
 
   private attempt: string | null = null;
+
+  /** What names the run here, or the last one, for resume() and hangUp(); null for one started without. */
+  private token: string | null = null;
 
   /** Whether the last run here has ended, its last events still kept for a caller that lost them. */
   private finished = false;
