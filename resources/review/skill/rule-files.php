@@ -24,7 +24,7 @@ if ($base === null || $commit === null) {
 }
 
 /** All of the rule files' text the prompt gets at most; the rest are named for reading. */
-const BUDGET = 60000;
+const BUDGET = 100000;
 
 /** What git prints, as it prints it: file names may hold any byte, so they are read NUL-delimited. */
 $git = function (array $arguments): ?string {
