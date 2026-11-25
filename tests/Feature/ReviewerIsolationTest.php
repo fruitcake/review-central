@@ -111,6 +111,36 @@ it('tells every reviewer which parts the team turned off, over whatever its inst
     }
 });
 
+it('adds the steps that only some runs have to the prompt only on a run they apply to', function () {
+    $dir = storage_path('framework/testing/isolation');
+    File::ensureDirectoryExists($dir);
+    $config = "{$dir}/claude-config.json";
+    File::put($config, '{"advisorModel":"opus"}');
+    $parts = fn (string $reviewer, array $env = []): string => Process::path($dir)->env(['HERE' => realpath(SKILL), ...$env])
+        ->run(['sh', '-c', '. "$HERE/reviewer-env.sh" && reviewer_prompt_parts "$1" "$2"', 'sh', $reviewer, $config])->throw()->output();
+
+    // A first review without OCR, a ticket, the scan or extra passes gets none of them.
+    File::put("{$dir}/review-context.json", '{"last_reviewed_commit":null,"findings":[]}');
+
+    expect($parts('codex-cli', ['REVIEW_OCR' => 'false']))->toBe('')
+        ->and($parts('claude-code', ['REVIEW_OCR' => 'false']))->toContain('ADVISOR:')->not->toContain('FOLLOW-UP ROUNDS:');
+
+    // A follow-up with a ticket, the scan, OCR and extra passes gets each of them; Codex runs its own pass instead.
+    File::put("{$dir}/review-context.json", '{"last_reviewed_commit":"abc123","findings":[{"id":"F1"}]}');
+    File::put("{$dir}/review-ticket.md", '# SHOP-12');
+    File::put("{$dir}/review-scan.md", 'No secrets.');
+
+    expect($parts('claude-code', ['REVIEW_EXTRA_PASSES' => 'true']))->toContain('FOLLOW-UP ROUNDS:', 'TICKET:', 'SCOPE AND CHECKLISTS', 'THE SCAN:', 'EXTRA PASSES:')
+        ->and($parts('codex-cli', ['REVIEW_EXTRA_PASSES' => 'true']))->toContain('FOLLOW-UP ROUNDS:')->not->toContain('EXTRA PASSES:');
+
+    // A trial that reviews as though nobody had is a first review, whatever the pull request holds.
+    File::put("{$dir}/review-context.json", '{"last_reviewed_commit":"abc123","findings":[],"ignored_existing":{"comments":2,"findings":1,"highest_finding_id":1}}');
+
+    expect($parts('claude-code'))->not->toContain('FOLLOW-UP ROUNDS:')
+        // The words the review server looks for to see a review is not converging stay in the follow-up's steps.
+        ->and((string) file_get_contents(SKILL.'/parts/follow-up.md'))->toContain('not converging');
+});
+
 it('renames every Claude skill, agent and command of the pull request to where it is read as text, links and nested ones included', function () {
     $dir = storage_path('framework/testing/isolation');
     $home = "{$dir}-home";

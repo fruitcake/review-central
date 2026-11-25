@@ -195,12 +195,13 @@ PROMPT=$(mktemp)
 jq -L "$HERE" 'include "strict-schema"; strict_schema' "$HERE/ai-review.schema.json" > "$STRICT"
 {
   cat "$HERE/codex-prompt.md"
+  reviewer_skill_parts codex-cli
   reviewer_module_notes
   printf '\n'
   cat "$HERE/structured-output.md"
   printf '\nThe schema is strict: every field is there. Give null for a field this skill says to leave out.\n'
   if [ -s "$CANDIDATES" ]; then
-    printf '\nCODEX REVIEW:\n\nCodex'"'"'s own review of this pull request ran before you; what it found is in `%s`. Treat it as SKILL.md treats the code-review skill in START ANALYSIS step 2: candidates, never findings of their own.\n' "$CANDIDATES"
+    printf '\nCODEX REVIEW:\n\nCodex'"'"'s own review of this pull request ran before you; what it found is in `%s`. Read it in START ANALYSIS step 2: every item is a candidate that goes through the same filtering and verification, never a finding of its own.\n' "$CANDIDATES"
   fi
 } > "$PROMPT"
 

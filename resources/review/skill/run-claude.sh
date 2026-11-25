@@ -103,10 +103,13 @@ PROMPT=$(mktemp)
 {
   # The platform's own structure where the precheck wrote one, else the one that ships.
   if [ -s .review-instructions/skill.md ] && [ ! -L .review-instructions/skill.md ]; then
-    cat .review-instructions/skill.md
+    SKILL_FILE=.review-instructions/skill.md
   else
-    cat "$HERE/SKILL.md"
+    SKILL_FILE="$HERE/SKILL.md"
   fi
+  cat "$SKILL_FILE"
+  # A saved copy from before the steps were split out still holds them all.
+  grep -q '^FOLLOW-UP ROUNDS:' "$SKILL_FILE" || reviewer_prompt_parts claude-code "$CONFIG"
   reviewer_module_notes
   printf '\n'
   cat "$HERE/structured-output.md"

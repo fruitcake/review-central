@@ -141,6 +141,56 @@ reviewer_hide_claude_skills() {
 # too, through settings in review-context.json, but a platform's saved copy of them
 # may be from before those settings, and OCR is in the image whatever is set. A
 # runner appends what this prints to its prompt; nothing is printed when all are on.
+# The steps of SKILL.md that only some runs have, added to the prompt after it
+# only on a run they apply to: every line of the prompt is read again on every
+# turn of the review. Each holds for its run alone, whatever an older copy of
+# the instructions says. Run in the review's working directory; $1 is the
+# reviewer, $2 the Claude settings file (for its advisor).
+reviewer_prompt_parts() {
+  _parts="$HERE/parts"
+  _context="review-context.json"
+
+  # A run that reviews as though nobody had is a first review, whatever is on the pull request.
+  if [ -s "$_context" ] && [ "$(jq -r 'if .ignored_existing != null then "first"
+       elif .last_reviewed_commit != null or .handover != null or ((.findings // []) | length) > 0 then "follow-up"
+       else "first" end' "$_context" 2>/dev/null)" = "follow-up" ]; then
+    cat "$_parts/follow-up.md"
+  fi
+
+  if [ -s review-ticket.md ] && [ ! -L review-ticket.md ]; then
+    cat "$_parts/ticket.md"
+  fi
+
+  if [ "${REVIEW_OCR:-true}" != "false" ]; then
+    cat "$_parts/ocr.md"
+  fi
+
+  if [ -s review-scan.md ] && [ ! -L review-scan.md ]; then
+    cat "$_parts/scan.md"
+  fi
+
+  # Claude's own subagents and skill; Codex runs its own pass before the review instead.
+  if [ "${1:-}" = "claude-code" ] && [ "${REVIEW_EXTRA_PASSES:-false}" = "true" ]; then
+    cat "$_parts/extra-passes.md"
+  fi
+
+  if [ "${1:-}" = "claude-code" ] && [ -n "${2:-}" ] && [ -s "$2" ] && [ "$(jq -r '.advisorModel // ""' "$2" 2>/dev/null)" != "" ]; then
+    cat "$_parts/advisor.md"
+  fi
+}
+
+# The same steps for a reviewer that reads SKILL.md as a file rather than being
+# handed it: said to belong to it, and left out where the file it reads still
+# holds them.
+reviewer_skill_parts() {
+  _skill=.review-instructions/skill.md
+  { [ -s "$_skill" ] && [ ! -L "$_skill" ]; } || _skill="$HERE/SKILL.md"
+  grep -q '^FOLLOW-UP ROUNDS:' "$_skill" && return 0
+  _steps=$(reviewer_prompt_parts "$1")
+  [ -n "$_steps" ] || return 0
+  printf '\nThese steps of SKILL.md apply to this run, and are part of it:\n%s\n' "$_steps"
+}
+
 reviewer_module_notes() {
   _off=""
   [ "${REVIEW_OCR:-true}" = "false" ] && _off="$_off
