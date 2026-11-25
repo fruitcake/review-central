@@ -9,6 +9,7 @@ use App\Exceptions\ReviewStepFailed;
 use App\Models\Repository;
 use App\Runners\ContainerRunner;
 use App\Services\PullRequestClassifier;
+use App\Services\ReviewContext;
 use App\Services\ReviewCredentials;
 use App\Services\ReviewInstructions;
 use App\Services\ReviewOpening;
@@ -101,6 +102,10 @@ class Precheck
             $say('Trial: a fresh review of the whole pull request, recorded here and not posted. Forced, drafts included, no lock.');
         }
 
+        if ($trial?->commit !== null) {
+            $say("Reviewed at the earlier commit {$commit} it was asked for, not at the pull request's head.");
+        }
+
         $opened = $this->opening->open($repository, [
             'pull_request_id' => $trial?->pullRequestId,
             'branch' => $branch,
@@ -122,9 +127,10 @@ class Precheck
             'advisor' => $advisor,
             'modules' => $modules,
             'custom' => $trial !== null,
-            // A trial reviews a commit that was reviewed, and a draft; it never
-            // overrides a superseded commit.
+            // A trial reviews a commit that was reviewed, and a draft; it only
+            // reviews a commit that is no longer the head when it asked for one.
             'force' => $trial !== null,
+            'earlier_commit' => $trial?->commit !== null,
             'drafts' => $trial !== null,
             'create_tasks' => true,
             'instructions' => ReviewInstructions::CONTRACT,
@@ -308,10 +314,12 @@ class Precheck
 
         $context = ['comments' => [], 'findings' => [], 'last_reviewed_commit' => null, 'changes' => [], 'before_release' => [], 'manual_review' => [], 'handover' => null, 'new_activity' => false] + $context;
 
-        // A marker line left in the description would have the run review as a follow-up after all.
+        // The section an earlier review wrote into the description is its summary,
+        // which would steer this review as much as its findings. A marker line left
+        // anywhere else would have the run review as a follow-up after all.
         if (is_string($context['pull_request']['description'] ?? null)) {
             $context['pull_request']['description'] = implode("\n", array_filter(
-                explode("\n", $context['pull_request']['description']),
+                explode("\n", ReviewContext::authorDescription($context['pull_request']['description'])),
                 fn (string $line): bool => preg_match('/^\s*\[\/\/\]: # \(ai-(review|finding)\b/', $line) !== 1,
             ));
         }

@@ -33,22 +33,30 @@ class ReviewComparisons
      * cannot be tried keeps why, and the others still start.
      *
      * @param  array<int, array{runner: string|null, provider: string|null, model: string|null, effort: string|null, verify: bool|null, ignore_existing?: bool, modules?: array<string, bool>|null}>  $rows
+     * @param  bool  $atRunCommit  review the commit the run reviewed rather than the pull request as it is now
      */
-    public function start(ReviewRun $run, array $rows, bool $ignoreExisting, ?User $user): ReviewComparison
+    public function start(ReviewRun $run, array $rows, bool $ignoreExisting, ?User $user, bool $atRunCommit = false): ReviewComparison
     {
+        $rows = array_slice(array_values($rows), 0, ReviewComparison::MAX_ROWS);
+
+        if ($atRunCommit) {
+            $rows = array_map(fn (array $row): array => ['commit' => $run->commit] + $row, $rows);
+        }
+
         return ReviewComparison::query()->create([
             'tenant_id' => $run->tenant_id,
             'repository_id' => $run->repository_id,
             'pull_request_id' => $run->pull_request_id,
             'review_run_id' => $run->getKey(),
             'user_id' => $user?->getKey(),
-            'rows' => $this->trials($run, array_slice(array_values($rows), 0, ReviewComparison::MAX_ROWS), $ignoreExisting),
+            'rows' => $this->trials($run, $rows, $ignoreExisting),
         ]);
     }
 
     /**
      * More setups for a comparison, up to its most, each a trial of the pull request
-     * as it is now. An analysis made before keeps to the reviews it read.
+     * as it is now, or at the comparison's commit when it has one. An analysis made
+     * before keeps to the reviews it read.
      *
      * @param  array<int, array{runner: string|null, provider: string|null, model: string|null, effort: string|null, verify: bool|null, ignore_existing?: bool, modules?: array<string, bool>|null}>  $rows
      * @return int how many were added
@@ -73,8 +81,9 @@ class ReviewComparisons
             }
 
             $existing = array_values($locked->rows);
+            $commit = $locked->commit();
             // Each place says when it was taken, so one whose start never came is let go.
-            $new = array_map(fn (array $row): array => $row + ['reserved_at' => now()->toIso8601String()], array_slice(array_values($rows), 0, $room));
+            $new = array_map(fn (array $row): array => ($commit === null ? [] : ['commit' => $commit]) + $row + ['reserved_at' => now()->toIso8601String()], array_slice(array_values($rows), 0, $room));
             $locked->update(['rows' => [...$existing, ...$new], 'analysis' => $analysis]);
 
             return array_combine(range(count($existing), count($existing) + count($new) - 1), $new);
@@ -213,10 +222,14 @@ class ReviewComparisons
             throw new RuntimeException('None of the reviews it was to read is still in the comparison.');
         }
 
-        // The diff read is the open pull request's as it is now. A review of another
-        // commit is judged against code it did not read, so it is said with it; when
-        // no review is of the head, the diff is none of theirs.
-        $head = ($pullRequest['state'] ?? null) === 'OPEN' ? (string) ($pullRequest['source']['commit']['hash'] ?? '') : '';
+        // The diff read is the open pull request's as it is now, or at the commit the
+        // comparison reviews. A review of another commit is judged against code it
+        // did not read, so it is said with it; when no review is of the commit the
+        // diff is of, the diff is none of theirs.
+        $pinned = $comparison->commit();
+        $destination = (string) ($pullRequest['destination']['branch']['name'] ?? '');
+        $atCommit = $pinned !== null && ($pullRequest['state'] ?? null) === 'OPEN' && $destination !== '';
+        $head = $atCommit ? $pinned : (($pullRequest['state'] ?? null) === 'OPEN' ? (string) ($pullRequest['source']['commit']['hash'] ?? '') : '');
         $older = $head === '' ? [] : $columns
             ->filter(fn (array $column): bool => ! ReviewContext::isSameCommit($column['run']->commit, $head))
             ->keys()
@@ -252,7 +265,7 @@ Of an older commit, '.substr($column['run']->commit, 0, 12).': a finding about c
         $text = implode("\n\n", [
             '# Pull request: '.($pullRequest['title'] ?? ''),
             Str::limit(ReviewContext::withoutReviewBlock($pullRequest['description'] ?? null), 3000),
-            "# The diff\n".Str::limit($source->getPullRequestDiff((string) $comparison->pull_request_id), self::DIFF_LENGTH),
+            ($atCommit ? '# The diff at commit '.substr($pinned, 0, 12)."\n" : "# The diff\n").Str::limit($atCommit ? $source->getCommitDiff($destination, $pinned) : $source->getPullRequestDiff((string) $comparison->pull_request_id), self::DIFF_LENGTH),
             "# The reviews\n".implode("\n\n", $reviews),
         ]);
 

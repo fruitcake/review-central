@@ -143,7 +143,8 @@ it('fails where no review can start, and says what to fix', function () {
 
 it('tries a setup as though nobody had reviewed, with no lock, and with the reviewer and model asked for', function () {
     $marker = "[//]: # (ai-review reviewed={$this->sha} mode=both)";
-    ($this->pullRequest)(['description' => "Adds the export.\n\n{$marker}"], [[
+    // The section an earlier review wrote, its summary and its marker in it.
+    ($this->pullRequest)(['description' => "Adds the export.\n\n---\n\n[//]: # (ai-review-start)\n## AI review\n\nNo findings; the export is scoped.\n\n{$marker}\n[//]: # (ai-review-end)"], [[
         'id' => 9, 'content' => ['raw' => "Looks wrong.\n\n[//]: # (ai-finding id=F4 status=open severity=HIGH path=app/Export.php line=12)"],
         'created_on' => '2026-11-18T10:00:00+00:00', 'user' => ['display_name' => 'AI review'],
     ]]);
@@ -164,11 +165,20 @@ it('tries a setup as though nobody had reviewed, with no lock, and with the revi
         ->and($context['comments'])->toBe([])
         ->and($context['last_reviewed_commit'])->toBeNull()
         ->and($context['ignored_existing'])->toBe(['comments' => 1, 'findings' => 1, 'highest_finding_id' => 4])
-        ->and($context['pull_request']['description'])->not->toContain('ai-review')
+        ->and($context['pull_request']['description'])->toBe('Adds the export.')
         ->and($context['settings']['review_drafts'])->toBeTrue()
         ->and(ReviewLock::heldBy($this->repository, 'feature/export'))->toBeNull()
         ->and(ReviewRun::query()->where('build_number', 41)->sole()->only(['custom', 'agent', 'effort', 'status']))->toBe(['custom' => true, 'agent' => 'codex-cli', 'effort' => 'xhigh', 'status' => ReviewRun::STATUS_RUNNING])
         ->and(($this->log)())->toContain('Reviewer codex-cli, model gpt-test, effort xhigh');
+});
+
+it('reviews the earlier commit a trial asks for, though the pull request has moved on', function () {
+    ($this->pullRequest)(['source' => ['branch' => ['name' => 'feature/export'], 'commit' => ['hash' => str_repeat('b', 12)]]]);
+    Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+
+    expect(($this->precheck)(new Trial(pullRequestId: 570, destination: 'main', commit: $this->sha))['REVIEW_NEEDED'])->toBe('true')
+        ->and(File::json("{$this->work}/review-context.json")['settings']['commit'])->toBe($this->sha)
+        ->and(($this->log)())->toContain("Reviewed at the earlier commit {$this->sha}");
 });
 
 it('writes its files as its own, not through a link the pull request committed', function () {

@@ -18,6 +18,7 @@ final readonly class Trial
      * @param  bool  $ignoreExisting  review as though nobody had: without the comments and earlier findings on the pull request
      * @param  string|null  $pullRef  the ref the host keeps an open pull request's head under in this repository, for one whose branch is in a fork
      * @param  array<string, bool>|null  $modules  the parts of the review to turn on or off, by ReviewSettings::MODULES name, over the repository's; those left out are as it has them
+     * @param  string|null  $commit  the commit of an open pull request's branch to review, an earlier one than its head; null reviews the branch as it is
      */
     public function __construct(
         public int $pullRequestId,
@@ -31,6 +32,7 @@ final readonly class Trial
         public ?string $sandbox = null,
         public ?string $pullRef = null,
         public ?array $modules = null,
+        public ?string $commit = null,
     ) {}
 
     /**

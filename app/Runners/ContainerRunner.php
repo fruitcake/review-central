@@ -128,7 +128,7 @@ class ContainerRunner implements ReviewRunner
             'context' => ['pull_request' => ['id' => $trial->pullRequestId, 'title' => $title]],
         ]);
 
-        RunContainerReview::dispatch($repository->getKey(), $branch, null, $build, time(), 1, $trial)
+        RunContainerReview::dispatch($repository->getKey(), $branch, $trial->commit, $build, time(), 1, $trial)
             ->onConnection(config('review.container.connection') ?: null)
             ->onQueue(config('review.container.queue'));
 

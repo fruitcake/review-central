@@ -21,6 +21,7 @@ use App\Runners\DiffRunner;
 use App\Runners\QueuedRuns;
 use App\Runners\RunConclusion;
 use App\Services\PullRequestClassifier;
+use App\Services\ReviewContext;
 use App\Services\ReviewFiling;
 use App\Services\ReviewInstructions;
 use App\Services\ReviewOpening;
@@ -158,6 +159,11 @@ class DiffReview
                 // As though nobody had reviewed: two setups are compared on the same
                 // work. The ticket stays, which is the brief and not the history.
                 $context = ['comments' => [], 'findings' => [], 'last_reviewed_commit' => null, 'changes' => [], 'before_release' => [], 'manual_review' => [], 'handover' => null] + $context;
+
+                // An earlier review's summary in the description steers as much as its findings.
+                if (is_string($context['pull_request']['description'] ?? null)) {
+                    $context['pull_request']['description'] = ReviewContext::authorDescription($context['pull_request']['description']);
+                }
             }
 
             // Nothing of a trial reaches the pull request, its commit's status included.

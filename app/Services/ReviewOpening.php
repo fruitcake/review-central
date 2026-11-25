@@ -100,8 +100,10 @@ class ReviewOpening
         }
 
         // A merged pull request has no newer commit coming. A run that is kept off
-        // it may review what went in, which after a squash is not the branch's head.
-        if (($input['custom'] ?? false) && $context['reason'] === 'superseded' && ($pullRequest['state'] ?? null) === 'MERGED') {
+        // it may review what went in, which after a squash is not the branch's head,
+        // or an earlier commit it was asked for, to compare reviews of that code.
+        if (($input['custom'] ?? false) && $context['reason'] === 'superseded'
+            && (($pullRequest['state'] ?? null) === 'MERGED' || ($input['earlier_commit'] ?? false))) {
             $context['skip'] = false;
             $context['reason'] = null;
         }

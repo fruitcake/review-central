@@ -29,7 +29,7 @@ class ReviewTrial
     ) {}
 
     /**
-     * @param  array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool|null, ignore_existing?: bool, modules?: array<string, bool>|null}  $options
+     * @param  array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool|null, ignore_existing?: bool, modules?: array<string, bool>|null, commit?: string|null}  $options
      *
      * @throws ReviewTrialRefused
      */
@@ -41,7 +41,7 @@ class ReviewTrial
     /**
      * The same as start(), and the build the trial runs as, to find its run by.
      *
-     * @param  array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool|null, ignore_existing?: bool, modules?: array<string, bool>|null}  $options
+     * @param  array{runner?: string|null, provider?: string|null, model?: string|null, effort?: string|null, verify?: bool|null, ignore_existing?: bool, modules?: array<string, bool>|null, commit?: string|null}  $options
      * @return array{repository: Repository, build: int}
      *
      * @throws ReviewTrialRefused
@@ -103,6 +103,8 @@ class ReviewTrial
             throw new ReviewTrialRefused('The pull request does not say which branches it is between.');
         }
 
+        $commit = $this->earlierCommit($repository, $pullRequest, $options, $fromDiff, $fork);
+
         $trial = new Trial(
             pullRequestId: $link->id,
             destination: $destination,
@@ -115,6 +117,7 @@ class ReviewTrial
             sandbox: $container?->name(),
             pullRef: $fork ? "pull/{$link->id}/head" : null,
             modules: $fromDiff ? null : ($options['modules'] ?? null),
+            commit: $commit,
         );
 
         // Only now: a pull request that cannot be tried leaves no repository behind.
@@ -125,6 +128,64 @@ class ReviewTrial
             : $container->startTrial($repository, $branch, $trial, $title);
 
         return ['repository' => $repository, 'build' => $build];
+    }
+
+    /**
+     * The earlier commit of an open pull request's branch the trial reviews, or
+     * null for the branch as it is. One that is the head is the branch as it is.
+     *
+     * @param  array<string, mixed>  $pullRequest
+     * @param  array{commit?: string|null, ignore_existing?: bool}  $options
+     *
+     * @throws ReviewTrialRefused
+     */
+    protected function earlierCommit(Repository $repository, array $pullRequest, array $options, bool $fromDiff, bool $fork): ?string
+    {
+        $asked = $options['commit'] ?? null;
+
+        if (! filled($asked)) {
+            return null;
+        }
+
+        $asked = strtolower(trim((string) $asked));
+        $head = (string) ($pullRequest['source']['commit']['hash'] ?? '');
+
+        if (preg_match('/^[0-9a-f]{7,40}$/', $asked) !== 1) {
+            throw new ReviewTrialRefused("{$asked} is not a commit hash.");
+        }
+
+        if (($pullRequest['state'] ?? null) !== 'OPEN') {
+            throw new ReviewTrialRefused('Only an open pull request is reviewed at an earlier commit: a merged one is reviewed as it went in.');
+        }
+
+        if ($head !== '' && ReviewContext::isSameCommit($asked, $head)) {
+            return null;
+        }
+
+        if ($fromDiff) {
+            throw new ReviewTrialRefused('The diff alone reads the pull request\'s diff as it is now, so it cannot review an earlier commit. Run it on Docker or a Cloudflare sandbox instead.');
+        }
+
+        if ($fork) {
+            throw new ReviewTrialRefused('This pull request comes from a fork, whose earlier commits are not in the repository to clone.');
+        }
+
+        // What was said on the pull request since was said about later code.
+        if (($options['ignore_existing'] ?? true) === false) {
+            throw new ReviewTrialRefused('A review of an earlier commit cannot read what is on the pull request, which was said about later code. Review it as though nobody had.');
+        }
+
+        try {
+            $resolved = $repository->sourceControl()->resolveCommit($asked);
+        } catch (Throwable $exception) {
+            throw new ReviewTrialRefused("Commit {$asked} could not be looked up: {$exception->getMessage()}", previous: $exception);
+        }
+
+        if ($resolved === null) {
+            throw new ReviewTrialRefused("The repository has no commit {$asked}, or no longer has it after a force push.");
+        }
+
+        return $resolved;
     }
 
     /**

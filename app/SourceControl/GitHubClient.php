@@ -493,6 +493,12 @@ class GitHubClient implements FiltersSecrets, OpensPullRequests, SourceControl
         return $this->request(60)->accept('application/vnd.github.diff')->get($this->url("pulls/{$id}"))->throw()->body();
     }
 
+    public function getCommitDiff(string $destination, string $commit): string
+    {
+        // Three dots: from where the two met, as a pull request shows it.
+        return $this->request(60)->accept('application/vnd.github.diff')->get($this->url('compare/'.rawurlencode($destination).'...'.rawurlencode($commit)))->throw()->body();
+    }
+
     public function getRepository(): ?array
     {
         $response = $this->request(10)->get(rtrim($this->url(''), '/'));

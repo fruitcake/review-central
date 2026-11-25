@@ -278,6 +278,44 @@ it('takes more setups later, and keeps an earlier analysis to the reviews it rea
     expect(array_keys(ReviewComparisons::scores($comparison)))->toBe(['A', 'B']);
 });
 
+it('compares setups at the commit the review read after the pull request moved on, and judges them against that commit\'s diff', function () {
+    $connection = Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    $commit = str_repeat('a', 40);
+    $this->mock(ReviewTrial::class)->shouldReceive('begin')
+        ->twice()
+        ->withArgs(fn (Tenant $tenant, string $url, array $options): bool => $options['commit'] === $commit)
+        ->andReturn(['repository' => $this->repository, 'build' => 51], ['repository' => $this->repository, 'build' => 52]);
+
+    livewire(ViewReviewRun::class, ['record' => $this->base->uuid])
+        ->callAction('compare', ['at_run_commit' => true, 'ignore_existing' => true, 'rows' => [['provider' => 'claude-code', 'effort' => 'xhigh']]])
+        ->assertHasNoActionErrors();
+
+    $comparison = ReviewComparison::query()->sole();
+
+    // A setup added later reviews the same commit.
+    livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])
+        ->callAction('add', ['ignore_existing' => true, 'rows' => [['provider' => 'claude-code', 'effort' => 'high']]])
+        ->assertHasNoActionErrors();
+
+    expect($comparison->refresh()->commit())->toBe($commit)
+        ->and(array_column($comparison->rows, 'commit'))->toBe([$commit, $commit]);
+
+    ($this->run)(51, []);
+    ($this->run)(52, []);
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570' => Http::response(['id' => 570, 'title' => 'Add the export', 'state' => 'OPEN',
+            'source' => ['branch' => ['name' => 'feature/export'], 'commit' => ['hash' => str_repeat('c', 12)]], 'destination' => ['branch' => ['name' => 'main']]]),
+        "api.bitbucket.org/2.0/repositories/acme/shop/diff/{$commit}..main" => Http::response("diff --git a/app/Export.php b/app/Export.php\n+return Invoice::all();\n"),
+    ]);
+    Comparer::fake([['summary' => 'Fine.', 'findings' => []]]);
+
+    AnalyzeReviewComparison::dispatchSync($comparison->id, $connection->id);
+
+    expect($comparison->refresh()->analysis_status)->toBe(ReviewComparison::ANALYSIS_FINISHED);
+    Comparer::assertPrompted(fn ($prompt): bool => str_contains($prompt->prompt, "# The diff at commit aaaaaaaaaaaa\ndiff --git")
+        && ! str_contains($prompt->prompt, 'Of an older commit'));
+});
+
 it('keeps a member off a comparison\'s page', function () {
     $comparison = ReviewComparison::query()->create([
         'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
