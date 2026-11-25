@@ -302,8 +302,17 @@
     .rc-advice-item { display: flex; gap: 12px; align-items: flex-start; background: var(--rc-ground); border-radius: 0; padding: 12px 14px; }
     .rc-advice-item > span:last-child { display: flex; flex-direction: column; gap: 2px; }
     /* Figures folded away until asked for: the steps of a review, a sandbox's per size. */
+    /* Whatever opens has the same chevron in front, turned down when open: a summary laid out
+       as flex loses the browser's own marker, which left most of them looking like plain text. */
+    details > summary { list-style: none; cursor: pointer; }
+    details > summary::-webkit-details-marker { display: none; }
+    details > summary::before { content: ''; display: inline-block; flex: none; width: 7px; height: 7px; margin: 0 10px 0 2px; border-right: 2px solid var(--rc-muted); border-bottom: 2px solid var(--rc-muted); transform: translateY(-2px) rotate(-45deg); transition: transform .15s ease; }
+    details[open] > summary::before { transform: translateY(-4px) rotate(45deg); }
+    details > summary:hover::before { border-color: var(--rc-ink); }
+    .rc-collapse > summary::before, .rc-update > summary::before { align-self: center; margin-right: 0; transform: rotate(-45deg); }
+    .rc-collapse[open] > summary::before, .rc-update[open] > summary::before { transform: translateY(-2px) rotate(45deg); }
+    @media (prefers-reduced-motion: reduce) { details > summary::before { transition: none; } }
     .rc-collapse > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-weight: 600; color: var(--rc-ink); }
-    .rc-collapse > summary::marker { color: var(--rc-muted); }
     .rc-collapse[open] > summary { margin-bottom: 8px; }
     .rc-collapse > summary .rc-muted { font-weight: 400; }
     .rc-collapse .rc-scroll + .rc-scroll { margin-top: 16px; }
