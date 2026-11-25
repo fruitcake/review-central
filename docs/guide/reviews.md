@@ -31,7 +31,7 @@ OpenCodeReview as the reviewer, and a review from the diff alone, have none of t
 
 The reviewer reads them as `review-rules.md`, after the instructions, with the standing of `REVIEW.md`: they cannot lower the evidence a finding needs. A rule is part of the instructions' version, so changing one has the next push reviewed against it. A rule that is off stays on the list and is not read.
 
-On a review, a finding marked *Not a problem* or *Factually wrong* offers **Make it a rule** (for the tenant's admins): a *Not a defect here* rule for that repository and file, to widen before saving. Everyone in the team reads the rules; its admins write them.
+On a review, a finding marked *Not a problem* or *Factually wrong* offers **Make it a rule** (for the tenant's admins): a *Not a defect here* rule for that repository and file, to widen before saving. Everyone in the team reads the rules; its admins write them. **Import CSV** adds many at once: a header row, then a row per rule with `kind` (`check` or `convention`) and `title`, and optionally `body`, `paths` (globs separated by `;`), `severity` and `repository` (`workspace/name`, or empty for every repository). A rule already there with the same kind, title and repository is skipped, as is a row that names an unknown repository or kind, each with its row number.
 
 ### By pull request
 

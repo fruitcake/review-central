@@ -12,6 +12,8 @@ use App\Models\ReviewRun;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Collection;
+use League\Csv\Reader;
+use Throwable;
 
 /**
  * A team's own rules, as the reviewer reads them: one more instruction file,
@@ -119,6 +121,99 @@ class ReviewRules
             'enabled' => true,
             'source' => $from === null ? null : "{$from->uuid}:{$findingId}",
         ]);
+    }
+
+    /** The most rows one import takes. */
+    public const IMPORT_LIMIT = 1000;
+
+    /**
+     * Adds the rules in a CSV, as add() would one by one: a header row, then a
+     * row per rule with `kind` (check or convention) and `title`, and optionally
+     * `body`, `paths` (globs, separated by ; or a new line), `severity` and
+     * `repository` (workspace/name, or empty for every repository of the
+     * tenant). A row add() refuses, or one already there with the same kind,
+     * title and repository, is skipped and said why.
+     *
+     * @return array{created: int, skipped: list<string>}
+     *
+     * @throws ActionRefused when the user may not, or the file is no such CSV
+     */
+    public function import(User $user, Tenant $tenant, string $csv): array
+    {
+        app(RepositoryAccess::class)->mustManage($user, $tenant);
+
+        try {
+            $reader = Reader::createFromString(ltrim($csv, "\u{FEFF}"));
+            $reader->setHeaderOffset(0);
+            $header = array_map(fn (string $name): string => strtolower(trim($name)), $reader->getHeader());
+            $records = iterator_to_array($reader->getRecords($header), false);
+        } catch (Throwable $exception) {
+            throw new ActionRefused('That is not a CSV this can read: '.$exception->getMessage(), previous: $exception);
+        }
+
+        if (! in_array('kind', $header, true) || ! in_array('title', $header, true)) {
+            throw new ActionRefused('The first row names the columns, and needs at least kind and title.');
+        }
+
+        if (count($records) > self::IMPORT_LIMIT) {
+            throw new ActionRefused('At most '.self::IMPORT_LIMIT.' rules in one file.');
+        }
+
+        $repositories = $tenant->repositories()->get();
+        $created = 0;
+        $skipped = [];
+
+        foreach ($records as $index => $record) {
+            // The header is row 1.
+            $row = $index + 2;
+            $kind = ReviewRuleKind::tryFrom(strtolower(trim((string) ($record['kind'] ?? ''))));
+            $title = self::line((string) ($record['title'] ?? ''));
+            $named = trim((string) ($record['repository'] ?? ''));
+
+            if ($kind === null) {
+                $skipped[] = "Row {$row}: kind is check or convention.";
+
+                continue;
+            }
+
+            $repository = $named === '' ? null : $repositories->first(fn (Repository $repository): bool => strcasecmp($repository->fullName(), $named) === 0);
+
+            if ($named !== '' && $repository === null) {
+                $skipped[] = "Row {$row}: no repository {$named} here.";
+
+                continue;
+            }
+
+            $exists = $tenant->reviewRules()
+                ->where('kind', $kind)
+                ->where('title', $title)
+                ->where('repository_id', $repository?->getKey())
+                ->exists();
+
+            if ($exists) {
+                $skipped[] = "Row {$row}: \"{$title}\" is there already.";
+
+                continue;
+            }
+
+            try {
+                $this->add(
+                    $user,
+                    $tenant,
+                    $repository,
+                    $kind,
+                    $title,
+                    (string) ($record['body'] ?? '') ?: null,
+                    preg_split('/[;\r\n]+/', (string) ($record['paths'] ?? '')) ?: [],
+                    trim((string) ($record['severity'] ?? '')) ?: null,
+                );
+                $created++;
+            } catch (ActionRefused $exception) {
+                $skipped[] = "Row {$row}: {$exception->getMessage()}";
+            }
+        }
+
+        return ['created' => $created, 'skipped' => $skipped];
     }
 
     /**
