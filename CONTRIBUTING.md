@@ -44,7 +44,7 @@ Tests run on SQLite in memory and need no services: HTTP calls to source control
 - Keep a pull request to one change, with a title and description that say what it does and why.
 - Update the docs in `docs/` when you change setup, configuration or behaviour someone relies on.
 - New environment variables go in the [configuration reference](docs/guide/configuration.md), and in `.env.example` with a comment when a feature needs them set.
-- Write the pull request's title for someone running Review Central: it goes into the release notes as it is. If they have to do something when updating, such as add a setting or deploy the Worker again, say what in the description and add the label `upgrade`.
+- Write the pull request's title for someone running Review Central: it goes into the release notes as it is. If they have to do something when updating that the release cannot tell from its files, such as press a button or set a setting a feature needs, add the label `upgrade` and say what in a paragraph of the description that starts with `**When updating:**`: that paragraph goes into the release notes. Deploying the Worker again, rebuilding the reviewer's image, new default instructions, migrations and new lines in `.env.example` are found by themselves.
 
 ## Adding a stack guide or a provider
 
@@ -68,7 +68,7 @@ git switch main && git pull
 git tag 2026.11.19 && git push origin 2026.11.19
 ```
 
-The workflow runs the checks on the tag and fast-forwards `stable` to it, which servers that deploy `stable` take from there. Then it makes a GitHub Release whose notes GitHub writes from the pull requests merged since the last release, grouped by label as `.github/release.yml` says: those labelled `upgrade` first, under **Needs action when updating**. A release that stopped halfway is finished with **Re-run failed jobs**: a step that was done is done again without changing anything. Edit a release's notes on GitHub afterwards to add anything the titles do not say.
+The workflow runs the checks on the tag and fast-forwards `stable` to it, which servers that deploy `stable` take from there. Then it makes a GitHub Release. Its notes start with **Updating to …**, a list of what to do, which `.github/release-notes.sh` reads from what changed since the last release and from the `**When updating:**` paragraph of each pull request labelled `upgrade`; run it locally to see what a release would say (`.github/release-notes.sh 2026.11.25`). Below that, GitHub writes the pull requests merged since, grouped by label as `.github/release.yml` says. A release that stopped halfway is finished with **Re-run failed jobs**: a step that was done is done again without changing anything. Edit a release's notes on GitHub afterwards to add anything the titles do not say.
 
 A tag with a suffix, such as `2026.11.19-rc.1`, is released as a pre-release and leaves `stable` where it is.
 
