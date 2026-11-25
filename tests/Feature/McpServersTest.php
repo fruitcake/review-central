@@ -966,3 +966,19 @@ it('gives the team\'s rules as Boost rule files for the repository, and proposal
         // A rule for every repository applies to every file; a proposal names the file and why it was dismissed.
         ->assertSee(['  - \"**\"', 'Not a defect here', '# Not a defect: Unescaped CSV cell', 'Handled elsewhere', 'CsvWriter escapes it']);
 });
+
+it('gives two rules of the same slug a file each, and proposes no finding a rule for every repository already covers', function () {
+    ReviewRule::factory()->create(['tenant_id' => $this->tenant->id, 'repository_id' => $this->repository->id, 'kind' => ReviewRuleKind::Check, 'title' => 'Exports']);
+    ReviewRule::factory()->create(['tenant_id' => $this->tenant->id, 'repository_id' => $this->repository->id, 'kind' => ReviewRuleKind::Check, 'title' => 'Exports!']);
+    ReviewRule::factory()->create(['tenant_id' => $this->tenant->id, 'repository_id' => null, 'kind' => ReviewRuleKind::Convention, 'title' => 'The writer escapes cells', 'source' => "{$this->run->uuid}:F2"]);
+    FindingVerdict::query()->create(['review_run_id' => $this->run->id, 'user_id' => $this->admin->id, 'finding_id' => 'F2', 'verdict' => FindingVerdictKind::NotAProblem, 'reason' => FindingVerdictReason::HandledElsewhere]);
+
+    AgentServer::actingAs($this->member)
+        ->tool(RuleFilesTool::class, ['repository' => 'acme/shop', 'proposals' => true])
+        ->assertOk()
+        ->assertStructuredContentPaths([
+            'files.1.path' => '.ai/rules/exports.md',
+            'files.2.path' => '.ai/rules/exports-2.md',
+        ])
+        ->assertStructuredContentCount(0, 'proposals');
+});

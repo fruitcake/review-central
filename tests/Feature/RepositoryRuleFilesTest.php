@@ -75,3 +75,32 @@ it('gives every reviewer the repository\'s rules, whatever copy of the instructi
         expect((string) file_get_contents(__DIR__."/../../resources/review/skill/{$script}"))->toContain('reviewer_repository_rules');
     }
 });
+
+it('keeps the dot of a folder, a comma inside braces, any file name, and an optional Cursor rule optional', function () {
+    ($this->put)('.github/workflows/tests.yml', 'on: push');
+    ($this->put)('src/main.ts', 'export {}');
+    ($this->put)('src/café.php', '<?php');
+    ($this->put)('.ai/rules/workflows.md', "---\npaths:\n  - .github/workflows/**\n---\nWorkflows pin their actions.\n");
+    ($this->put)('.github/instructions/frontend.instructions.md', "---\napplyTo: \"src/**/*.{ts,tsx}\"\n---\nNo default exports.\n");
+    ($this->put)('.ai/rules/équipe.md', "---\npaths: [\"src/**\"]\n---\nThe team's own rule.\n");
+    ($this->put)('.cursor/rules/optional.mdc', "---\ndescription: Only when picked\nglobs: \"\"\nalwaysApply: false\n---\nNot for the review.\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Rules');
+    ($this->git)('checkout', '-qb', 'feature');
+    ($this->put)('.github/workflows/tests.yml', 'on: pull_request');
+    ($this->put)('src/main.ts', 'export const a = 1');
+    ($this->put)('src/café.php', '<?php // changed');
+    ($this->git)('commit', '-qam', 'Change');
+
+    expect(($this->rules)())
+        ->toContain('Workflows pin their actions.', 'this change touches `.github/workflows/tests.yml`')
+        ->toContain('No default exports.', 'this change touches `src/main.ts`')
+        ->toContain('### `.ai/rules/équipe.md`', '`src/café.php`')
+        ->not->toContain('Not for the review.');
+});
+
+it('runs its scripts with PHP 8, whatever PHP the project put first', function () {
+    $php = trim(Process::run(['sh', '-c', '. "$0" && reviewer_php', realpath(__DIR__.'/../../resources/review/skill/reviewer-env.sh')])->throw()->output());
+
+    expect(Process::run([$php, '-r', 'echo PHP_MAJOR_VERSION;'])->output())->toBeGreaterThanOrEqual('8');
+});
