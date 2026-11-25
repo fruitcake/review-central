@@ -204,9 +204,23 @@ class ReviewRuleArchive
             return false;
         }
 
-        return preg_match('/^alwaysApply:\s*true\s*$/mi', $match[1]) === 1
-            || preg_match('/^globs:[ \t]*["\'\[]*[^\s"\'\],]/m', $match[1]) === 1
-            || preg_match('/^globs:[ \t]*\r?\n[ \t]+-[ \t]*\S/m', $match[1]) === 1;
+        if (preg_match('/^alwaysApply:\s*true\s*$/mi', $match[1]) === 1) {
+            return true;
+        }
+
+        // The globs as rule-files.php reads them: inline, split on commas outside braces, and listed below the key.
+        if (preg_match('/^globs:[ \t]*(.*)$((?:\r?\n[ \t]+-.*$)*)/m', $match[1], $field) !== 1) {
+            return false;
+        }
+
+        $inline = trim($field[1]);
+        $globs = $inline === '' ? [] : (preg_split('/\s*,\s*(?![^{]*\})/', trim($inline, "[] \t")) ?: []);
+
+        if (preg_match_all('/^[ \t]+-[ \t]*(.+)$/m', $field[2], $listed) > 0) {
+            $globs = array_merge($globs, $listed[1]);
+        }
+
+        return array_filter(array_map(fn (string $glob): string => trim($glob, " \t\"'"), $globs), fn (string $glob): bool => $glob !== '') !== [];
     }
 
     /**
