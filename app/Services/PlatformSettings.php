@@ -10,6 +10,7 @@ use App\Models\PlatformSetting;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Laravel\Passport\Passport;
 use phpseclib4\Crypt\RSA;
 use RuntimeException;
@@ -98,6 +99,16 @@ class PlatformSettings
      */
     public const MCP_REDIRECTS = 'mcp_redirects';
 
+    /**
+     * The name people give this installation's MCP server in their assistant,
+     * which an agent's tools are then called by (mcp__<name>__...). Not set: the
+     * app's name as a slug.
+     */
+    public const MCP_NAME = 'mcp_name';
+
+    /** What an MCP server's name may be: what Claude Code and other clients accept. */
+    public const MCP_NAME_PATTERN = '/^[a-z0-9][a-z0-9_-]{0,47}$/';
+
     /** Kept encrypted, and never shown again. */
     public const SECRETS = [self::CLOUDFLARE_API_TOKEN, self::R2_SECRET_ACCESS_KEY, self::CLOUDFLARE_TOKEN];
 
@@ -134,6 +145,7 @@ class PlatformSettings
         self::CLOUDFLARE_CLIS => null,
         self::OAUTH_KEYS => null,
         self::MCP_REDIRECTS => null,
+        self::MCP_NAME => null,
     ];
 
     protected const CACHE = 'platform-settings';
@@ -160,6 +172,23 @@ class PlatformSettings
         $runner = $this->get(self::RUNNER);
 
         return is_string($runner) && $runner !== '' ? $runner : null;
+    }
+
+    /**
+     * The name to give the MCP server: as set, or the app's name as a slug, so two
+     * installations someone connects to are told apart.
+     */
+    public function mcpName(): string
+    {
+        $name = $this->text(self::MCP_NAME);
+
+        if ($name !== null && preg_match(self::MCP_NAME_PATTERN, $name) === 1) {
+            return $name;
+        }
+
+        $slug = Str::limit(Str::slug($this->appName()), 48, '');
+
+        return preg_match(self::MCP_NAME_PATTERN, $slug) === 1 ? $slug : 'review-central';
     }
 
     public function appName(): string

@@ -157,6 +157,8 @@ Add it with its address, and the assistant signs you in on Review Central's own 
 claude mcp add --transport http review-central https://review.example.com/mcp/agent
 ```
 
+The name, `review-central` here, is what the profile tells people to give the server, and an agent's tools are called by it (`mcp__review-central__…`). An administrator sets it under **MCP server name** in Admin → Settings, so someone connected to two installations can tell them apart; without one it is the app's name as a slug.
+
 It does no more than your account may: only your tenants' repositories, and rules and the open findings backlog only where you are an admin. Starting a review costs what a review costs, and the assistant is told to ask you first.
 
 An assistant registers itself under a name of its own choosing, so the consent screen also shows where access goes: a web address such as `claude.ai`, or an app on your own computer. Only these may be signed in to: Claude (`claude.ai`, `claude.com`, the `claude://` scheme), ChatGPT (`chatgpt.com`), VS Code (`vscode.dev`, `insiders.vscode.dev`, `vscode://`, `vscode-insiders://`), Cursor (`cursor://`), and any client on the same computer through `http://localhost` or `http://127.0.0.1`, such as Claude Code. An administrator adds others under **Extra MCP redirect domains** in Admin → Settings, or with `MCP_REDIRECT_DOMAINS` in the [configuration](./configuration).
