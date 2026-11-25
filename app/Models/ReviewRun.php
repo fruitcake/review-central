@@ -107,6 +107,17 @@ class ReviewRun extends Model
     }
 
     /**
+     * Whether a review is running: of the tenant, or of any when left out.
+     */
+    public static function runningFor(?int $tenantId = null): bool
+    {
+        return self::query()
+            ->when($tenantId !== null, fn (Builder $query) => $query->where('tenant_id', $tenantId))
+            ->where('status', self::STATUS_RUNNING)
+            ->exists();
+    }
+
+    /**
      * Started and not begun: waiting for a worker, or for the review of the commit
      * before it. The review takes this record over when it asks for its context.
      */

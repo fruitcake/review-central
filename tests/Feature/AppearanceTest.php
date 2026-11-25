@@ -2,6 +2,8 @@
 
 use App\Filament\Admin\Pages\Settings;
 use App\Filament\Themes;
+use App\Models\Repository;
+use App\Models\ReviewRun;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\PlatformSettings;
@@ -23,6 +25,22 @@ it('wears the mark, the default name and the credit until an administrator sets 
         ->assertSee('Review Central')
         ->assertSee('Open source · developed by')
         ->assertSee('favicon.svg');
+});
+
+it('turns the mark only while a review of the open tenant runs', function () {
+    $repository = Repository::factory()->create(['tenant_id' => $this->tenant->id]);
+    $other = Repository::factory()->create();
+    $run = fn (Repository $repository) => ReviewRun::query()->create([
+        'tenant_id' => $repository->tenant_id, 'repository_id' => $repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'feature/export', 'commit' => str_repeat('a', 40), 'status' => ReviewRun::STATUS_RUNNING, 'started_at' => now(),
+    ]);
+
+    // Another tenant's review does not.
+    $run($other);
+    $this->get('/app/acme')->assertOk()->assertDontSee('class="rc-spin"', false);
+
+    $run($repository);
+    $this->get('/app/acme')->assertOk()->assertSee('class="rc-spin"', false);
 });
 
 it('lets an administrator give the installation its own name, logo and colour, and drop the credit', function () {

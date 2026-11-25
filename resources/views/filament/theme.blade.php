@@ -187,6 +187,8 @@
     .rc-activity .rc-muted { font-size: 12px; font-weight: 400; }
 
     .rc-column { display: flex; flex-direction: column; gap: 16px; }
+    .rc-classified { margin: 0 0 10px; font-size: 14px; color: var(--rc-ink-soft); line-height: 1.6; }
+    .rc-classified .rc-chip { margin-right: 6px; }
     .rc-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; font-size: 14px; color: var(--rc-ink-soft); }
     .rc-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
     .rc-timeline { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }

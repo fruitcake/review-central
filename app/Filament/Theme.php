@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Filament;
 
+use App\Events\ReviewRunChanged;
+use App\Models\ReviewRun;
 use App\Services\Broadcasts;
 use App\Services\PlatformSettings;
 use App\Services\SingleSignOn;
@@ -52,7 +54,7 @@ class Theme
                 'name' => app(PlatformSettings::class)->appName(),
                 'logo' => app(PlatformSettings::class)->logo(),
                 'subtitle' => $subtitle,
-            ]))
+            ] + self::activity($subtitle !== '')))
             ->brandLogoHeight('2rem')
             ->favicon(fn (): string => app(PlatformSettings::class)->favicon())
             ->renderHook(PanelsRenderHook::SIDEBAR_FOOTER, fn (): string|View => app(PlatformSettings::class)->credit() ? view('filament.credit') : '')
@@ -60,5 +62,26 @@ class Theme
             ->renderHook(PanelsRenderHook::HEAD_END, fn (): View => view('filament.theme', ['admin' => $subtitle !== '', 'colours' => Themes::for(CurrentTenant::find())]))
             // Filament's own Echo is left off: it does not know Mercure.
             ->renderHook(PanelsRenderHook::SCRIPTS_AFTER, fn (): View => view('filament.echo', ['options' => Broadcasts::echoOptions()]));
+    }
+
+    /**
+     * Whether the logo turns: while a review of the open tenant runs, or of any
+     * on the admin side. A tenant's page hears when that changes, where the
+     * installation broadcasts; otherwise the next page shows it.
+     *
+     * @return array{active: bool, channel: string|null}
+     */
+    protected static function activity(bool $admin): array
+    {
+        $tenant = $admin ? null : CurrentTenant::find();
+
+        if (! $admin && $tenant === null) {
+            return ['active' => false, 'channel' => null];
+        }
+
+        return [
+            'active' => rescue(fn (): bool => ReviewRun::runningFor($tenant === null ? null : (int) $tenant->getKey()), false, false),
+            'channel' => $tenant !== null && Broadcasts::enabled() && auth()->check() ? ReviewRunChanged::channel((int) $tenant->getKey()) : null,
+        ];
     }
 }
