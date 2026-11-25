@@ -1,6 +1,6 @@
 # Updating
 
-Releases are named after the day they came out, `2026.11.19`, and tagged on GitHub under that name. Each one's [release notes](https://github.com/fruitcake/review-central/releases) say what changed, with what to do about it first, under **Needs action when updating**. The branch `stable` always holds the latest release: deploy that, with your host's automatic deployment if you like, or a tag of your choice. `main` has what is merged since, and is not for a server you rely on.
+Releases are named after the day they came out, `2026.11.19`, and tagged on GitHub under that name. Each one's [release notes](https://github.com/fruitcake/review-central/releases) start with **Updating to …**: what to do for that release beyond the steps below, such as deploying the Worker again or taking new review instructions. Then what changed. The branch `stable` always holds the latest release: deploy that, with your host's automatic deployment if you like, or a tag of your choice. `main` has what is merged since, and is not for a server you rely on.
 
 After checking out a new release, on the server (and on every worker):
 

@@ -6,6 +6,7 @@ name: release
 # pull requests merged since the last release (grouped as .github/release.yml
 # says). Forge deploys `stable`, so pushing the tag is the whole release. Every
 # step can be run again: "Re-run failed jobs" finishes a release that stopped.
+# The notes start with what to do when updating: see .github/release-notes.sh.
 
 on:
   push:
@@ -96,4 +97,12 @@ jobs:
             *-*) prerelease=--prerelease ;;
             *) prerelease= ;;
           esac
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes $prerelease
+          # What to do when updating first, read from what changed since the release
+          # before (.github/release-notes.sh), then the notes GitHub writes from the
+          # pull requests.
+          previous="$(git describe --tags --abbrev=0 --match '20[0-9][0-9].*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          notes="$RUNNER_TEMP/notes.md"
+          .github/release-notes.sh "$GITHUB_REF_NAME" "$previous" > "$notes"
+          echo >> "$notes"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" ${previous:+-f previous_tag_name="$previous"} --jq .body >> "$notes"
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$notes" $prerelease
