@@ -131,8 +131,8 @@ class ReviewTrial
     }
 
     /**
-     * The earlier commit of an open pull request's branch the trial reviews, or
-     * null for the branch as it is. One that is the head is the branch as it is.
+     * The commit of an open pull request's branch the trial reviews, its head or an
+     * earlier one, or null for the branch as it is when it starts.
      *
      * @param  array<string, mixed>  $pullRequest
      * @param  array{commit?: string|null, ignore_existing?: bool}  $options
@@ -158,11 +158,16 @@ class ReviewTrial
             throw new ReviewTrialRefused('Only an open pull request is reviewed at an earlier commit: a merged one is reviewed as it went in.');
         }
 
-        if ($head !== '' && ReviewContext::isSameCommit($asked, $head)) {
+        // The head now, which a push before the trial starts can move: it is kept, so
+        // the trial still reviews it.
+        $isHead = $head !== '' && ReviewContext::isSameCommit($asked, $head);
+
+        // A fork's head is cloned through the host's ref for it, which moves with it.
+        if ($isHead && $fork) {
             return null;
         }
 
-        if ($fromDiff) {
+        if ($fromDiff && ! $isHead) {
             throw new ReviewTrialRefused('The diff alone reads the pull request\'s diff as it is now, so it cannot review an earlier commit. Run it on Docker or a Cloudflare sandbox instead.');
         }
 
@@ -171,7 +176,7 @@ class ReviewTrial
         }
 
         // What was said on the pull request since was said about later code.
-        if (($options['ignore_existing'] ?? true) === false) {
+        if (! $isHead && ($options['ignore_existing'] ?? true) === false) {
             throw new ReviewTrialRefused('A review of an earlier commit cannot read what is on the pull request, which was said about later code. Review it as though nobody had.');
         }
 

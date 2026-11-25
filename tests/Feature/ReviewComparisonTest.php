@@ -316,6 +316,24 @@ it('compares setups at the commit the review read after the pull request moved o
         && ! str_contains($prompt->prompt, 'Of an older commit'));
 });
 
+it('will not judge reviews at a commit against the diff of a pull request closed with later commits', function () {
+    $connection = Connection::factory()->anthropic()->create(['tenant_id' => $this->repository->tenant_id]);
+    $comparison = ReviewComparison::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'review_run_id' => $this->base->id, 'rows' => [['build' => 51, 'commit' => str_repeat('a', 40)]],
+    ]);
+    ($this->run)(51, []);
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/570' => Http::response(['id' => 570, 'title' => 'Add the export', 'state' => 'MERGED',
+            'source' => ['branch' => ['name' => 'feature/export'], 'commit' => ['hash' => str_repeat('c', 12)]], 'destination' => ['branch' => ['name' => 'main']]]),
+    ]);
+
+    AnalyzeReviewComparison::dispatchSync($comparison->id, $connection->id);
+
+    expect($comparison->refresh()->analysis_status)->toBe(ReviewComparison::ANALYSIS_FAILED)
+        ->and($comparison->analysis_error)->toContain('closed with commits after aaaaaaaaaaaa');
+});
+
 it('keeps a member off a comparison\'s page', function () {
     $comparison = ReviewComparison::query()->create([
         'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,

@@ -187,7 +187,7 @@ it('refuses an open pull request from a fork on Bitbucket, whose branch is nowhe
         ->toThrow(ReviewTrialRefused::class, 'comes from a fork');
 });
 
-it('tries an open pull request at an earlier commit of its branch, and the branch as it is for its head', function () {
+it('tries an open pull request at an earlier commit of its branch, and keeps its head when that is asked for', function () {
     $earlier = str_repeat('b', 40);
     Http::fake([
         'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/12' => Http::response([
@@ -196,15 +196,16 @@ it('tries an open pull request at an earlier commit of its branch, and the branc
             'destination' => ['branch' => ['name' => 'main']],
         ]),
         'api.bitbucket.org/2.0/repositories/acme/shop/commit/bbbbbbbbbbbb*' => Http::response(['hash' => $earlier]),
+        'api.bitbucket.org/2.0/repositories/acme/shop/commit/aaaaaaaaaaaa*' => Http::response(['hash' => str_repeat('a', 40)]),
         '*' => Http::response([], 404),
     ]);
 
     app(ReviewTrial::class)->start($this->tenant, 'https://bitbucket.org/acme/shop/pull-requests/12', ['commit' => 'bbbbbbbbbbbb']);
     app(ReviewTrial::class)->start($this->tenant, 'https://bitbucket.org/acme/shop/pull-requests/12', ['commit' => str_repeat('a', 40)]);
 
-    // The job clones the earlier commit; the head is no earlier commit.
+    // Each clones the commit asked for: the head too, which a push before the job starts would move.
     Queue::assertPushed(fn (RunContainerReview $job): bool => $job->commit === $earlier && $job->trial?->commit === $earlier);
-    Queue::assertPushed(fn (RunContainerReview $job): bool => $job->commit === null && $job->trial?->commit === null);
+    Queue::assertPushed(fn (RunContainerReview $job): bool => $job->commit === str_repeat('a', 40) && $job->trial?->commit === str_repeat('a', 40));
 });
 
 it('refuses an earlier commit it cannot review there', function (array $options, array $pullRequest, string $message) {

@@ -227,9 +227,18 @@ class ReviewComparisons
         // did not read, so it is said with it; when no review is of the commit the
         // diff is of, the diff is none of theirs.
         $pinned = $comparison->commit();
+        $open = ($pullRequest['state'] ?? null) === 'OPEN';
+        $last = (string) ($pullRequest['source']['commit']['hash'] ?? '');
         $destination = (string) ($pullRequest['destination']['branch']['name'] ?? '');
-        $atCommit = $pinned !== null && ($pullRequest['state'] ?? null) === 'OPEN' && $destination !== '';
-        $head = $atCommit ? $pinned : (($pullRequest['state'] ?? null) === 'OPEN' ? (string) ($pullRequest['source']['commit']['hash'] ?? '') : '');
+
+        // Once merged or declined, the destination has the pull request in it, and
+        // only its own diff is left: that is the pinned commit's only when it was the last.
+        if ($pinned !== null && ! $open && ($last === '' || ! ReviewContext::isSameCommit($pinned, $last))) {
+            throw new RuntimeException('The pull request was closed with commits after '.substr($pinned, 0, 12).', the one these reviews read, so its diff at that commit can no longer be read.');
+        }
+
+        $atCommit = $pinned !== null && $open && $destination !== '';
+        $head = $pinned ?? ($open ? $last : '');
         $older = $head === '' ? [] : $columns
             ->filter(fn (array $column): bool => ! ReviewContext::isSameCommit($column['run']->commit, $head))
             ->keys()

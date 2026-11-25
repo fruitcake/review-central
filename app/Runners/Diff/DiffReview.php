@@ -91,6 +91,20 @@ class DiffReview
                 return;
             }
 
+            // The diff on the host is the pull request's as it is now: a trial asked
+            // for a commit that is no longer its head cannot be reviewed from it.
+            $asked = $trial?->commit;
+
+            if ($asked !== null && ! ReviewContext::isSameCommit($asked, (string) ($pullRequest['source']['commit']['hash'] ?? ''))) {
+                $summary = 'Not reviewed: the pull request moved on from '.substr($asked, 0, 12).' before this review started, and the diff alone only has its diff as it is now.';
+                $log?->note($summary);
+                // Said on the run as well: a comparison shows its column with it.
+                ReviewRun::query()->where('repository_id', $repository->getKey())->where('build_number', $build)->update(['summary' => $summary]);
+                $this->queued->close($repository, $build, ReviewRun::STATUS_SKIPPED, $summary);
+
+                return;
+            }
+
             // The run is recorded and locked by its commit, and a pull request
             // names its head by the start of it.
             // A merged pull request is recorded on the commit it went in as.
