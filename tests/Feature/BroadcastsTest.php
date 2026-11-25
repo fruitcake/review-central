@@ -107,8 +107,8 @@ it('says that a review started or ended, and not what it cost', function () {
     Event::assertDispatched(fn (ReviewRunChanged $event): bool => $event->tenantId === $this->tenant->id
         && $event->broadcastOn()->name === "private-tenants.{$this->tenant->id}"
         && $event->broadcastAs() === 'review.changed'
-        // Only which review: the page reads the rest from this server.
-        && $event->broadcastWith() === ['run' => $run->uuid]);
+        // Only which review, and whether one still runs for the logo: the page reads the rest from this server.
+        && $event->broadcastWith() === ['run' => $run->uuid, 'running' => false]);
 });
 
 it('says that a log grew, at most once a second and without what was printed', function () {

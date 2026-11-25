@@ -9,6 +9,7 @@ use App\Models\Connection;
 use App\Models\Repository;
 use App\Models\ReviewClassification;
 use App\Models\ReviewInstruction;
+use App\Models\ReviewInstructionVersion;
 use App\Models\ReviewRun;
 use App\Models\Tenant;
 use App\Models\User;
@@ -152,7 +153,7 @@ it('says on Review defaults what each complexity runs at', function () {
     expect(ReviewSettings::defaults($tenant)->strategy)->toBe('apply');
 });
 
-it('shows what a commit was classified as with its run', function () {
+it('shows with its run what the commit was classified as, what its instructions held and the ticket it read', function () {
     $repository = Repository::factory()->create(['slug' => 'shop']);
     $user = User::factory()->create();
     $user->tenants()->attach($repository->tenant, ['role' => 'admin']);
@@ -164,7 +165,13 @@ it('shows what a commit was classified as with its run', function () {
     $run = ReviewRun::query()->create([
         'tenant_id' => $repository->tenant_id, 'repository_id' => $repository->id, 'workspace' => 'acme', 'slug' => 'shop',
         'branch' => 'feature/export', 'commit' => str_repeat('a', 40), 'pull_request_id' => 570, 'status' => ReviewRun::STATUS_FINISHED, 'started_at' => now(),
+        'instructions_version' => 'abc123',
+        'context' => ['ticket' => ['reference' => 'DEV-12', 'source' => 'Asana', 'url' => null, 'markdown' => "# Export orders\n\nAs CSV, **by month**.", 'error' => null]],
     ]);
+    ReviewInstructionVersion::query()->create(['version' => 'abc123', 'files' => [
+        ['key' => 'review', 'title' => 'Review', 'stack' => null, 'file' => 'REVIEW.md', 'body' => ''],
+        ['key' => 'laravel', 'title' => 'Laravel', 'stack' => 'laravel', 'file' => 'laravel.md', 'body' => ''],
+    ]]);
     ReviewClassification::query()->create([
         'tenant_id' => $repository->tenant_id, 'repository_id' => $repository->id, 'pull_request_id' => 570, 'commit' => str_repeat('a', 40),
         'complexity' => 'complex', 'kind' => 'feature', 'flags' => ['security'], 'reason' => 'It changes the login check.', 'files_count' => 3, 'lines_added' => 40, 'lines_removed' => 2,
@@ -172,7 +179,11 @@ it('shows what a commit was classified as with its run', function () {
 
     livewire(ViewReviewRun::class, ['record' => $run->uuid])
         ->assertSee('Complex · feature · security')
-        ->assertSee('It changes the login check.');
+        ->assertSee('It changes the login check.')
+        // What the instructions held, not their hash.
+        ->assertSee('Review, Laravel · used since')
+        ->assertSee('Ticket DEV-12')
+        ->assertSee('<strong>by month</strong>', false);
 });
 
 it('gives Pi the picked effort too, which has no effort setting of its own', function () {

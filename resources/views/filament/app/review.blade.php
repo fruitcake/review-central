@@ -19,6 +19,11 @@
         return $sum;
     }, ['input' => 0, 'output' => 0, 'cache_read' => 0, 'cache_creation' => 0]);
     $tokens = array_sum($usage);
+    // What the instructions held, rather than their version's hash: the titles of their files.
+    $instructions = ($version = $run->instructionsVersion) === null ? null : [
+        'files' => (fn (array $titles): string => count($titles) <= 3 ? implode(', ', $titles) : implode(', ', array_slice($titles, 0, 3)).' and '.(count($titles) - 3).' more')(array_values(array_filter(array_map(fn (array $file): string => (string) ($file['title'] ?: $file['file']), $version->files ?? [])))),
+        'since' => $version->created_at === null ? null : \App\Filament\LocalTime::of($version->created_at)->format('j M Y'),
+    ];
     $statuses = ['new' => 'New', 'open' => 'Open', 'fixed' => 'Fixed', 'acknowledged' => 'Acknowledged', 'false_positive' => 'Not a problem', 'unreported' => 'No longer reported'];
     // Only a web address becomes a link: a ticket's address comes from whatever its tracker answered.
     $link = fn (?string $url, string $label) => $url === null || preg_match('~^https?://~i', $url) !== 1
@@ -51,6 +56,18 @@
                 @endif
             </span>
         </div>
+
+        @if (filled($ticket['markdown'] ?? null))
+            {{-- Closed: what the review read of the ticket, for whoever wants to judge the change by it. --}}
+            <details class="rc-card rc-pad rc-collapse">
+                <summary>
+                    <span>Ticket {{ $ticket['reference'] }}</span>
+                    <span class="rc-muted">as the review read it{{ filled($ticket['source'] ?? null) ? ', from '.$ticket['source'] : '' }}</span>
+                </summary>
+                {{-- Someone wrote it in the tracker: its markdown, without HTML of its own or links that are not web addresses. --}}
+                <div class="rc-prose rc-ticket-text">{!! Str::markdown(Str::limit($ticket['markdown'], 6000), ['html_input' => 'strip', 'allow_unsafe_links' => false]) !!}</div>
+            </details>
+        @endif
 
         @if ($siblings->count() > 1)
             <section class="rc-card rc-pad" aria-labelledby="rc-runs">
@@ -96,6 +113,14 @@
 
                 <section class="rc-card rc-pad" aria-labelledby="rc-summary">
                     <h2 id="rc-summary">Summary</h2>
+                    @if ($classification !== null)
+                        {{-- How the change was judged before the review, which decided how it was reviewed. --}}
+                        <p class="rc-classified">
+                            <span class="rc-chip rc-chip-neutral">{{ $classification->text() }}</span>
+                            @if ($classification->reason !== null) {{ $classification->reason }} @endif
+                            <span class="rc-muted">{{ $classification->files_count }} {{ $classification->files_count === 1 ? 'file' : 'files' }}, +{{ $classification->lines_added }} −{{ $classification->lines_removed }}{{ $classification->cost === null ? '' : ' · classified for about '.Currency::show($classification->cost, null, 4) }}</span>
+                        </p>
+                    @endif
                     @if (filled($run->summary))
                         <div class="rc-prose">{!! Str::markdown($run->summary, ['html_input' => 'strip', 'allow_unsafe_links' => false]) !!}</div>
                     @else
@@ -283,10 +308,10 @@
                         @if ($run->modules !== null)
                             <dt>Parts</dt><dd>{{ ucfirst(ReviewSettings::describeModules($run->modules)) }}</dd>
                         @endif
-                        @if ($classification !== null)
-                            <dt>Classified</dt><dd>{{ $classification->text() }}<span class="rc-muted">{{ $classification->reason === null ? '' : ": {$classification->reason}" }} · {{ $classification->files_count }} files, +{{ $classification->lines_added }} −{{ $classification->lines_removed }}{{ $classification->cost === null ? '' : ' · about '.Currency::show($classification->cost, null, 4) }}</span></dd>
+                        @if ($instructions !== null)
+                            {{-- Which instructions, by what they hold and since when they were read so; the version itself on hover. --}}
+                            <dt>Instructions</dt><dd title="Version {{ $run->instructions_version }}">{{ $instructions['files'] }}{{ $instructions['since'] === null ? '' : " · used since {$instructions['since']}" }}</dd>
                         @endif
-                        <dt>Instructions</dt><dd class="rc-mono">{{ $run->instructions_version ?? '—' }}</dd>
                         <dt>Commit</dt><dd class="rc-mono">{{ substr($run->commit, 0, 12) }}</dd>
                         @if (($run->metrics['cpu_average'] ?? null) !== null)
                             <dt>Processor</dt><dd>{{ $run->metrics['cpu_average'] }} on average, {{ $run->metrics['cpu_peak'] }} at most{{ ($run->metrics['processors'] ?? null) === null ? '' : ', of '.$run->metrics['processors'] }}{{ ($run->metrics['starved_percent'] ?? 0) > 0 ? " · short of it {$run->metrics['starved_percent']}% of the time" : '' }}</dd>

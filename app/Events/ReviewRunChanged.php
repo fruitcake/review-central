@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Events;
 
+use App\Models\ReviewRun;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Contracts\Broadcasting\ShouldRescue;
@@ -40,10 +41,11 @@ class ReviewRunChanged implements ShouldBroadcastNow, ShouldRescue
     }
 
     /**
-     * @return array<string, string>
+     * @return array{run: string, running: bool}
      */
     public function broadcastWith(): array
     {
-        return ['run' => $this->run];
+        // Whether the tenant has a review running still, for the logo in the menu.
+        return ['run' => $this->run, 'running' => ReviewRun::runningFor($this->tenantId)];
     }
 }
