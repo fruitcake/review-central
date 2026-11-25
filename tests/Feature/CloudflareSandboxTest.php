@@ -42,7 +42,8 @@ afterEach(function () {
  */
 function sandboxEvents(array $events): string
 {
-    return collect($events)->map(fn (array $event): string => "event: {$event[0]}\ndata: ".json_encode($event[1])."\n\n")->implode(": keep-alive\n\n");
+    // Numbered, as the Worker numbers them for a connection that is made again.
+    return collect($events)->values()->map(fn (array $event, int $index): string => 'id: '.($index + 1)."\nevent: {$event[0]}\ndata: ".json_encode($event[1])."\n\n")->implode(": keep-alive\n\n");
 }
 
 it('runs a step in a Cloudflare sandbox: the checkout up through the bucket, the output streamed, the reviewer\'s files back', function () {
