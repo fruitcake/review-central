@@ -210,6 +210,19 @@ i=0
 while [ ! -s "$dir/pid" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
 cat "$dir/pid"`;
 
+/**
+ * Stops every process of a step's session, whose id is the step's process id: GNU
+ * timeout puts the reviewer in a process group of its own, so the step's group is not
+ * all of it. From /proc, so it needs no pkill; a process's name can hold spaces and
+ * parentheses, so its fields are read after the last ") ".
+ */
+const STOP_SESSION = `for p in /proc/[0-9]*; do
+  stat=$(cat "$p/stat" 2> /dev/null) || continue
+  set -- \${stat##*) }
+  [ "$4" = "$0" ] && kill -TERM "\${p#/proc/}" 2> /dev/null
+done
+exit 0`;
+
 const UNPRIVILEGED = ["setpriv", "--reuid=1000", "--regid=1000", "--clear-groups", "--inh-caps=-all", "--ambient-caps=-all", "--bounding-set=-all", "--no-new-privs"];
 
 /** Run through UNPRIVILEGED: succeeds only with no capabilities left, none to get back, and a root-owned file it cannot write. */
@@ -810,7 +823,7 @@ export class ReviewSandbox extends DurableObject<Env> {
 
   /** What the script runs now, stopped when the run is let go. */
   private current: ExecProcess | null = null;
-  /** The process group of a step started with DETACH, which killing its follower does not stop. */
+  /** The session of a step started with DETACH (its process id), which killing its follower does not stop. */
   private group: string | null = null;
 
   private readonly encoder = new TextEncoder();
@@ -866,7 +879,7 @@ export class ReviewSandbox extends DurableObject<Env> {
     this.current?.kill();
 
     if (this.group !== null) {
-      void this.ctx.container?.exec(["kill", "-TERM", "--", `-${this.group}`], { stdout: "ignore", stderr: "ignore" }).catch(() => undefined);
+      void this.ctx.container?.exec(["sh", "-c", STOP_SESSION, this.group], { stdout: "ignore", stderr: "ignore" }).catch(() => undefined);
     }
   }
 
@@ -1187,7 +1200,7 @@ export class ReviewSandbox extends DurableObject<Env> {
       try {
         for (;;) {
           if (!wanted()) {
-            await container.exec(["kill", "-TERM", "--", `-${pid}`], { stdout: "ignore", stderr: "ignore" }).catch(() => undefined);
+            await container.exec(["sh", "-c", STOP_SESSION, pid], { stdout: "ignore", stderr: "ignore" }).catch(() => undefined);
 
             return 143;
           }
@@ -1223,7 +1236,10 @@ export class ReviewSandbox extends DurableObject<Env> {
             }
 
             await send("note", `The connection to the step was lost (${error instanceof Error ? error.message : String(error)}); it goes on in the sandbox, and its output is followed again from byte ${offset}.`);
-            await new Promise((resolve) => setTimeout(resolve, REATTACH_WAIT_MS * lost));
+            // In short steps, so a run that is stopped meanwhile does not wait out the rest.
+            for (let waited = 0; waited < REATTACH_WAIT_MS * lost && wanted(); waited += 500) {
+              await new Promise((resolve) => setTimeout(resolve, 500));
+            }
           } finally {
             this.current = null;
           }
