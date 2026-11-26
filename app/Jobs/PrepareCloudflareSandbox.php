@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
+use App\Filament\Admin\Pages\Setup;
 use App\Runners\Container\CloudflareSandbox;
 use App\Services\PlatformSettings;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -35,6 +36,7 @@ class PrepareCloudflareSandbox implements ShouldQueue
     {
         $setup = CloudflareSandbox::setupScript($versions);
         Cache::put(self::PREPARING, ['at' => now()->getTimestamp(), 'version' => $setup === null ? null : CloudflareSandbox::setupVersion($setup)], now()->addHour());
+        Setup::forget();
 
         self::dispatch($versions)
             ->onConnection(config('review.container.connection') ?: null)
@@ -54,6 +56,10 @@ class PrepareCloudflareSandbox implements ShouldQueue
     public function handle(CloudflareSandbox $sandbox, PlatformSettings $settings): void
     {
         $setup = CloudflareSandbox::setupScript($this->versions);
+        // Picked up: the page says it is with the Worker now, not waiting on the queue.
+        $asked = Cache::get(self::PREPARING);
+        Cache::put(self::PREPARING, (is_array($asked) ? $asked : []) + ['at' => now()->getTimestamp(), 'version' => $setup === null ? null : CloudflareSandbox::setupVersion($setup), 'started' => now()->getTimestamp()], now()->addHour());
+        Setup::forget();
 
         try {
             $result = $sandbox->prepare($this->versions);
@@ -72,5 +78,6 @@ class PrepareCloudflareSandbox implements ShouldQueue
             'at' => now()->getTimestamp(),
             'version' => $setup === null ? null : CloudflareSandbox::setupVersion($setup),
         ], now()->addWeek());
+        Setup::forget();
     }
 }

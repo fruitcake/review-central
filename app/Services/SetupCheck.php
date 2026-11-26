@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Connections\Integrations;
+use App\Filament\LocalTime;
 use App\Jobs\CheckWorker;
 use App\Jobs\PrepareCloudflareSandbox;
 use App\Models\CapacitySample;
@@ -51,6 +52,9 @@ class SetupCheck
 
     /** Seconds a worker gets to pick the check up before it is taken to be absent. */
     protected const PATIENCE = 60;
+
+    /** Seconds the Worker may take over the sandbox's tools before the page says where to look. */
+    protected const PREPARE_SLOW = 600;
 
     /**
      * Asks the worker to look, by a job on the reviews' queue.
@@ -593,14 +597,48 @@ class SetupCheck
         $tried = Cache::get(PrepareCloudflareSandbox::RESULT);
         $failed = is_array($tried) && ($tried['version'] ?? null) === $version && ($tried['ok'] ?? true) === false;
         $going = Cache::get(PrepareCloudflareSandbox::PREPARING);
-        $going = is_array($going) && ($going['version'] ?? null) === $version ? (int) ($going['at'] ?? 0) : null;
+        $going = is_array($going) && ($going['version'] ?? null) === $version ? $going : null;
 
         return [...$checks, match (true) {
             $response->json('snapshot') === true => ['state' => self::OK, 'title' => $title, 'detail' => 'Reviews start from a snapshot with PHP, Composer and the reviewers in it.', 'fix' => null],
-            $going !== null => ['state' => self::NOTE, 'title' => $title, 'detail' => 'Being prepared, since '.CarbonImmutable::createFromTimestamp($going)->diffForHumans().'. The first time takes about four minutes; refresh this page to see it done.', 'fix' => 'To follow it: `npx wrangler tail` in cloudflare/worker.'],
+            $going !== null => $this->preparing($title, $going),
             $failed => ['state' => self::WRONG, 'title' => $title, 'detail' => 'Preparing them failed: '.mb_substr((string) ($tried['error'] ?? ''), 0, 400), 'fix' => 'Try "Prepare the sandbox" again; the Worker keeps the setup\'s output in the bucket under `review/snapshots/`, and `npx wrangler tail` shows its own.'],
             default => ['state' => self::NOTE, 'title' => $title, 'detail' => 'Not yet, for this setup script. The first review prepares them, which takes a few minutes, and reviews that start meanwhile wait for it.', 'fix' => 'To have that done before anyone waits: "Prepare the sandbox", above.'],
         }];
+    }
+
+    /**
+     * The tools while they are being prepared: waiting on the queue, or with the
+     * Worker, and what to look at once that takes longer than it should.
+     *
+     * @param  array{at?: int, started?: int}  $going
+     * @return array{state: string, title: string, detail: string, fix: string|null}
+     */
+    private function preparing(string $title, array $going): array
+    {
+        $clock = fn (int $timestamp): string => LocalTime::of(CarbonImmutable::createFromTimestamp($timestamp))->format('H:i');
+
+        if (! isset($going['started'])) {
+            $asked = (int) ($going['at'] ?? 0);
+            $stuck = now()->getTimestamp() - $asked > self::PATIENCE;
+
+            return [
+                'state' => $stuck ? self::WRONG : self::NOTE,
+                'title' => $title,
+                'detail' => 'Asked for at '.$clock($asked).', on the queue "'.config('review.container.queue').'"'.($stuck ? '; nothing has picked it up.' : '. This page shows when it is done.'),
+                'fix' => $stuck ? 'A worker for that queue picks it up: `php artisan horizon`, or `php artisan queue:work --queue='.config('review.container.queue').'`.' : null,
+            ];
+        }
+
+        $started = (int) $going['started'];
+        $slow = now()->getTimestamp() - $started > self::PREPARE_SLOW;
+
+        return [
+            'state' => self::NOTE,
+            'title' => $title,
+            'detail' => 'Being prepared since '.$clock($started).'. A first time takes about four minutes'.($slow ? ', so this is taking longer.' : '; this page shows when it is done.'),
+            'fix' => $slow ? '`npx wrangler tail` in cloudflare/worker shows what the Worker is doing.' : null,
+        ];
     }
 
     /**

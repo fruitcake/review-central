@@ -278,8 +278,33 @@ it('tells a Worker that was not deployed again after a change, and a prepare tha
 
     Queue::assertPushedOn('reviews', PrepareCloudflareSandbox::class);
 
-    expect(($this->find)('the Worker is up to date'))->toMatchArray(['state' => SetupCheck::OK])
-        ->and(($this->find)('the tools are prepared')['detail'])->toContain('Being prepared, since');
+    $groups = collect(app(SetupCheck::class)->groups())->flatMap(fn (array $group): array => $group['checks'])->keyBy('title');
+
+    expect($groups['Cloudflare sandboxes: the Worker is up to date'])->toMatchArray(['state' => SetupCheck::OK])
+        ->and($groups['Cloudflare sandboxes: the tools are prepared'])->toMatchArray(['state' => SetupCheck::NOTE, 'fix' => null])
+        ->and($groups['Cloudflare sandboxes: the tools are prepared']['detail'])->toContain('on the queue "reviews"');
+});
+
+it('says a prepare nothing picked up is wrong, and where to look at one that takes long', function () {
+    config(['review.cloudflare.url' => 'https://sandbox.example.com', 'review.cloudflare.token' => 'worker-token', 'review.cloudflare.setup' => true]);
+    Queue::fake();
+    Http::fake(['sandbox.example.com/health*' => Http::response(['ok' => true, 'version' => CloudflareSandbox::workerVersion(), 'bucket' => true, 'snapshot' => false])]);
+    PrepareCloudflareSandbox::ask();
+    $asked = Cache::get(PrepareCloudflareSandbox::PREPARING);
+
+    $this->travel(2)->minutes();
+
+    expect(($this->find)('the tools are prepared'))->toMatchArray(['state' => SetupCheck::WRONG])
+        ->and(($this->find)('the tools are prepared')['fix'])->toContain('queue:work --queue=reviews');
+
+    Cache::put(PrepareCloudflareSandbox::PREPARING, $asked + ['started' => now()->getTimestamp()], now()->addHour());
+
+    expect(($this->find)('the tools are prepared'))->toMatchArray(['state' => SetupCheck::NOTE, 'fix' => null])
+        ->and(($this->find)('the tools are prepared')['detail'])->toContain('Being prepared since');
+
+    $this->travel(11)->minutes();
+
+    expect(($this->find)('the tools are prepared')['fix'])->toContain('npx wrangler tail');
 });
 
 it('says when this release has newer review instructions than are kept here', function () {
