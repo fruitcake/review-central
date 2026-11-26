@@ -409,8 +409,9 @@ foreach ($checks as $key => $check) {
         }
 
         // In a controller or a component the class's other public actions are entry points
-        // themselves: one that writes, guards nothing and does not call the check skips it.
+        // themselves: one that writes, guards nothing and reaches the check by no path skips it.
         if (preg_match(ENTRY, $check['file']) === 1 && $isPublic($check['file'], $function['name'])
+            && ! isset($entries["{$check['file']}::{$function['name']}"])
             && preg_match(GUARD, $body) !== 1 && preg_match('/(->|::)'.preg_quote($check['name'], '/').'\s*\(/', $body) !== 1) {
             $without["{$check['file']}::{$function['name']}"] = ['via' => [$function['name']], 'distance' => 0];
         }

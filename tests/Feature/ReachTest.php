@@ -315,3 +315,41 @@ it('takes a policy\'s methods, and a method a changed line guards, as checks', f
         ->toContain('- `app/Http/Controllers/LessonController.php::update`, which writes itself, with no guard of its own')
         ->not->toContain('LessonController.php::destroy`, which');
 });
+
+it('does not list an action that reaches the check through a helper as one without it', function () {
+    ($this->put)('app/Http/Controllers/BookingFlowController.php', <<<'PHP'
+        <?php
+
+        class BookingFlowController
+        {
+            public function store(Lesson $lesson)
+            {
+                $this->enforceAccess($lesson);
+                $lesson->participants()->create(['member_id' => auth()->id()]);
+            }
+
+            public function update(Lesson $lesson)
+            {
+                $lesson->participants()->update(['paid' => true]);
+            }
+
+            protected function enforceAccess(Lesson $lesson)
+            {
+                abort_unless($this->canBook($lesson), 403);
+            }
+
+            public function canBook(Lesson $lesson)
+            {
+                return true;
+            }
+        }
+        PHP);
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Booking flow');
+    ($this->put)('app/Http/Controllers/BookingFlowController.php', str_replace("        return true;\n", "        return \$lesson->open;\n", File::get("{$this->dir}/app/Http/Controllers/BookingFlowController.php")));
+    ($this->git)('commit', '-qam', 'Only open lessons');
+
+    expect(($this->reach)())
+        ->toContain('- `app/Http/Controllers/BookingFlowController.php::update`, which writes itself, with no guard of its own')
+        ->not->toContain('BookingFlowController.php::store`, which');
+});
