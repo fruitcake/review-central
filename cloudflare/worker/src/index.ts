@@ -40,7 +40,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
  * after one is told apart. tests/Feature/CloudflareWorkerVersionTest.php fails
  * on a change that leaves it as it was.
  */
-const WORKER_VERSION = "2026-11-26.1";
+const WORKER_VERSION = "2026-11-26.2";
 
 interface Env {
   REVIEW_SANDBOX: DurableObjectNamespace<ReviewSandbox>;
@@ -209,6 +209,26 @@ setsid sh -c 'd=$1; shift; echo $$ > "$d/pid"; "$@" > "$d/log" 2>&1; echo $? > "
 i=0
 while [ ! -s "$dir/pid" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
 cat "$dir/pid"`;
+
+/**
+ * Prints a step's output from a byte on (DETACH), until a second after its exit code
+ * is there. Not with tail --pid: the step's process is left to PID 1, which is sleep
+ * here and never reaps it, and a zombie counts as running. A step killed before it
+ * wrote its exit code ends it too, once its process is gone or a zombie.
+ */
+const FOLLOW = `dir=$1; pid=$2
+tail -c "+$3" -F "$dir/log" 2> /dev/null &
+follower=$!
+while [ ! -e "$dir/code" ]; do
+  stat=$(cat "/proc/$pid/stat" 2> /dev/null) || break
+  set -- \${stat##*) }
+  [ "$1" = Z ] && break
+  sleep 1
+done
+sleep 1
+kill "$follower" 2> /dev/null
+wait "$follower" 2> /dev/null
+exit 0`;
 
 /**
  * Stops every process of a step's session, whose id is the step's process id: GNU
@@ -1207,7 +1227,7 @@ export class ReviewSandbox extends DurableObject<Env> {
 
           try {
             // From the next byte; ends a second after the step does.
-            const tail = await container.exec(["tail", "-c", `+${offset + 1}`, `--pid=${pid}`, "-F", `${dir}/log`], { stdout: "pipe", stderr: "ignore" });
+            const tail = await container.exec(["sh", "-c", FOLLOW, "follow", dir, pid, String(offset + 1)], { stdout: "pipe", stderr: "ignore" });
             this.current = tail;
 
             if (tail.stdout !== null) {
