@@ -311,3 +311,36 @@ it('runs a trial with its own parts of the review on a reviewer\'s runner, and r
     expect(fn () => app(ReviewTrial::class)->start($this->tenant, 'https://bitbucket.org/acme/shop/pull-requests/12', ['runner' => 'diff', 'modules' => ['ocr' => false]]))
         ->toThrow(ReviewTrialRefused::class, 'The diff alone has no OpenCodeReview');
 });
+
+it('keeps a pull request\'s trials out of its runs until asked for, and shows them on a trial', function () {
+    $user = User::factory()->create();
+    $user->tenants()->attach($this->tenant);
+    $this->actingAs($user);
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+    Filament::setTenant($this->tenant);
+    Filament::bootCurrentPanel();
+    fakePullRequest();
+    $repository = Repository::factory()->create(['tenant_id' => $this->tenant->id, 'connection_id' => $this->connection->id, 'slug' => 'shop']);
+    $run = fn (int $minutesAgo, bool $trial): ReviewRun => ReviewRun::query()->create([
+        'tenant_id' => $this->tenant->id, 'repository_id' => $repository->id, 'workspace' => 'acme', 'slug' => 'shop', 'branch' => 'feature/export',
+        'commit' => str_repeat('a', 40), 'pull_request_id' => 12, 'status' => $trial ? ReviewRun::STATUS_UNPUBLISHED : ReviewRun::STATUS_FINISHED,
+        'started_at' => now()->subMinutes($minutesAgo), 'runner' => 'docker', 'agent' => 'claude-code', 'custom' => $trial,
+    ]);
+    $first = $run(30, false);
+    $trial = $run(20, true);
+    $run(10, true);
+    $last = $run(5, false);
+
+    // Numbered among the reviews alone, at the top as in the runs, and the trials there but hidden.
+    livewire(ViewReviewRun::class, ['record' => $first->uuid])
+        ->assertSee('Run 1 of 2')
+        ->assertSeeInOrder(['Run 1', 'Trial', 'Trial', 'Run 2'])
+        ->assertSee('Show trials (2)')
+        ->assertSeeHtml('x-data="{ trials: false }"');
+
+    livewire(ViewReviewRun::class, ['record' => $last->uuid])->assertSee('Run 2 of 2');
+
+    livewire(ViewReviewRun::class, ['record' => $trial->uuid])
+        ->assertDontSee(' of 2')
+        ->assertSeeHtml('x-data="{ trials: true }"');
+});

@@ -8,12 +8,12 @@
             x-init="if (! $el.open) { try { $el.open = localStorage.getItem('rc-log-open') === '1' } catch (e) {} }"
             x-on:toggle="if ($el.open) { follow = true; toEnd() } if (chosen) { chosen = false; try { localStorage.setItem('rc-log-open', $el.open ? '1' : '0') } catch (e) {} }"
         >
-            <summary x-on:click="chosen = true"><h2 id="rc-log" style="display: inline">Log</h2> <span class="rc-muted">{{ $live ? 'follows the review as it runs' : 'what the review printed' }}{{ $log['truncated'] ? ' · the end of it' : '' }}</span></summary>
+            <summary x-on:click="chosen = true"><h2 id="rc-log" style="display: inline">{{ __('Log') }}</h2> <span class="rc-muted">{{ $live ? __('follows the review as it runs') : __('what the review printed') }}{{ $log['truncated'] ? ' · '.__('the end of it') : '' }}</span></summary>
             {{-- Stays at the end while new lines come in, unless someone scrolled up to read. --}}
-            <pre class="rc-log" tabindex="0" aria-label="Log of this review" x-ref="log"
+            <pre class="rc-log" tabindex="0" aria-label="{{ __('Log of this review') }}" x-ref="log"
                 x-init="$el.scrollTop = $el.scrollHeight; new MutationObserver(() => { if (follow) $el.scrollTop = $el.scrollHeight }).observe($el, { childList: true, characterData: true, subtree: true })"
                 x-on:scroll="follow = $el.scrollTop + $el.clientHeight >= $el.scrollHeight - 24"
-            >{{ $log['text'] === '' ? 'Nothing printed yet.' : $log['text'] }}</pre>
+            >{{ $log['text'] === '' ? __('Nothing printed yet.') : $log['text'] }}</pre>
         </details>
     </section>
 @endif

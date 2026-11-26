@@ -48,7 +48,7 @@ class FindingVerdict extends Model
      */
     public function explanation(): string
     {
-        return trim(($this->user->name ?? 'Someone').': '.$this->verdict->text().($this->reason === null ? '' : ' · '.$this->reason->text()).(filled($this->note) ? " — {$this->note}" : ''));
+        return trim(($this->user->name ?? __('Someone')).': '.$this->verdict->text().($this->reason === null ? '' : ' · '.$this->reason->text()).(filled($this->note) ? " — {$this->note}" : ''));
     }
 
     /**

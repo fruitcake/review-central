@@ -35,6 +35,7 @@ class ReviewInstructionSchema
                 ->columnSpanFull()
                 ->schema([
                     TextInput::make('key')
+                        ->label(__('Key'))
                         ->required()
                         ->maxLength(64)
                         ->regex(ReviewInstructions::KEY_PATTERN)
@@ -42,32 +43,34 @@ class ReviewInstructionSchema
                         // The platform's own copy keeps its name, so the rule is for a file that is not one.
                         ->rule(Rule::notIn(array_keys(ReviewInstructions::BASE)), fn (?ReviewInstruction $record): bool => $record === null || ! array_key_exists($record->key, ReviewInstructions::BASE))
                         ->disabled(fn (?ReviewInstruction $record): bool => $record !== null && array_key_exists($record->key, ReviewInstructions::BASE))
-                        ->validationMessages(['regex' => 'Lowercase letters, digits, dots, dashes and underscores, starting with a letter or digit: the review refuses any other file name.'])
+                        ->validationMessages(['regex' => __('Lowercase letters, digits, dots, dashes and underscores, starting with a letter or digit: the review refuses any other file name.')])
                         ->unique(ignoreRecord: true, modifyRuleUsing: fn (Unique $rule): Unique => $tenantId === null ? $rule->whereNull('tenant_id') : $rule->where('tenant_id', $tenantId))
-                        ->helperText('The review reads it as .review-instructions/<key>.md. `method` is the guidance for a pull request\'s review, and `stack-<name>` a stack\'s guide: keep those keys.'),
-                    TextInput::make('title')->required()->maxLength(255),
+                        ->helperText(__('The review reads it as .review-instructions/<key>.md. `method` is the guidance for a pull request\'s review, and `stack-<name>` a stack\'s guide: keep those keys.')),
+                    TextInput::make('title')->label(__('Title'))->required()->maxLength(255),
                     TextInput::make('stack')
+                        ->label(__('Stack'))
                         ->maxLength(40)
                         ->regex(ReviewStack::NAME_PATTERN)
                         ->datalist(ReviewStack::STACKS)
-                        ->placeholder('Every repository')
-                        ->validationMessages(['regex' => 'Lowercase letters, digits and dashes, such as symfony or next-js.'])
-                        ->helperText('A stack guide goes only to repositories set to that stack. One of the stacks listed, or a name of your own for a stack there is no guide for yet: give it the key stack-<name>, and it can be chosen on a repository.'),
+                        ->placeholder(__('Every repository'))
+                        ->validationMessages(['regex' => __('Lowercase letters, digits and dashes, such as symfony or next-js.')])
+                        ->helperText(__('A stack guide goes only to repositories set to that stack. One of the stacks listed, or a name of your own for a stack there is no guide for yet: give it the key stack-<name>, and it can be chosen on a repository.')),
                     TextInput::make('position')
+                        ->label(__('Position'))
                         ->integer()
                         ->default(20)
                         ->required()
-                        ->helperText('The review reads them in this order, lowest first.'),
+                        ->helperText(__('The review reads them in this order, lowest first.')),
                 ]),
-            Section::make('This is how a review works, not what it looks for')
-                ->description('It replaces what ships with the review for every tenant, and the review\'s scripts read the report it describes. Keep the report\'s fields and the names of the sections; a report the scripts cannot read is a review that fails. Deleting this copy puts the shipped text back.')
+            Section::make(__('This is how a review works, not what it looks for'))
+                ->description(__('It replaces what ships with the review for every tenant, and the review\'s scripts read the report it describes. Keep the report\'s fields and the names of the sections; a report the scripts cannot read is a review that fails. Deleting this copy puts the shipped text back.'))
                 ->icon(Heroicon::OutlinedExclamationTriangle)
                 ->iconColor('warning')
                 ->columnSpanFull()
                 ->visible(fn (?ReviewInstruction $record): bool => $record !== null && $record->tenant_id === null && array_key_exists($record->key, ReviewInstructions::BASE))
                 ->schema([]),
-            Section::make('Text')
-                ->description('What the review reads, from its next run on. How a review works and what its report looks like is not in here: that is fixed, with the review itself.')
+            Section::make(__('Text'))
+                ->description(__('What the review reads, from its next run on. How a review works and what its report looks like is not in here: that is fixed, with the review itself.'))
                 ->columnSpanFull()
                 ->schema([
                     Textarea::make('body')
@@ -76,8 +79,8 @@ class ReviewInstructionSchema
                         ->rows(30)
                         ->extraInputAttributes(['class' => 'font-mono text-sm']),
                 ]),
-            Section::make('What this release ships')
-                ->description('The text as it comes with the review, to compare with or to copy from. For a default, "Import the bundled instructions" puts it back.')
+            Section::make(__('What this release ships'))
+                ->description(__('The text as it comes with the review, to compare with or to copy from. For a default, "Import the bundled instructions" puts it back.'))
                 ->columnSpanFull()
                 ->collapsible()
                 ->collapsed()
@@ -99,11 +102,12 @@ class ReviewInstructionSchema
             ->columns([
                 TextColumn::make('position')->label('#')->sortable(),
                 TextColumn::make('key')
+                    ->label(__('Key'))
                     ->fontFamily('mono')
                     ->description(fn (ReviewInstruction $record): string => $record->title)
                     ->searchable(['key', 'title']),
-                TextColumn::make('stack')->badge()->color('gray')->placeholder('Every repository'),
-                TextColumn::make('updated_at')->since()->sortable(),
+                TextColumn::make('stack')->label(__('Stack'))->badge()->color('gray')->placeholder(__('Every repository')),
+                TextColumn::make('updated_at')->label(__('Updated'))->since()->sortable(),
             ])
             ->recordActions([
                 EditAction::make(),

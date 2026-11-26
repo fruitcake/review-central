@@ -25,25 +25,25 @@ class GitDriver implements ExplainsSetup, SourceControlDriver
 {
     public function label(): string
     {
-        return 'Git over HTTPS (clone only)';
+        return __('Git over HTTPS (clone only)');
     }
 
     public function credentialFields(): array
     {
         return [
-            Secret::make('password')->label('Password or token')
+            Secret::make('password')->label(__('Password or token'))
                 ->required(false)
-                ->helperText('What the server takes to clone over HTTPS. Leave it empty for repositories anyone can clone.'),
+                ->helperText(__('What the server takes to clone over HTTPS. Leave it empty for repositories anyone can clone.')),
         ];
     }
 
     public function settingFields(): array
     {
         return [
-            TextInput::make('base_url')->label('Address')->url()->required()->rule(new PublicUrl)->placeholder('https://git.example.com/acme')
-                ->helperText('What the repositories are cloned from, without the repository: <address>/<repository>.git.'),
-            TextInput::make('username')->label('User name')->maxLength(120)
-                ->helperText('With a password or token, when the server wants a name with it.'),
+            TextInput::make('base_url')->label(__('Address'))->url()->required()->rule(new PublicUrl)->placeholder('https://git.example.com/acme')
+                ->helperText(__('What the repositories are cloned from, without the repository: <address>/<repository>.git.')),
+            TextInput::make('username')->label(__('User name'))->maxLength(120)
+                ->helperText(__('With a password or token, when the server wants a name with it.')),
         ];
     }
 
@@ -54,20 +54,20 @@ class GitDriver implements ExplainsSetup, SourceControlDriver
     public function setupGuide(): SetupGuide
     {
         return new SetupGuide(
-            title: 'A token to clone over HTTPS',
+            title: __('A token to clone over HTTPS'),
             url: 'https://gitlab.com/-/user_settings/personal_access_tokens',
-            linkLabel: 'Personal access tokens on GitLab.com, for example',
+            linkLabel: __('Personal access tokens on GitLab.com, for example'),
             steps: [
-                'Make a token on the git server that may read the repositories: on GitLab a project, group or personal access token; on Gitea or Forgejo under **Settings → Applications**; on another server, whatever it takes for `git clone` over HTTPS.',
-                'Give it read access to the code only: nothing is pushed or posted.',
-                'Paste it here. Under Settings, fill in the address the repositories are cloned from, and the user name the server wants with the token (GitLab takes any name, such as `oauth2`).',
+                __('Make a token on the git server that may read the repositories: on GitLab a project, group or personal access token; on Gitea or Forgejo under **Settings → Applications**; on another server, whatever it takes for `git clone` over HTTPS.'),
+                __('Give it read access to the code only: nothing is pushed or posted.'),
+                __('Paste it here. Under Settings, fill in the address the repositories are cloned from, and the user name the server wants with the token (GitLab takes any name, such as `oauth2`).'),
             ],
             permissions: [
-                'read_repository (GitLab)' => 'clones the repository.',
-                'read:repository (Gitea, Forgejo)' => 'the same.',
+                'read_repository (GitLab)' => __('clones the repository.'),
+                'read:repository (Gitea, Forgejo)' => __('the same.'),
             ],
             notes: [
-                'Leave it empty for repositories anyone can clone.',
+                __('Leave it empty for repositories anyone can clone.'),
             ],
         );
     }
@@ -103,7 +103,7 @@ class GitDriver implements ExplainsSetup, SourceControlDriver
 
     public function webhookHelp(): string
     {
-        return 'A git server that is only cloned from has no webhook: nothing there starts a review.';
+        return __('A git server that is only cloned from has no webhook: nothing there starts a review.');
     }
 
     public function webhookEvent(Connection $connection, Request $request): ?WebhookEvent

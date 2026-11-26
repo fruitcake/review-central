@@ -36,62 +36,70 @@ class ViewReviewComparison extends ViewRecord
 
     public function getTitle(): string|Htmlable
     {
-        return "Comparison of {$this->record->repository->slug} #{$this->record->pull_request_id}";
+        return __('Comparison of :repository #:number', ['repository' => $this->record->repository->slug, 'number' => $this->record->pull_request_id]);
     }
 
     protected function getHeaderActions(): array
     {
         return [
             Action::make('add')
-                ->label('Add setups')
+                ->label(__('Add setups'))
                 ->icon(Heroicon::OutlinedPlus)
                 ->color('gray')
                 ->visible(fn (): bool => $this->record->reviewRun !== null && count($this->record->rows) < ReviewComparison::MAX_ROWS)
-                ->modalHeading('Add setups to this comparison')
-                ->modalDescription(fn (): string => 'Each row reviews the pull request '.($this->record->commit() === null ? 'as it is now' : 'at commit '.substr($this->record->commit(), 0, 12).', as the comparison does').', as a trial, and shows as a column of its own. Up to '.(ReviewComparison::MAX_ROWS - count($this->record->rows)).' more. An analysis made before keeps to the reviews it read: analyse again to judge the new ones too.')
+                ->modalHeading(__('Add setups to this comparison'))
+                ->modalDescription(fn (): string => $this->record->commit() === null
+                    ? __('Each row reviews the pull request as it is now, as a trial, and shows as a column of its own. Up to :count more. An analysis made before keeps to the reviews it read: analyse again to judge the new ones too.', ['count' => ReviewComparison::MAX_ROWS - count($this->record->rows)])
+                    : __('Each row reviews the pull request at commit :commit, as the comparison does, as a trial, and shows as a column of its own. Up to :count more. An analysis made before keeps to the reviews it read: analyse again to judge the new ones too.', ['commit' => substr($this->record->commit(), 0, 12), 'count' => ReviewComparison::MAX_ROWS - count($this->record->rows)]))
                 ->schema([
                     ReviewRunResource::ignoreExistingField(),
                     Repeater::make('rows')
-                        ->label('Setups')
+                        ->label(__('Setups'))
                         ->schema(ReviewRunResource::trialFields(withExisting: false))
                         ->columns(2)
                         ->default(fn (): array => [[]])
                         ->minItems(1)
                         ->maxItems(fn (): int => max(1, ReviewComparison::MAX_ROWS - count($this->record->rows)))
-                        ->addActionLabel('Add a setup'),
+                        ->addActionLabel(__('Add a setup')),
                 ])
-                ->modalSubmitActionLabel('Start')
+                ->modalSubmitActionLabel(__('Start'))
                 ->action(function (array $data, ReviewComparisons $comparisons): void {
                     $added = $comparisons->add($this->record, array_map(ReviewRunResource::trialOptions(...), array_values($data['rows'] ?? [])), (bool) ($data['ignore_existing'] ?? true));
                     $this->record->refresh();
 
-                    Notification::make()->title($added === 1 ? 'One setup added' : "{$added} setups added")->success()->send();
+                    Notification::make()->title($added === 1 ? __('One setup added') : __(':count setups added', ['count' => $added]))->success()->send();
                 }),
             Action::make('analyze')
-                ->label(fn (): string => $this->record->analysis === null ? 'Analyse' : 'Analyse again')
+                ->label(fn (): string => $this->record->analysis === null ? __('Analyse') : __('Analyse again'))
                 ->icon(Heroicon::OutlinedSparkles)
                 ->disabled(fn (): bool => ! $this->record->done() || $this->record->analysis_status === ReviewComparison::ANALYSIS_RUNNING || $this->record->active()->filter(fn (array $column): bool => $column['run'] !== null)->isEmpty())
-                ->tooltip(fn (): ?string => $this->record->done() ? null : 'Once every review not left out has ended.')
-                ->modalHeading('Analyse the reviews together')
-                ->modalDescription('One model reads the pull request\'s diff and every review\'s findings, groups the same issues, says which hold and which are false, and who missed what. It costs one request with the whole diff.')
+                ->tooltip(function (): ?string {
+                    if ($this->record->done()) {
+                        return null;
+                    }
+
+                    return __('Once every review not left out has ended.');
+                })
+                ->modalHeading(__('Analyse the reviews together'))
+                ->modalDescription(__('One model reads the pull request\'s diff and every review\'s findings, groups the same issues, says which hold and which are false, and who missed what. It costs one request with the whole diff.'))
                 ->schema([
                     Select::make('connection')
-                        ->label('AI provider')
+                        ->label(__('AI provider'))
                         ->options(fn (): array => self::connections())
                         ->default(fn (): ?int => array_key_first(self::connections()))
                         ->required(),
                     ReviewSettingsForm::modelField('model', ['smartest' => 'smartest (Laravel AI)', 'default' => 'default (Laravel AI)'] + array_diff_key(ReviewSettingsForm::claudeModels() + ReviewSettingsForm::openAiModels(), array_flip(['smartest', 'default', 'cheapest', 'opus', 'sonnet', 'haiku'])))
-                        ->label('Model')
-                        ->placeholder('The provider\'s smartest')
-                        ->helperText('A tier is read for the provider chosen; a model by name has to be one of that provider.'),
+                        ->label(__('Model'))
+                        ->placeholder(__('The provider\'s smartest'))
+                        ->helperText(__('A tier is read for the provider chosen; a model by name has to be one of that provider.')),
                 ])
-                ->modalSubmitActionLabel('Analyse')
+                ->modalSubmitActionLabel(__('Analyse'))
                 ->action(function (array $data): void {
                     $this->record->update(['analysis_status' => ReviewComparison::ANALYSIS_RUNNING, 'analysis_error' => null]);
                     // The reviews it reads are the ones that can be read now.
                     AnalyzeReviewComparison::dispatch($this->record->getKey(), (int) $data['connection'], filled($data['model'] ?? null) ? (string) $data['model'] : null, ReviewComparisons::analysable($this->record));
 
-                    Notification::make()->title('The analysis is started')->body('This page shows it when it is done.')->success()->send();
+                    Notification::make()->title(__('The analysis is started'))->body(__('This page shows it when it is done.'))->success()->send();
                 }),
         ];
     }

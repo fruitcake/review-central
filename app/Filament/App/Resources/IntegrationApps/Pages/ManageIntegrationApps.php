@@ -17,6 +17,11 @@ class ManageIntegrationApps extends ManageRecords
 {
     protected static string $resource = IntegrationAppResource::class;
 
+    public function getTitle(): string|Htmlable
+    {
+        return static::getResource()::getNavigationLabel();
+    }
+
     public function getSubheading(): string|Htmlable|null
     {
         $tenant = CurrentTenant::get();
@@ -29,15 +34,15 @@ class ManageIntegrationApps extends ManageRecords
             ))
             ->implode(', ');
 
-        return 'Your own apps at Asana or Atlassian, for this team alone: a connection signs in there through one instead of taking a pasted token.'
-            .($shared === '' ? '' : " The installation's, for this team too: {$shared}.");
+        return __('Your own apps at Asana or Atlassian, for this team alone: a connection signs in there through one instead of taking a pasted token.')
+            .($shared === '' ? '' : ' '.__('The installation\'s, for this team too: :apps.', ['apps' => $shared]));
     }
 
     protected function getHeaderActions(): array
     {
         return [
             CreateAction::make()
-                ->label('Add app')
+                ->label(__('Add app'))
                 // Its own: for this tenant alone, whatever the form held.
                 ->mutateDataUsing(fn (array $data): array => ['tenant_id' => CurrentTenant::get()->getKey(), 'for_all_tenants' => false] + IntegrationAppForm::save($data)),
         ];

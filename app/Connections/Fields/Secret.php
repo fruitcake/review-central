@@ -19,7 +19,13 @@ class Secret
             ->revealable()
             ->autocomplete('off')
             ->required(fn (string $operation): bool => $operation === 'create')
-            ->placeholder(fn (string $operation): ?string => $operation === 'edit' ? 'Unchanged' : null)
+            ->placeholder(function (string $operation): ?string {
+                if ($operation !== 'edit') {
+                    return null;
+                }
+
+                return __('Unchanged');
+            })
             ->dehydrated(fn (?string $state): bool => filled($state));
     }
 }

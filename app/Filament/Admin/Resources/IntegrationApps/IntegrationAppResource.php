@@ -71,7 +71,7 @@ class IntegrationAppResource extends Resource
         // Nor one .env sets: that one goes first, and a second would never be used.
         $fromEnv = collect(Integrations::TYPES)->filter(fn (array $type, string $key): bool => $type['single'] && Integrations::fromEnv($key) !== null)->keys()->all();
 
-        return collect(Integrations::TYPES)->except([...$taken, ...$fromEnv])->map(fn (array $type): string => $type['label'])->all();
+        return collect(Integrations::types())->except([...$taken, ...$fromEnv])->map(fn (array $type): string => $type['label'])->all();
     }
 
     /**
@@ -94,7 +94,7 @@ class IntegrationAppResource extends Resource
             ->modifyQueryUsing(fn (Builder $query) => $query->with(['tenant', 'tenants'])->orderByRaw('tenant_id is not null')->orderBy('type')->orderBy('name'))
             ->columns([
                 TextColumn::make('name')->searchable(),
-                TextColumn::make('type')->formatStateUsing(fn (string $state): string => Integrations::TYPES[$state]['label'] ?? $state),
+                TextColumn::make('type')->formatStateUsing(fn (string $state): string => Integrations::types()[$state]['label'] ?? $state),
                 TextColumn::make('for')
                     ->label('For')
                     ->state(fn (IntegrationApp $record): string => match (true) {

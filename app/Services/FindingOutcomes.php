@@ -32,14 +32,22 @@ class FindingOutcomes
         'unreported' => ['unreported'],
     ];
 
-    public const LABELS = [
-        'fixed' => 'Fixed',
-        'acknowledged' => 'Acknowledged',
-        'false_positive' => 'False positive',
-        'open' => 'Still open',
-        'outdated' => 'Code changed',
-        'unreported' => 'Not reported again',
-    ];
+    /**
+     * What each outcome is called, in the user's language.
+     *
+     * @return array<string, string>
+     */
+    public static function labels(): array
+    {
+        return [
+            'fixed' => __('Fixed'),
+            'acknowledged' => __('Acknowledged'),
+            'false_positive' => __('False positive'),
+            'open' => __('Still open'),
+            'outdated' => __('Code changed'),
+            'unreported' => __('Not reported again'),
+        ];
+    }
 
     /**
      * @param  Collection<int, ReviewRun>  $runs  of the period, with their findings
@@ -63,9 +71,11 @@ class FindingOutcomes
             ->get(['reason'])
             ->countBy(fn (FindingVerdict $verdict): string => $verdict->reason->value ?? '');
 
+        $labels = self::labels();
+
         return [
             'total' => array_sum($counts),
-            'outcomes' => array_map(fn (string $key): array => ['key' => $key, 'label' => self::LABELS[$key], 'count' => $counts[$key]], array_keys($counts)),
+            'outcomes' => array_map(fn (string $key): array => ['key' => $key, 'label' => $labels[$key], 'count' => $counts[$key]], array_keys($counts)),
             'reasons' => collect(FindingVerdictReason::cases())
                 ->map(fn (FindingVerdictReason $reason): array => ['key' => $reason->value, 'label' => $reason->text(), 'count' => (int) $reasons->get($reason->value, 0)])
                 ->filter(fn (array $reason): bool => $reason['count'] > 0)

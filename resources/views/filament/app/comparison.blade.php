@@ -6,7 +6,7 @@
     use App\Services\ReviewComparisons;
     use App\Services\ReviewSettings;
 
-    $verdicts = ['valid' => 'Holds', 'false_positive' => 'False positive', 'unclear' => 'Unclear'];
+    $verdicts = ['valid' => __('Holds'), 'false_positive' => __('False positive'), 'unclear' => __('Unclear')];
     $commits = $columns->map(fn ($column) => $column['run']?->commit)->filter()->unique();
 @endphp
 
@@ -14,7 +14,7 @@
     {{-- Until every review and the analysis have ended, it looks again now and then. --}}
     <div class="rc-stack" @if (! $settled || $comparison->analysis_status === ReviewComparison::ANALYSIS_RUNNING) wire:poll.15s @endif>
         @if ($commits->count() > 1)
-            <p class="rc-note">Not every review is of the same commit: the pull request moved on between them. Compare with that in mind.</p>
+            <p class="rc-note">{{ __('Not every review is of the same commit: the pull request moved on between them. Compare with that in mind.') }}</p>
         @endif
 
         <div class="rc-compare">
@@ -25,12 +25,12 @@
                 <section @class(['rc-card', 'rc-pad', 'rc-excluded' => $excluded]) aria-labelledby="rc-col-{{ $label }}">
                     <div class="rc-card-head">
                         <div>
-                            <h2 id="rc-col-{{ $label }}">{{ $label }}{{ $label === 'A' ? ' · started from' : '' }}{{ $excluded ? ' · left out' : '' }}</h2>
+                            <h2 id="rc-col-{{ $label }}">{{ $label }}{{ $label === 'A' ? ' · '.__('started from') : '' }}{{ $excluded ? ' · '.__('left out') : '' }}</h2>
                             <span class="rc-muted">
                                 @if ($run !== null)
                                     {{ ReviewComparisons::setup($run) }}
                                 @else
-                                    {{ implode(' · ', array_filter([$column['row']['provider'] ?? null, $column['row']['model'] ?? null, isset($column['row']['effort']) ? 'effort '.$column['row']['effort'] : null, empty($column['row']['modules']) ? null : ReviewSettings::describeModules($column['row']['modules'])])) ?: 'the repository\'s setup' }}
+                                    {{ implode(' · ', array_filter([$column['row']['provider'] ?? null, $column['row']['model'] ?? null, isset($column['row']['effort']) ? __('effort :effort', ['effort' => $column['row']['effort']]) : null, empty($column['row']['modules']) ? null : ReviewSettings::describeModules($column['row']['modules'])])) ?: __('the repository\'s setup') }}
                                 @endif
                             </span>
                         </div>
@@ -38,30 +38,30 @@
                             @php($outcome = RunPresenter::outcome($run))
                             <span class="rc-chip rc-chip-{{ $outcome['tone'] }}">{{ $outcome['label'] }}</span>
                         @elseif (ReviewComparison::notStarted($column) !== null)
-                            <span class="rc-chip rc-chip-failed">Not started</span>
+                            <span class="rc-chip rc-chip-failed">{{ __('Not started') }}</span>
                         @else
-                            <span class="rc-chip rc-chip-running">Waiting</span>
+                            <span class="rc-chip rc-chip-running">{{ __('Waiting') }}</span>
                         @endif
                     </div>
 
-                    <button type="button" class="rc-link-button" wire:click="toggleColumn(@js($label))">{{ $excluded ? 'Bring back' : 'Leave out' }}</button>
+                    <button type="button" class="rc-link-button" wire:click="toggleColumn(@js($label))">{{ $excluded ? __('Bring back') : __('Leave out') }}</button>
 
                     @if ($run === null)
-                        <p class="rc-muted">{{ ReviewComparison::notStarted($column) ?? 'Its review has not started yet.' }}</p>
+                        <p class="rc-muted">{{ ReviewComparison::notStarted($column) ?? __('Its review has not started yet.') }}</p>
                     @else
                         <dl class="rc-details">
-                            <dt>Cost</dt><dd>{{ $run->cost === null ? '—' : Currency::show((float) $run->cost) }}</dd>
-                            <dt>Took</dt><dd>{{ $run->duration_seconds === null ? '—' : RunPresenter::duration((int) $run->duration_seconds) }}</dd>
-                            <dt>Commit</dt><dd class="rc-mono">{{ substr($run->commit, 0, 12) }}</dd>
+                            <dt>{{ __('Cost') }}</dt><dd>{{ $run->cost === null ? '—' : Currency::show((float) $run->cost) }}</dd>
+                            <dt>{{ __('Took') }}</dt><dd>{{ $run->duration_seconds === null ? '—' : RunPresenter::duration((int) $run->duration_seconds) }}</dd>
+                            <dt>{{ __('Commit') }}</dt><dd class="rc-mono">{{ substr($run->commit, 0, 12) }}</dd>
                             {{-- Scores only from an analysis: before one, a row of noughts says nothing. --}}
                             @if ($comparison->analysis !== null && isset($scores[$label]))
-                                <dt>Holds</dt><dd>{{ $scores[$label]['valid'] }}</dd>
-                                <dt>False positives</dt><dd>{{ $scores[$label]['false_positive'] }}</dd>
-                                <dt>Unclear</dt><dd>{{ $scores[$label]['unclear'] }}</dd>
-                                <dt>Missed</dt><dd>{{ $scores[$label]['missed'] }}</dd>
+                                <dt>{{ __('Holds') }}</dt><dd>{{ $scores[$label]['valid'] }}</dd>
+                                <dt>{{ __('False positives') }}</dt><dd>{{ $scores[$label]['false_positive'] }}</dd>
+                                <dt>{{ __('Unclear') }}</dt><dd>{{ $scores[$label]['unclear'] }}</dd>
+                                <dt>{{ __('Missed') }}</dt><dd>{{ $scores[$label]['missed'] }}</dd>
                             @endif
                         </dl>
-                        <a href="{{ ReviewRunResource::getUrl('view', ['record' => $run]) }}">Open the review</a>
+                        <a href="{{ ReviewRunResource::getUrl('view', ['record' => $run]) }}">{{ __('Open the review') }}</a>
                         <ol>
                             @forelse (array_values(array_filter($run->findings ?? [], is_array(...))) as $finding)
                                 <li>
@@ -72,7 +72,7 @@
                                     @endif
                                 </li>
                             @empty
-                                <li class="rc-muted">{{ in_array($run->status, ['queued', 'running', 'pending'], true) ? 'Still reviewing.' : 'No findings.' }}</li>
+                                <li class="rc-muted">{{ in_array($run->status, ['queued', 'running', 'pending'], true) ? __('Still reviewing.') : __('No findings.') }}</li>
                             @endforelse
                         </ol>
                     @endif
@@ -83,33 +83,33 @@
         <section class="rc-card rc-pad" aria-labelledby="rc-analysis">
             <div class="rc-card-head">
                 <div>
-                    <h2 id="rc-analysis">Analysis</h2>
+                    <h2 id="rc-analysis">{{ __('Analysis') }}</h2>
                     @if ($comparison->analysis_model !== null)
-                        <span class="rc-muted">By {{ $comparison->analysis_model }}{{ $comparison->analysis_cost === null ? '' : ' · about '.Currency::show($comparison->analysis_cost, null, 4) }}</span>
+                        <span class="rc-muted">{{ __('By :model', ['model' => $comparison->analysis_model]) }}{{ $comparison->analysis_cost === null ? '' : ' · '.__('about :cost', ['cost' => Currency::show($comparison->analysis_cost, null, 4)]) }}</span>
                     @endif
                 </div>
             </div>
             {{-- What the scores in the columns are of, also while another attempt runs or after one failed. --}}
             @if ($analysed !== null)
                 <p class="rc-muted">
-                    The scores are of {{ implode(', ', $analysed) }}.
+                    {{ __('The scores are of :labels.', ['labels' => implode(', ', $analysed)]) }}
                     @if ($analysed !== $analysable)
-                        The reviews to analyse are {{ implode(', ', $analysable) ?: 'none' }} now: analyse again to judge those.
+                        {{ __('The reviews to analyse are :labels now: analyse again to judge those.', ['labels' => implode(', ', $analysable) ?: __('none')]) }}
                     @endif
                 </p>
             @endif
             @if ($comparison->analysis_status === ReviewComparison::ANALYSIS_RUNNING)
-                <p class="rc-muted">The model is reading the reviews.</p>
+                <p class="rc-muted">{{ __('The model is reading the reviews.') }}</p>
             @elseif ($comparison->analysis_status === ReviewComparison::ANALYSIS_FAILED)
-                <p>It failed: {{ $comparison->analysis_error }}</p>
+                <p>{{ __('It failed: :error', ['error' => $comparison->analysis_error]) }}</p>
             @elseif ($comparison->analysis === null)
-                <p class="rc-muted">{{ $done ? 'Analyse has one model judge the findings of the reviews not left out together: which hold, which are false, and who missed what.' : 'Once every review not left out has ended, Analyse has one model judge their findings together.' }}</p>
+                <p class="rc-muted">{{ $done ? __('Analyse has one model judge the findings of the reviews not left out together: which hold, which are false, and who missed what.') : __('Once every review not left out has ended, Analyse has one model judge their findings together.') }}</p>
             @else
                 @if (filled($comparison->analysis['summary'] ?? null))
                     <p>{{ $comparison->analysis['summary'] }}</p>
                 @endif
                 <table class="rc-steps">
-                    <thead><tr><th scope="col">Issue</th><th scope="col">Verdict</th><th scope="col">Found by</th></tr></thead>
+                    <thead><tr><th scope="col">{{ __('Issue') }}</th><th scope="col">{{ __('Verdict') }}</th><th scope="col">{{ __('Found by') }}</th></tr></thead>
                     <tbody>
                         @foreach ($comparison->analysis['findings'] ?? [] as $issue)
                             <tr>
@@ -119,7 +119,7 @@
                                     <br><span class="rc-muted">{{ $issue['reason'] }}</span>
                                 </td>
                                 <td class="rc-verdict-{{ $issue['verdict'] }}">{{ $verdicts[$issue['verdict']] ?? $issue['verdict'] }}</td>
-                                <td class="rc-mono">{{ implode(', ', $issue['found_by']) ?: 'nobody' }}</td>
+                                <td class="rc-mono">{{ implode(', ', $issue['found_by']) ?: __('nobody') }}</td>
                             </tr>
                         @endforeach
                     </tbody>

@@ -43,13 +43,24 @@ class ReviewRuleResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedScale;
 
-    protected static ?string $navigationLabel = 'Rules';
-
-    protected static ?string $modelLabel = 'rule';
-
     protected static ?string $recordTitleAttribute = 'title';
 
     protected static ?int $navigationSort = 36;
+
+    public static function getModelLabel(): string
+    {
+        return __('rule');
+    }
+
+    public static function getPluralModelLabel(): string
+    {
+        return __('rules');
+    }
+
+    public static function getNavigationLabel(): string
+    {
+        return __('Rules');
+    }
 
     public static function canCreate(): bool
     {
@@ -89,38 +100,39 @@ class ReviewRuleResource extends Resource
     {
         return [
             Radio::make('kind')
+                ->label(__('Kind'))
                 ->options(ReviewRuleKind::options())
                 ->descriptions(array_column(array_map(fn (ReviewRuleKind $kind): array => [$kind->value, $kind->description()], ReviewRuleKind::cases()), 1, 0))
                 ->default(ReviewRuleKind::Check->value)
                 ->required()
                 ->live(),
             TextInput::make('title')
-                ->label('Rule')
+                ->label(__('Rule'))
                 ->required()
                 ->maxLength(255)
-                ->helperText('In one line, as the reviewer cites it: "Every controller action checks the policy", "Raw queries in migrations are fine".'),
+                ->helperText(__('In one line, as the reviewer cites it: "Every controller action checks the policy", "Raw queries in migrations are fine".')),
             Textarea::make('body')
-                ->label('Why, and what counts')
+                ->label(__('Why, and what counts'))
                 ->rows(4)
                 ->maxLength(5000)
-                ->helperText('Optional. What the rule protects, and the cases it does and does not cover.'),
+                ->helperText(__('Optional. What the rule protects, and the cases it does and does not cover.')),
             Select::make('repository_id')
-                ->label('For')
+                ->label(__('For'))
                 ->options(fn (): array => self::repositoryOptions())
-                ->placeholder('Every repository'),
+                ->placeholder(__('Every repository')),
             TagsInput::make('paths')
-                ->label('Only in')
+                ->label(__('Only in'))
                 ->placeholder('app/Http/Controllers/**')
-                ->helperText('Optional globs. Without any, the rule holds for every file.'),
+                ->helperText(__('Optional globs. Without any, the rule holds for every file.')),
             Select::make('severity')
-                ->label('Severity when broken')
-                ->options(ReviewRule::SEVERITIES)
-                ->placeholder('As the reviewer judges it')
+                ->label(__('Severity when broken'))
+                ->options(ReviewRule::severities())
+                ->placeholder(__('As the reviewer judges it'))
                 ->visible(fn (Get $get): bool => $get('kind') === ReviewRuleKind::Check->value || $get('kind') === ReviewRuleKind::Check),
             Toggle::make('enabled')
-                ->label('On')
+                ->label(__('On'))
                 ->default(true)
-                ->helperText('Off, the reviewer does not read it, and it stays here.'),
+                ->helperText(__('Off, the reviewer does not read it, and it stays here.')),
         ];
     }
 
@@ -130,36 +142,44 @@ class ReviewRuleResource extends Resource
             ->modifyQueryUsing(fn (Builder $query) => $query->with('repository')->orderByRaw('repository_id is not null')->orderBy('title'))
             ->columns([
                 TextColumn::make('title')
-                    ->label('Rule')
+                    ->label(__('Rule'))
                     ->wrap()
                     ->description(fn (ReviewRule $record): ?string => $record->body === null ? null : str($record->body)->limit(160)->toString())
                     ->searchable(['title', 'body']),
                 TextColumn::make('kind')
+                    ->label(__('Kind'))
                     ->badge()
                     ->formatStateUsing(fn (ReviewRuleKind $state): string => $state->text())
                     ->color(fn (ReviewRuleKind $state): string => $state === ReviewRuleKind::Check ? 'primary' : 'gray'),
                 TextColumn::make('repository_id')
-                    ->label('For')
+                    ->label(__('For'))
                     ->formatStateUsing(fn (ReviewRule $record): string => self::repositoryLabel($record))
-                    ->placeholder('Every repository'),
+                    ->placeholder(__('Every repository')),
                 TextColumn::make('paths')
-                    ->label('Only in')
+                    ->label(__('Only in'))
                     ->badge()
                     ->color('gray')
-                    ->placeholder('Every file'),
+                    ->placeholder(__('Every file')),
                 TextColumn::make('severity')
-                    ->formatStateUsing(fn (?string $state): ?string => ReviewRule::SEVERITIES[$state] ?? $state)
+                    ->label(__('Severity'))
+                    ->formatStateUsing(fn (?string $state): ?string => ReviewRule::severities()[$state] ?? $state)
                     ->placeholder('—'),
                 ToggleColumn::make('enabled')
-                    ->label('On')
+                    ->label(__('On'))
                     ->disabled(fn (): bool => ! TenantRole::isAdmin()),
                 TextColumn::make('archived_to')
-                    ->label('In the repository')
+                    ->label(__('In the repository'))
                     ->description(fn (ReviewRule $record): ?string => $record->archived_note)
-                    ->tooltip(fn (ReviewRule $record): ?string => match (true) {
-                        $record->archived_at !== null => 'Found on the main branch '.$record->archived_at->diffForHumans().', and turned off here. Turned on again, it stays on.',
-                        $record->archived_to !== null => 'Found on the main branch, and turned on again by hand: the check leaves it on.',
-                        default => null,
+                    ->tooltip(function (ReviewRule $record): ?string {
+                        if ($record->archived_at !== null) {
+                            return __('Found on the main branch :when, and turned off here. Turned on again, it stays on.', ['when' => $record->archived_at->diffForHumans()]);
+                        }
+
+                        if ($record->archived_to !== null) {
+                            return __('Found on the main branch, and turned on again by hand: the check leaves it on.');
+                        }
+
+                        return null;
                     })
                     ->wrap()
                     ->placeholder('—')
@@ -167,22 +187,22 @@ class ReviewRuleResource extends Resource
             ])
             ->filters([
                 SelectFilter::make('repository_id')
-                    ->label('For')
-                    ->options(fn (): array => ['all' => 'Every repository'] + self::repositoryOptions())
+                    ->label(__('For'))
+                    ->options(fn (): array => ['all' => __('Every repository')] + self::repositoryOptions())
                     // A repository's rules are its own and those for every repository: what its review reads.
                     ->query(fn (Builder $query, array $data): Builder => match ($data['value'] ?? null) {
                         null, '' => $query,
                         'all' => $query->whereNull('repository_id'),
                         default => $query->where(fn (Builder $scope) => $scope->whereNull('repository_id')->orWhere('repository_id', (int) $data['value'])),
                     }),
-                SelectFilter::make('kind')->options(ReviewRuleKind::options()),
+                SelectFilter::make('kind')->label(__('Kind'))->options(ReviewRuleKind::options()),
             ])
             ->recordActions([
                 EditAction::make(),
                 DeleteAction::make(),
             ])
-            ->emptyStateHeading('No rules yet')
-            ->emptyStateDescription('A rule says what the reviewer checks in your code, or what is not a defect here. Mark a finding "Not a problem" to make one from it.');
+            ->emptyStateHeading(__('No rules yet'))
+            ->emptyStateDescription(__('A rule says what the reviewer checks in your code, or what is not a defect here. Mark a finding "Not a problem" to make one from it.'));
     }
 
     /**
@@ -205,10 +225,10 @@ class ReviewRuleResource extends Resource
     public static function repositoryLabel(ReviewRule $rule): string
     {
         if ($rule->repository === null) {
-            return 'Every repository';
+            return __('Every repository');
         }
 
-        return self::repositoryOptions()[$rule->repository_id] ?? $rule->repository->fullName().' (removed)';
+        return self::repositoryOptions()[$rule->repository_id] ?? __(':repository (removed)', ['repository' => $rule->repository->fullName()]);
     }
 
     /**
@@ -226,8 +246,8 @@ class ReviewRuleResource extends Resource
                 return [$repository->getKey() => $repository->fullName()];
             }
 
-            $connection = $repository->integration->name ?? 'a connection';
-            $alike = $same->filter(fn (Repository $other): bool => ($other->integration->name ?? 'a connection') === $connection)->count() > 1;
+            $connection = $repository->integration->name ?? __('a connection');
+            $alike = $same->filter(fn (Repository $other): bool => ($other->integration->name ?? __('a connection')) === $connection)->count() > 1;
 
             return [$repository->getKey() => $repository->fullName().' ('.$connection.($alike ? " #{$repository->connection_id}" : '').')'];
         })->all();

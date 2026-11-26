@@ -154,23 +154,23 @@ class SetupGuides
     public function asana(): SetupGuide
     {
         return new SetupGuide(
-            title: 'An Asana app to connect by signing in',
+            title: __('An Asana app to connect by signing in'),
             url: 'https://app.asana.com/0/my-apps',
-            linkLabel: 'Asana developer console',
+            linkLabel: __('Asana developer console'),
             steps: [
-                'Open the link and choose **Create new app**.',
-                'Under **OAuth**, add `'.url('/connections/oauth/callback').'` as a redirect URL.',
-                'Fill in the app\'s client ID and secret under **Apps** in the admin panel, or set `ASANA_CLIENT_ID` and `ASANA_CLIENT_SECRET` in `.env`, which goes first.',
-                'Under **Manage distribution**, let the app be used in any workspace, so tenants outside your own organisation can connect.',
-                'Give the app the scopes below, which is what `ASANA_OAUTH_SCOPE` asks for unless it is set. For an app with full permissions instead, set `ASANA_OAUTH_SCOPE` empty: Asana refuses scopes such an app does not name.',
+                __('Open the link and choose **Create new app**.'),
+                __('Under **OAuth**, add `:url` as a redirect URL.', ['url' => url('/connections/oauth/callback')]),
+                __('Fill in the app\'s client ID and secret under **Apps** in the admin panel, or set `ASANA_CLIENT_ID` and `ASANA_CLIENT_SECRET` in `.env`, which goes first.'),
+                __('Under **Manage distribution**, let the app be used in any workspace, so tenants outside your own organisation can connect.'),
+                __('Give the app the scopes below, which is what `ASANA_OAUTH_SCOPE` asks for unless it is set. For an app with full permissions instead, set `ASANA_OAUTH_SCOPE` empty: Asana refuses scopes such an app does not name.'),
             ],
             permissions: [
-                'tasks:read' => 'reads a task, its subtasks, and the workspace\'s search for a task\'s number.',
-                'stories:read' => 'reads the comments on a task.',
-                'workspaces:read' => 'checks the workspace, which is what **Test** asks.',
-                'workspaces.typeahead:read' => 'finds a task by the number its name starts with.',
-                'users:read' => 'reads who a task is assigned to and who wrote a comment.',
-                'attachments:read' => 'lists the files on a task, and reads a screenshot or log for an agent that asks. Without it, a task is read without its files.',
+                'tasks:read' => __('reads a task, its subtasks, and the workspace\'s search for a task\'s number.'),
+                'stories:read' => __('reads the comments on a task.'),
+                'workspaces:read' => __('checks the workspace, which is what **Test** asks.'),
+                'workspaces.typeahead:read' => __('finds a task by the number its name starts with.'),
+                'users:read' => __('reads who a task is assigned to and who wrote a comment.'),
+                'attachments:read' => __('lists the files on a task, and reads a screenshot or log for an agent that asks. Without it, a task is read without its files.'),
             ],
         );
     }
@@ -181,23 +181,23 @@ class SetupGuides
     public function atlassian(): SetupGuide
     {
         return new SetupGuide(
-            title: 'An Atlassian app to connect Jira by signing in',
+            title: __('An Atlassian app to connect Jira by signing in'),
             url: 'https://developer.atlassian.com/console/myapps/',
-            linkLabel: 'Atlassian developer console',
+            linkLabel: __('Atlassian developer console'),
             steps: [
-                'Open the link and choose **Create → OAuth 2.0 integration**.',
-                'Under **Permissions**, add the Jira API, and its classic scopes below.',
-                'Under **Authorization**, add `'.url('/connections/oauth/callback').'` as the callback URL.',
-                'Under the app\'s **Settings**, copy the client ID and secret into **Apps** here, or into `ATLASSIAN_CLIENT_ID` and `ATLASSIAN_CLIENT_SECRET` in `.env`, which goes first.',
-                'Under **Distribution**, set it to **Sharing**, so people of other organisations can authorize it, not only you.',
+                __('Open the link and choose **Create → OAuth 2.0 integration**.'),
+                __('Under **Permissions**, add the Jira API, and its classic scopes below.'),
+                __('Under **Authorization**, add `:url` as the callback URL.', ['url' => url('/connections/oauth/callback')]),
+                __('Under the app\'s **Settings**, copy the client ID and secret into **Apps** here, or into `ATLASSIAN_CLIENT_ID` and `ATLASSIAN_CLIENT_SECRET` in `.env`, which goes first.'),
+                __('Under **Distribution**, set it to **Sharing**, so people of other organisations can authorize it, not only you.'),
             ],
             permissions: [
-                'read:jira-work' => 'reads issues, their subtasks and comments.',
-                'read:jira-user' => 'reads who an issue is assigned to, and who signed in.',
-                'offline_access' => 'a refresh token, to keep reading without signing in again. Atlassian adds it when it is asked for.',
+                'read:jira-work' => __('reads issues, their subtasks and comments.'),
+                'read:jira-user' => __('reads who an issue is assigned to, and who signed in.'),
+                'offline_access' => __('a refresh token, to keep reading without signing in again. Atlassian adds it when it is asked for.'),
             ],
             notes: [
-                'An app that is not shared stays usable by its own developer only: under **Distribution**, share it for anyone else to connect.',
+                __('An app that is not shared stays usable by its own developer only: under **Distribution**, share it for anyone else to connect.'),
             ],
         );
     }

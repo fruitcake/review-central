@@ -51,16 +51,23 @@ class OpenFinding extends Model
     /** The statuses that are still on the backlog. */
     public const ACTIVE = [self::OPEN, self::PRESENT, self::UNCLEAR];
 
-    /** @var array<string, string> */
-    public const LABELS = [
-        self::OPEN => 'Not checked yet',
-        self::PRESENT => 'Still there',
-        self::UNCLEAR => 'Unclear',
-        self::RESOLVED => 'Resolved',
-        self::DISMISSED => 'Closed',
-    ];
-
     protected $guarded = [];
+
+    /**
+     * What each status is called, in the user's language.
+     *
+     * @return array<string, string>
+     */
+    public static function statusLabels(): array
+    {
+        return [
+            self::OPEN => __('Not checked yet'),
+            self::PRESENT => __('Still there'),
+            self::UNCLEAR => __('Unclear'),
+            self::RESOLVED => __('Resolved'),
+            self::DISMISSED => __('Closed'),
+        ];
+    }
 
     /**
      * @return array<string, string>

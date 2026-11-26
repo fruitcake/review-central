@@ -63,6 +63,47 @@ final class Integrations
     ];
 
     /**
+     * TYPES with its labels in the user's language: the constant cannot translate
+     * them, so what shows a type or its fields reads them from here.
+     *
+     * @return array<string, array{label: string, single: bool, tenants_add: bool, service: string, fields: array<string, array{label: string, secret: bool, env: string}>}>
+     */
+    public static function types(): array
+    {
+        $labels = [
+            'google' => __('Google: signing in'),
+            'bitbucket' => __('Bitbucket: act as yourself'),
+            'asana' => __('Asana: connect by signing in'),
+            'atlassian' => __('Atlassian: connect Jira by signing in'),
+            'github_app' => __('GitHub App: review, sign in and reply as yourself'),
+        ];
+
+        $fields = [
+            'Client ID' => __('Client ID'),
+            'Client secret' => __('Client secret'),
+            'Secret' => __('Secret'),
+            'App ID' => __('App ID'),
+            'Name in its address' => __('Name in its address'),
+            'Webhook secret' => __('Webhook secret'),
+            'Private key' => __('Private key'),
+        ];
+
+        $types = [];
+
+        foreach (self::TYPES as $key => $type) {
+            $type['label'] = $labels[$key];
+
+            foreach ($type['fields'] as $name => $field) {
+                $type['fields'][$name]['label'] = $fields[$field['label']];
+            }
+
+            $types[$key] = $type;
+        }
+
+        return $types;
+    }
+
+    /**
      * Types whose app is for the whole installation, never for some tenants only:
      * signing in comes before a tenant is known, and a user's own Bitbucket
      * account is theirs, not a tenant's.
@@ -139,7 +180,7 @@ final class Integrations
         }
 
         return filled($credentials['client_id'] ?? null) && filled($credentials['client_secret'] ?? null)
-            ? new OAuthApp(OAuthApp::ENV, 'From .env', $credentials)
+            ? new OAuthApp(OAuthApp::ENV, __('From .env'), $credentials)
             : null;
     }
 
@@ -203,10 +244,13 @@ final class Integrations
      */
     public static function unavailable(ConnectsWithOAuth $driver, string $service, ?Tenant $tenant = null): ?string
     {
+        if (self::offered($driver, $tenant)) {
+            return null;
+        }
+
         return match (true) {
-            self::offered($driver, $tenant) => null,
-            ! self::configured($driver->oauthIntegration()) => "Signing in at {$service} is not set up; an administrator adds an app for it under Apps, or this team adds its own.",
-            default => "Signing in at {$service} is not on for this team; an administrator makes an app available to it under Apps, or this team adds its own.",
+            ! self::configured($driver->oauthIntegration()) => __('Signing in at :service is not set up; an administrator adds an app for it under Apps, or this team adds its own.', ['service' => $service]),
+            default => __('Signing in at :service is not on for this team; an administrator makes an app available to it under Apps, or this team adds its own.', ['service' => $service]),
         };
     }
 

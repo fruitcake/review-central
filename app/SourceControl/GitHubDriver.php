@@ -41,17 +41,17 @@ class GitHubDriver implements ExplainsSetup, SourceControlDriver
     public function credentialFields(): array
     {
         return [
-            Secret::make('access_token')->label('Personal access token')
+            Secret::make('access_token')->label(__('Personal access token'))
                 ->required(false)
-                ->helperText('A fine-grained token for the repositories, with read access to Contents and Metadata, and read and write access to Pull requests, Issues and Commit statuses; Webhooks too, to have the webhook added for you. The review comments, approves and requests changes as the account that owns it, so give it an account of its own. Leave it empty for public repositories, which are then only read.'),
+                ->helperText(__('A fine-grained token for the repositories, with read access to Contents and Metadata, and read and write access to Pull requests, Issues and Commit statuses; Webhooks too, to have the webhook added for you. The review comments, approves and requests changes as the account that owns it, so give it an account of its own. Leave it empty for public repositories, which are then only read.')),
         ];
     }
 
     public function settingFields(): array
     {
         return [
-            TextInput::make('workspace')->label('Owner')->rule('regex:/^[\w.-]+$/')
-                ->helperText('The user or organisation from the address: github.com/<owner>. Leave it empty, with no token, for any public repository.'),
+            TextInput::make('workspace')->label(__('Owner'))->rule('regex:/^[\w.-]+$/')
+                ->helperText(__('The user or organisation from the address: github.com/<owner>. Leave it empty, with no token, for any public repository.')),
             ReadOnlyClient::field(),
         ];
     }
@@ -64,28 +64,28 @@ class GitHubDriver implements ExplainsSetup, SourceControlDriver
     public function setupGuide(): SetupGuide
     {
         return new SetupGuide(
-            title: 'A GitHub token for reviews',
+            title: __('A GitHub token for reviews'),
             url: 'https://github.com/settings/personal-access-tokens/new',
-            linkLabel: 'New fine-grained personal access token on GitHub',
+            linkLabel: __('New fine-grained personal access token on GitHub'),
             steps: [
-                'Sign in at GitHub as the account the review acts as: an account of its own, a machine user such as `acme-review`, invited to the organisation with **Write** access to the repositories. GitHub does not let an account approve its own pull request.',
-                'Open the link, name the token and give it an expiry date. As **Resource owner**, pick the organisation (or the user) whose repositories are reviewed.',
-                'Under **Repository access**, pick **Only select repositories** with the ones to review, or **All repositories**.',
-                'Under **Repository permissions**, set the permissions below. For a webhook on the whole organisation, also set **Webhooks: Read and write** under **Organization permissions**.',
-                'Generate the token, copy it and paste it here. Under Settings, fill in the organisation or user as **Owner**.',
-                'If the organisation approves fine-grained tokens, an owner approves it under the organisation\'s **Settings → Personal access tokens → Pending requests**.',
+                __('Sign in at GitHub as the account the review acts as: an account of its own, a machine user such as `acme-review`, invited to the organisation with **Write** access to the repositories. GitHub does not let an account approve its own pull request.'),
+                __('Open the link, name the token and give it an expiry date. As **Resource owner**, pick the organisation (or the user) whose repositories are reviewed.'),
+                __('Under **Repository access**, pick **Only select repositories** with the ones to review, or **All repositories**.'),
+                __('Under **Repository permissions**, set the permissions below. For a webhook on the whole organisation, also set **Webhooks: Read and write** under **Organization permissions**.'),
+                __('Generate the token, copy it and paste it here. Under Settings, fill in the organisation or user as **Owner**.'),
+                __('If the organisation approves fine-grained tokens, an owner approves it under the organisation\'s **Settings → Personal access tokens → Pending requests**.'),
             ],
             permissions: [
-                'Contents: Read' => 'clones the repository and reads its commits and files.',
-                'Metadata: Read' => 'GitHub adds it to every token; finds the repositories by name.',
-                'Pull requests: Read and write' => 'reads the pull request and its diff, writes its description, comments on its lines, and approves or requests changes.',
-                'Issues: Read and write' => 'comments on the pull request\'s conversation, which GitHub keeps as an issue.',
-                'Commit statuses: Read and write' => 'sets the "AI Review" status on the commit.',
-                'Webhooks: Read and write' => 'only to have "Add it for me" add the webhook: on each repository, or as an organisation permission on the organisation.',
+                'Contents: Read' => __('clones the repository and reads its commits and files.'),
+                'Metadata: Read' => __('GitHub adds it to every token; finds the repositories by name.'),
+                'Pull requests: Read and write' => __('reads the pull request and its diff, writes its description, comments on its lines, and approves or requests changes.'),
+                'Issues: Read and write' => __('comments on the pull request\'s conversation, which GitHub keeps as an issue.'),
+                'Commit statuses: Read and write' => __('sets the "AI Review" status on the commit.'),
+                'Webhooks: Read and write' => __('only to have "Add it for me" add the webhook: on each repository, or as an organisation permission on the organisation.'),
             ],
             notes: [
-                'Leave the token and the owner empty for public repositories: they are then only read, and their pull requests can be tried.',
-                'A token expires: note the date and replace it here before then. **Test** in the list says whether it still works.',
+                __('Leave the token and the owner empty for public repositories: they are then only read, and their pull requests can be tried.'),
+                __('A token expires: note the date and replace it here before then. **Test** in the list says whether it still works.'),
             ],
         );
     }
@@ -296,7 +296,7 @@ class GitHubDriver implements ExplainsSetup, SourceControlDriver
 
     public function webhookHelp(): string
     {
-        return 'Starts a review on every new commit of a pull request, when a draft is marked ready, and on a /review comment. "Add it for me" adds it to the organisation, or to each repository of the connection on a user\'s account. By hand it goes under the repository\'s or organisation\'s Settings, Webhooks: this URL as the payload URL, content type application/json, this secret, and the events Pull requests, Issue comments and Pull request review comments.';
+        return __('Starts a review on every new commit of a pull request, when a draft is marked ready, and on a /review comment. "Add it for me" adds it to the organisation, or to each repository of the connection on a user\'s account. By hand it goes under the repository\'s or organisation\'s Settings, Webhooks: this URL as the payload URL, content type application/json, this secret, and the events Pull requests, Issue comments and Pull request review comments.');
     }
 
     protected function request(Connection $connection): PendingRequest

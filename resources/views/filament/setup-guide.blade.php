@@ -10,7 +10,7 @@
     </p>
 
     @if ($guide->steps !== [])
-        <h3>Steps</h3>
+        <h3>{{ __('Steps') }}</h3>
         <ol>
             @foreach ($guide->steps as $step)
                 <li>{{ $inline($step) }}</li>
@@ -19,7 +19,7 @@
     @endif
 
     @if ($guide->permissions !== [])
-        <h3>Scopes and permissions</h3>
+        <h3>{{ __('Scopes and permissions') }}</h3>
         <ul>
             @foreach ($guide->permissions as $permission => $why)
                 <li><code>{{ $permission }}</code>: {{ $inline($why) }}</li>

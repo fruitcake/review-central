@@ -48,18 +48,18 @@ class BitbucketDriver implements ExplainsSetup, SourceControlDriver
     public function credentialFields(): array
     {
         return [
-            Secret::make('access_token')->label('Access token')
-                ->helperText('A workspace access token with the scope pullrequest:write, and webhook to have the webhook added for you. The review comments and approves as this token.'),
+            Secret::make('access_token')->label(__('Access token'))
+                ->helperText(__('A workspace access token with the scope pullrequest:write, and webhook to have the webhook added for you. The review comments and approves as this token.')),
         ];
     }
 
     public function settingFields(): array
     {
         return [
-            TextInput::make('workspace')->label('Workspace')->required()->rule('regex:/^[\w.-]+$/')
-                ->helperText('The workspace ID from the URL: bitbucket.org/<workspace>.'),
-            TextInput::make('username')->label('Account email')->email()
-                ->helperText('Only with an API token of a user account, which is sent with this address. Leave empty for a workspace access token.'),
+            TextInput::make('workspace')->label(__('Workspace'))->required()->rule('regex:/^[\w.-]+$/')
+                ->helperText(__('The workspace ID from the URL: bitbucket.org/<workspace>.')),
+            TextInput::make('username')->label(__('Account email'))->email()
+                ->helperText(__('Only with an API token of a user account, which is sent with this address. Leave empty for a workspace access token.')),
             ReadOnlyClient::field(),
         ];
     }
@@ -72,23 +72,23 @@ class BitbucketDriver implements ExplainsSetup, SourceControlDriver
     public function setupGuide(): SetupGuide
     {
         return new SetupGuide(
-            title: 'A Bitbucket workspace access token',
+            title: __('A Bitbucket workspace access token'),
             url: 'https://bitbucket.org/account/workspaces/',
-            linkLabel: 'Your Bitbucket workspaces',
+            linkLabel: __('Your Bitbucket workspaces'),
             steps: [
-                'Open the link and pick the workspace, then **Settings** (the cog) → **Security** → **Access tokens** → **Create workspace access token**.',
-                'Name it after what it is, such as "AI Review": the review comments and approves under that name.',
-                'Tick the scopes below and create it.',
-                'Copy the token, which Bitbucket shows once, and paste it here.',
-                'Under Settings, fill in the workspace ID from the address `bitbucket.org/<workspace>`, and leave **Account email** empty.',
+                __('Open the link and pick the workspace, then **Settings** (the cog) → **Security** → **Access tokens** → **Create workspace access token**.'),
+                __('Name it after what it is, such as "AI Review": the review comments and approves under that name.'),
+                __('Tick the scopes below and create it.'),
+                __('Copy the token, which Bitbucket shows once, and paste it here.'),
+                __('Under Settings, fill in the workspace ID from the address `bitbucket.org/<workspace>`, and leave **Account email** empty.'),
             ],
             permissions: [
-                'pullrequest:write' => 'reads the pull requests and their diff, comments, adds and resolves tasks, approves or requests changes, and writes the description. Bitbucket ticks the repository scopes it implies, which clone the repository and put the status and report on the commit.',
-                'webhook' => 'only to have "Add it for me" add the webhook for every repository of the workspace: Bitbucket has no screen for that, only its API.',
+                'pullrequest:write' => __('reads the pull requests and their diff, comments, adds and resolves tasks, approves or requests changes, and writes the description. Bitbucket ticks the repository scopes it implies, which clone the repository and put the status and report on the commit.'),
+                'webhook' => __('only to have "Add it for me" add the webhook for every repository of the workspace: Bitbucket has no screen for that, only its API.'),
             ],
             notes: [
-                'Workspace access tokens come with Bitbucket\'s Premium plan. Without it, make an API token with scopes for a user account of its own at [id.atlassian.com](https://id.atlassian.com/manage-profile/security/api-tokens), with the same access to repositories, pull requests and webhooks, and fill in that account\'s email under Settings.',
-                'Without the webhook scope, add the webhook to each repository by hand: see **Webhook** in the list.',
+                __('Workspace access tokens come with Bitbucket\'s Premium plan. Without it, make an API token with scopes for a user account of its own at [id.atlassian.com](https://id.atlassian.com/manage-profile/security/api-tokens), with the same access to repositories, pull requests and webhooks, and fill in that account\'s email under Settings.'),
+                __('Without the webhook scope, add the webhook to each repository by hand: see **Webhook** in the list.'),
             ],
         );
     }
@@ -240,7 +240,7 @@ class BitbucketDriver implements ExplainsSetup, SourceControlDriver
 
     public function webhookHelp(): string
     {
-        return 'Starts a review on a /review comment, when a draft is marked ready, and on every new commit of a pull request. "Add it for me" adds it for every repository of the workspace. By hand it goes on each repository, under Repository settings, Webhooks, with the pull request events Created, Updated, Merged, Declined and Comment created.';
+        return __('Starts a review on a /review comment, when a draft is marked ready, and on every new commit of a pull request. "Add it for me" adds it for every repository of the workspace. By hand it goes on each repository, under Repository settings, Webhooks, with the pull request events Created, Updated, Merged, Declined and Comment created.');
     }
 
     public function webhookEvent(Connection $connection, Request $request): ?WebhookEvent

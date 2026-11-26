@@ -13,9 +13,9 @@ enum FindingVerdictKind: string
     public function text(): string
     {
         return match ($this) {
-            self::Valid => 'Valid, will fix',
-            self::NotAProblem => 'Not a problem',
-            self::Wrong => 'Factually wrong',
+            self::Valid => __('Valid, will fix'),
+            self::NotAProblem => __('Not a problem'),
+            self::Wrong => __('Factually wrong'),
         };
     }
 

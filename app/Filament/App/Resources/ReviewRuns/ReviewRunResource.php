@@ -50,11 +50,22 @@ class ReviewRunResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedClipboardDocumentCheck;
 
-    protected static ?string $navigationLabel = 'Reviews';
-
-    protected static ?string $modelLabel = 'review';
-
     protected static ?int $navigationSort = 10;
+
+    public static function getNavigationLabel(): string
+    {
+        return __('Reviews');
+    }
+
+    public static function getModelLabel(): string
+    {
+        return __('review');
+    }
+
+    public static function getPluralModelLabel(): string
+    {
+        return __('reviews');
+    }
 
     public static function statusColor(string $status): string
     {
@@ -73,22 +84,23 @@ class ReviewRunResource extends Resource
             ->defaultSort('started_at', 'desc')
             ->columns([
                 TextColumn::make('slug')
-                    ->label('Pull request')
+                    ->label(__('Pull request'))
                     ->state(fn (ReviewRun $record): string => RunPresenter::title($record))
                     ->weight('semibold')
                     ->wrap()
                     ->description(fn (ReviewRun $record): string => collect([
                         $record->slug.($record->pull_request_id ? " #{$record->pull_request_id}" : ''),
                         $record->branch,
-                        LocalTime::of($record->started_at)->isSameDay(LocalTime::now()) ? $record->started_at->diffForHumans() : LocalTime::of($record->started_at)->format('j M H:i'),
+                        LocalTime::of($record->started_at)->isSameDay(LocalTime::now()) ? $record->started_at->diffForHumans() : LocalTime::of($record->started_at)->translatedFormat('j M H:i'),
                     ])->implode(' · '))
                     ->searchable(['slug', 'branch'])
                     ->sortable(['started_at']),
                 TextColumn::make('status')
-                    ->label('Result')
+                    ->label(__('Result'))
                     ->html()
                     ->state(fn (ReviewRun $record): HtmlString => self::chip(RunPresenter::outcome($record)['label'], RunPresenter::outcome($record)['tone'])),
                 TextColumn::make('findings')
+                    ->label(__('Findings'))
                     ->html()
                     ->state(function (ReviewRun $record): HtmlString {
                         if ($record->findings === null) {
@@ -98,26 +110,37 @@ class ReviewRunResource extends Resource
                         $open = RunPresenter::openBySeverity($record);
 
                         return $open === []
-                            ? self::chip('None', 'none')
-                            : new HtmlString(collect($open)->map(fn (int $count, string $severity): string => (string) self::chip("{$count} {$severity}", $severity))->implode(' '));
+                            ? self::chip(__('None'), 'none')
+                            : new HtmlString(collect($open)->map(fn (int $count, string $severity): string => (string) self::chip(match ($severity) {
+                                'high' => __(':count high', ['count' => $count]),
+                                'medium' => __(':count medium', ['count' => $count]),
+                                default => __(':count low', ['count' => $count]),
+                            }, $severity))->implode(' '));
                     }),
                 TextColumn::make('runner')
-                    ->label('Runner · reviewer')
-                    ->state(fn (ReviewRun $record): string => rescue(fn (): string => app(Runners::class)->get((string) $record->runner)->shortLabel(), 'Unknown', false))
+                    ->label(__('Runner · reviewer'))
+                    ->state(fn (ReviewRun $record): string => rescue(fn (): string => app(Runners::class)->get((string) $record->runner)->shortLabel(), __('Unknown'), false))
                     // Who reviewed and with which model: two reviewers can share one.
                     ->description(fn (ReviewRun $record): ?string => implode(' · ', array_filter([RunPresenter::reviewer($record), $record->model])) ?: null),
-                TextColumn::make('duration_seconds')->label('Duration')
+                TextColumn::make('duration_seconds')->label(__('Duration'))
                     ->formatStateUsing(fn (?int $state): ?string => RunPresenter::duration($state))->placeholder('—')
                     // The sandbox it left for the next review of the branch, while it is there.
-                    ->description(fn (ReviewRun $record): ?HtmlString => self::warm($record, 'Sandbox warm until :time')),
-                TextColumn::make('cost')->formatStateUsing(fn (mixed $state): string => Currency::show($state))->placeholder('—')->sortable()
-                    ->description(fn (ReviewRun $record): ?string => $record->cost_estimated ? 'estimated' : null),
+                    ->description(fn (ReviewRun $record): ?HtmlString => self::warm($record, __('Sandbox warm until :time'))),
+                TextColumn::make('cost')->label(__('Cost'))->formatStateUsing(fn (mixed $state): string => Currency::show($state))->placeholder('—')->sortable()
+                    ->description(function (ReviewRun $record): ?string {
+                        if (! $record->cost_estimated) {
+                            return null;
+                        }
+
+                        return __('estimated');
+                    }),
             ])
             ->filters([
                 SelectFilter::make('repository_id')
-                    ->label('Repository')
+                    ->label(__('Repository'))
                     ->options(fn (): array => CurrentTenant::get()->repositories()->pluck('slug', 'id')->all()),
                 SelectFilter::make('runner')
+                    ->label(__('Runner'))
                     ->options(fn (): array => array_map(
                         fn (string $name): string => app(Runners::class)->get($name)->shortLabel(),
                         array_combine($names = array_map(strval(...), array_keys((array) config('review.runners'))), $names),
@@ -128,22 +151,22 @@ class ReviewRunResource extends Resource
             ->recordUrl(fn (ReviewRun $record): string => self::getUrl('view', ['record' => $record]))
             ->recordActions([
                 Action::make('pullRequest')
-                    ->label('Open the pull request')
-                    ->tooltip('Open the pull request on its host')
+                    ->label(__('Open the pull request'))
+                    ->tooltip(__('Open the pull request on its host'))
                     ->icon(Heroicon::OutlinedArrowTopRightOnSquare)
                     ->iconButton()
                     ->color('gray')
                     ->visible(fn (ReviewRun $record): bool => $record->pull_request_id !== null)
                     ->url(fn (ReviewRun $record): ?string => rescue(fn (): ?string => $record->pullRequestUrl(), null, false), shouldOpenInNewTab: true),
                 self::dismissAction(),
-                ViewAction::make()->label('Open')->icon(null),
+                ViewAction::make()->label(__('Open'))->icon(null),
             ])
             ->toolbarActions([
                 BulkAction::make('dismiss')
-                    ->label('Set aside')
+                    ->label(__('Set aside'))
                     ->icon(Heroicon::OutlinedArchiveBox)
                     ->requiresConfirmation()
-                    ->modalDescription('The reviews among these that did not finish leave "Did not finish" and "Needs action". They stay under All and in the figures.')
+                    ->modalDescription(__('The reviews among these that did not finish leave "Did not finish" and "Needs action". They stay under All and in the figures.'))
                     ->action(fn (Collection $records) => $records->each(fn (Model $run) => $run instanceof ReviewRun && $run->canBeDismissed() && $run->update(['dismissed_at' => now()])))
                     ->deselectRecordsAfterCompletion(),
             ]);
@@ -160,39 +183,40 @@ class ReviewRunResource extends Resource
         return [
             ...($withExisting ? [self::ignoreExistingField()] : []),
             Select::make('runner')
-                ->label('Runs on')
+                ->label(__('Runs on'))
                 ->options(fn (Runners $runners): array => $runners->options())
-                ->placeholder('As the repository would')
+                ->placeholder(__('As the repository would'))
                 ->live()
                 ->afterStateUpdated(fn (Get $get, Set $set) => self::keepModel($get, $set))
-                ->helperText('Docker and a Cloudflare sandbox run a reviewer that reads the repository. The diff alone sends only the pull request\'s diff to the AI provider: no clone and no reviewer to choose; the model and effort below then name the provider\'s own.'),
+                ->helperText(__('Docker and a Cloudflare sandbox run a reviewer that reads the repository. The diff alone sends only the pull request\'s diff to the AI provider: no clone and no reviewer to choose; the model and effort below then name the provider\'s own.')),
             Select::make('provider')
-                ->label('Reviewer')
+                ->label(__('Reviewer'))
                 ->options(fn (ReviewCredentials $credentials): array => $credentials->trialReviewers(CurrentTenant::get()))
-                ->placeholder('As the repository would get')
+                ->placeholder(__('As the repository would get'))
                 // The models to pick from follow the reviewer.
                 ->live()
                 ->afterStateUpdated(fn (Get $get, Set $set) => self::keepModel($get, $set))
                 ->visible(fn (Get $get): bool => $get('runner') !== DiffRunner::NAME),
             ReviewSettingsForm::modelField('model', fn (Get $get): array => self::trialModels($get('runner') === DiffRunner::NAME ? null : $get('provider')))
-                ->placeholder('The reviewer\'s own')
-                ->helperText('Pick one, or type the name as the reviewer takes it. A Laravel AI tier is read for Claude Code or Codex when the trial starts. For Pi, a provider can go in front: google/gemini-3-pro.'),
+                ->placeholder(__('The reviewer\'s own'))
+                ->helperText(__('Pick one, or type the name as the reviewer takes it. A Laravel AI tier is read for Claude Code or Codex when the trial starts. For Pi, a provider can go in front: google/gemini-3-pro.')),
             Select::make('effort')
+                ->label(__('Effort'))
                 ->options(collect(ReviewEffort::cases())->mapWithKeys(fn (ReviewEffort $effort): array => [$effort->value => $effort->text()]))
-                ->placeholder('The reviewer\'s own'),
+                ->placeholder(__('The reviewer\'s own')),
             Toggle::make('plain')
-                ->label('Plain review: the reviewer alone')
+                ->label(__('Plain review: the reviewer alone'))
                 ->live()
                 ->visible(fn (Get $get): bool => $get('runner') !== DiffRunner::NAME)
-                ->helperText('Claude Code or Codex asked for a review with the review\'s own instructions, and nothing else: no OpenCodeReview, no scan, no floor guard, no extra passes and no second check. To see what those add.'),
-            Fieldset::make('Parts of the review')
+                ->helperText(__('Claude Code or Codex asked for a review with the review\'s own instructions, and nothing else: no OpenCodeReview, no scan, no floor guard, no extra passes and no second check. To see what those add.')),
+            Fieldset::make(__('Parts of the review'))
                 ->columns(2)
                 ->visible(fn (Get $get): bool => $get('runner') !== DiffRunner::NAME && ! $get('plain'))
                 ->schema(array_map(
                     fn (string $field): Select => Select::make("modules.{$field}")
-                        ->label(ucfirst(ReviewSettings::MODULE_LABELS[$field]))
-                        ->options(['true' => 'On', 'false' => 'Off'])
-                        ->placeholder('As the repository has it'),
+                        ->label(ucfirst(ReviewSettings::moduleLabels()[$field]))
+                        ->options(['true' => __('On'), 'false' => __('Off')])
+                        ->placeholder(__('As the repository has it')),
                     array_keys(ReviewSettings::MODULES),
                 )),
         ];
@@ -201,9 +225,9 @@ class ReviewRunResource extends Resource
     public static function ignoreExistingField(): Toggle
     {
         return Toggle::make('ignore_existing')
-            ->label('Review as though nobody had')
+            ->label(__('Review as though nobody had'))
             ->default(true)
-            ->helperText('Leaves out the comments and earlier findings on the pull request, from this review and from people. Turn it off to try a follow-up review instead.');
+            ->helperText(__('Leaves out the comments and earlier findings on the pull request, from this review and from people. Turn it off to try a follow-up review instead.'));
     }
 
     /**
@@ -236,7 +260,10 @@ class ReviewRunResource extends Resource
     }
 
     /** What stopping a review does, for the question before it. */
-    public const STOP_DESCRIPTION = 'A review that waits is closed at once. One that runs is stopped within a few seconds, with its sandbox: nothing it found is posted, and the pull request shows it as stopped. What its AI provider already did is still paid for. "Re-run" starts a new one.';
+    public static function stopDescription(): string
+    {
+        return __('A review that waits is closed at once. One that runs is stopped within a few seconds, with its sandbox: nothing it found is posted, and the pull request shows it as stopped. What its AI provider already did is still paid for. "Re-run" starts a new one.');
+    }
 
     /**
      * Stops a review that waits or runs, as the person who asked, and says so.
@@ -247,16 +274,18 @@ class ReviewRunResource extends Resource
         $running = $run?->status === ReviewRun::STATUS_RUNNING;
 
         if ($run === null || ! $stops->stop($run, $user instanceof User ? $user->name : 'someone')) {
-            Notification::make()->title('There is no review to stop')->body('It finished, or was stopped, meanwhile.')->warning()->send();
+            Notification::make()->title(__('There is no review to stop'))->body(__('It finished, or was stopped, meanwhile.'))->warning()->send();
 
             return;
         }
 
-        Notification::make()
-            ->title($running ? 'The review is stopping' : 'The review is stopped')
-            ->body($running ? 'Its reviewer and sandbox are stopped within a few seconds.' : null)
-            ->success()
-            ->send();
+        $notification = Notification::make()->title(__('The review is stopped'))->success();
+
+        if ($running) {
+            $notification->title(__('The review is stopping'))->body(__('Its reviewer and sandbox are stopped within a few seconds.'));
+        }
+
+        $notification->send();
     }
 
     /**
@@ -265,11 +294,11 @@ class ReviewRunResource extends Resource
     public static function started(?ReviewRun $run, ?string $body = null): void
     {
         Notification::make()
-            ->title('The review is started')
+            ->title(__('The review is started'))
             ->body($body)
             ->success()
             ->actions($run === null ? [] : [
-                Action::make('open')->label('Open the review')->url(self::getUrl('view', ['record' => $run])),
+                Action::make('open')->label(__('Open the review'))->url(self::getUrl('view', ['record' => $run])),
             ])
             ->send();
     }
@@ -316,7 +345,7 @@ class ReviewRunResource extends Resource
     public static function dismissAction(): Action
     {
         return Action::make('dismiss')
-            ->label('Set aside')
+            ->label(__('Set aside'))
             ->icon(Heroicon::OutlinedArchiveBox)
             ->color('gray')
             ->visible(fn (ReviewRun $record): bool => $record->canBeDismissed())

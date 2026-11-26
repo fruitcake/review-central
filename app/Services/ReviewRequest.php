@@ -555,7 +555,7 @@ class ReviewRequest
         // Said at once to a person who asked. A webhook's review goes ahead, and
         // ends as one that did not finish, with the reason in its log.
         if ($strict && ! $runner->available()) {
-            throw new RuntimeException("{$repository->fullName()} reviews on {$runner->label()}, which is not set up on this installation. {$runner->setupHint()} Or pick another runner under \"Runs on\".");
+            throw new RuntimeException(__(':repository reviews on :runner, which is not set up on this installation. :hint Or pick another runner under "Runs on".', ['repository' => $repository->fullName(), 'runner' => $runner->label(), 'hint' => $runner->setupHint()]));
         }
 
         // A person asked for this review by name, so a draft is reviewed, as on a

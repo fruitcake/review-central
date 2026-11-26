@@ -27,13 +27,24 @@ class ReviewInstructionResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedDocumentText;
 
-    protected static ?string $navigationLabel = 'Instructions';
-
-    protected static ?string $modelLabel = 'instruction';
-
     protected static ?string $recordTitleAttribute = 'key';
 
     protected static ?int $navigationSort = 40;
+
+    public static function getModelLabel(): string
+    {
+        return __('instruction');
+    }
+
+    public static function getPluralModelLabel(): string
+    {
+        return __('instructions');
+    }
+
+    public static function getNavigationLabel(): string
+    {
+        return __('Instructions');
+    }
 
     public static function form(Schema $schema): Schema
     {
@@ -43,8 +54,8 @@ class ReviewInstructionResource extends Resource
     public static function table(Table $table): Table
     {
         return ReviewInstructionSchema::table($table)
-            ->emptyStateHeading('The default instructions apply')
-            ->emptyStateDescription('Add a file of your own, or start from a default to change it for your repositories.');
+            ->emptyStateHeading(__('The default instructions apply'))
+            ->emptyStateDescription(__('Add a file of your own, or start from a default to change it for your repositories.'));
     }
 
     public static function getPages(): array

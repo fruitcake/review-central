@@ -81,33 +81,31 @@ class RepositoryOverview extends TenantOverview
 
         return [
             [
-                'label' => 'Reviews', 'value' => (string) $runs->count(), 'tone' => 'neutral', 'bar' => null,
-                'note' => $previous === 0
-                    ? "None in the {$days} days before"
-                    : sprintf('%+d%% vs previous %dd', (int) round(($runs->count() - $previous) / $previous * 100), $days),
+                'label' => __('Reviews'), 'value' => (string) $runs->count(), 'tone' => 'neutral', 'bar' => null,
+                'note' => self::comparedTo($runs->count(), $previous, $days),
             ],
             [
-                'label' => 'Changes requested', 'tone' => 'neutral', 'bar' => null,
+                'label' => __('Changes requested'), 'tone' => 'neutral', 'bar' => null,
                 'value' => $finished->isEmpty() ? '—' : round($blocked / $finished->count() * 100).'%',
-                'note' => $finished->isEmpty() ? 'No finished reviews yet' : "{$blocked} of {$finished->count()} finished",
+                'note' => $finished->isEmpty() ? __('No finished reviews yet') : __(':count of :total finished', ['count' => $blocked, 'total' => $finished->count()]),
             ],
             [
-                'label' => 'Findings accepted', 'tone' => 'primary', 'bar' => null,
+                'label' => __('Findings accepted'), 'tone' => 'primary', 'bar' => null,
                 'value' => $acceptance['percent'] === null ? '—' : "{$acceptance['percent']}%",
-                'note' => $acceptance['rated'] === 0 ? 'No findings rated yet' : "{$acceptance['accepted']} of {$acceptance['rated']} rated findings",
+                'note' => $acceptance['rated'] === 0 ? __('No findings rated yet') : __(':count of :total rated findings', ['count' => $acceptance['accepted'], 'total' => $acceptance['rated']]),
             ],
             [
-                'label' => 'Median duration', 'tone' => 'neutral', 'bar' => null,
+                'label' => __('Median duration'), 'tone' => 'neutral', 'bar' => null,
                 'value' => $durations->isEmpty() ? '—' : (string) RunPresenter::duration((int) round((float) $durations->median())),
-                'note' => $durations->isEmpty() ? 'No finished reviews yet' : 'p90 '.RunPresenter::duration((int) $durations[(int) ceil($durations->count() * 0.9) - 1]),
+                'note' => $durations->isEmpty() ? __('No finished reviews yet') : 'p90 '.RunPresenter::duration((int) $durations[(int) ceil($durations->count() * 0.9) - 1]),
             ],
             [
-                'label' => 'Cost', 'value' => Currency::showOwn($cost, $repository->tenant), 'tone' => 'neutral', 'bar' => null,
-                'note' => $runs->isEmpty() ? 'No reviews in the period' : 'about '.Currency::showOwn($cost / $runs->count(), $repository->tenant).' a review',
+                'label' => __('Cost'), 'value' => Currency::showOwn($cost, $repository->tenant), 'tone' => 'neutral', 'bar' => null,
+                'note' => $runs->isEmpty() ? __('No reviews in the period') : __('about :cost a review', ['cost' => Currency::showOwn($cost / $runs->count(), $repository->tenant)]),
             ],
             [
-                'label' => 'Open findings', 'value' => (string) $openFindings, 'tone' => $openFindings > 0 ? 'danger' : 'neutral', 'bar' => null,
-                'note' => 'Left open on merged pull requests',
+                'label' => __('Open findings'), 'value' => (string) $openFindings, 'tone' => $openFindings > 0 ? 'danger' : 'neutral', 'bar' => null,
+                'note' => __('Left open on merged pull requests'),
             ],
         ];
     }
@@ -127,7 +125,7 @@ class RepositoryOverview extends TenantOverview
             $durations = $own->where('status', ReviewRun::STATUS_FINISHED)->pluck('duration_seconds')->reject(fn (?int $seconds): bool => $seconds === null);
 
             return [
-                'name' => ReviewProvider::tryFrom($agent)?->text() ?? ($agent === DiffReview::AGENT ? 'The diff alone' : $agent),
+                'name' => ReviewProvider::tryFrom($agent)?->text() ?? ($agent === DiffReview::AGENT ? __('The diff alone') : $agent),
                 'reviews' => $own->count(),
                 'accepted' => $acceptance['percent'] === null ? '—' : "{$acceptance['percent']}%",
                 'cost' => (float) $own->sum(fn (ReviewRun $run): float => (float) $run->cost),

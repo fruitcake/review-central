@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Auth;
 
 use App\Enums\LandingPage;
+use App\Enums\Language;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\Landing;
@@ -90,10 +91,17 @@ class EditProfile extends BaseEditProfile
                 $this->getEmailFormComponent(),
                 self::accountsSection(),
                 TagsInput::make('source_accounts')
-                    ->label(fn (): string => self::hasConnected() ? 'Other accounts on the hosts' : 'Your accounts on the hosts')
-                    ->placeholder('A nickname, login or account ID')
+                    ->label(fn (): string => self::hasConnected() ? __('Other accounts on the hosts') : __('Your accounts on the hosts'))
+                    ->placeholder(__('A nickname, login or account ID'))
                     ->nestedRecursiveRules(['string', 'max:120'])
-                    ->helperText('Your nickname or login on a host whose account you did not connect, as its pull requests name you: "With me" under Pull requests lists the ones whose turn is yours. They only tell which pull requests are yours, and give no access. Without any account, your name here is matched to the name the host shows.'),
+                    ->helperText(__('Your nickname or login on a host whose account you did not connect, as its pull requests name you: "With me" under Pull requests lists the ones whose turn is yours. They only tell which pull requests are yours, and give no access. Without any account, your name here is matched to the name the host shows.')),
+                Select::make('language')
+                    ->label(__('Language'))
+                    ->options(Language::options())
+                    ->enum(Language::class)
+                    // Not the installation's language by name: the user's own has replaced it in config by now.
+                    ->placeholder(__('Installation default'))
+                    ->helperText(__('The language you read Review Central in. Platform admin and email stay in English.')),
                 self::landingSection(),
                 $this->getPasswordFormComponent(),
                 $this->getPasswordConfirmationFormComponent(),
@@ -110,20 +118,20 @@ class EditProfile extends BaseEditProfile
     {
         $user = fn (): ?User => Filament::auth()->user() instanceof User ? Filament::auth()->user() : null;
 
-        return Section::make('After signing in')
+        return Section::make(__('After signing in'))
             ->visible(fn (): bool => ($current = $user()) !== null && app(Landing::class)->canChoose($current))
             ->schema([
                 Select::make('landing_page')
-                    ->label('Start on')
+                    ->label(__('Start on'))
                     ->options(fn (): array => LandingPage::options(withPlatform: (bool) $user()?->is_admin))
                     ->enum(LandingPage::class)
-                    ->placeholder(fn (): string => $user()?->is_admin ? LandingPage::Platform->label() : 'As your role in the tenant: its dashboard for an admin'),
+                    ->placeholder(fn (): string => $user()?->is_admin ? LandingPage::Platform->label() : __('As your role in the tenant: its dashboard for an admin')),
                 Select::make('landing_tenant_id')
-                    ->label('In')
+                    ->label(__('In'))
                     ->options(fn (): array => ($current = $user()) === null ? [] : $current->getTenants(Filament::getPanel('app'))->pluck('name', 'id')->all())
                     ->searchable()
-                    ->placeholder('The first, by name')
-                    ->helperText('The tenant you land in, and that the panel opens on.'),
+                    ->placeholder(__('The first, by name'))
+                    ->helperText(__('The tenant you land in, and that the panel opens on.')),
             ]);
     }
 
@@ -146,8 +154,8 @@ class EditProfile extends BaseEditProfile
     {
         $hosts = array_keys(PersonalConnections::HOSTS);
 
-        return Section::make('Bitbucket and GitHub')
-            ->description('Connect your own account. You then sign in with it, the pull requests that are yours show under "With me", and your replies to findings are written as you instead of by the team\'s connection with your name above them. Review Central uses it for nothing else.')
+        return Section::make(__('Bitbucket and GitHub'))
+            ->description(__('Connect your own account. You then sign in with it, the pull requests that are yours show under "With me", and your replies to findings are written as you instead of by the team\'s connection with your name above them. Review Central uses it for nothing else.'))
             ->visible(fn (): bool => collect($hosts)->contains(fn (string $host): bool => PersonalConnections::available($host)))
             ->schema(array_map(self::accountEntry(...), $hosts));
     }
@@ -169,37 +177,37 @@ class EditProfile extends BaseEditProfile
                 $connection = $connections->of($user(), $host);
 
                 return match (true) {
-                    $connection === null && $connections->signsIn($user(), $host) => 'Signs you in. Connect it to reply as you.',
-                    $connection === null => 'Not connected',
+                    $connection === null && $connections->signsIn($user(), $host) => __('Signs you in. Connect it to reply as you.'),
+                    $connection === null => __('Not connected'),
                     ($problem = $connections->problem($user(), $host)) !== null => $problem,
-                    default => 'Connected as '.($connection->nickname ?? $connection->account_id),
+                    default => __('Connected as :account', ['account' => $connection->nickname ?? $connection->account_id]),
                 };
             })
             ->weight(fn (): ?FontWeight => $connections->of($user(), $host) === null ? null : FontWeight::SemiBold)
             ->belowContent($host === PersonalConnections::GITHUB
-                ? 'Replies show your name with the app\'s badge, on repositories reviewed through the GitHub App.'
-                : 'Bitbucket lets it comment on every pull request you can.')
+                ? __('Replies show your name with the app\'s badge, on repositories reviewed through the GitHub App.')
+                : __('Bitbucket lets it comment on every pull request you can.'))
             ->afterContent([
                 Action::make('connect'.ucfirst($host))
-                    ->label(fn (): string => $connections->of($user(), $host) === null ? 'Connect' : 'Connect again')
+                    ->label(fn (): string => $connections->of($user(), $host) === null ? __('Connect') : __('Connect again'))
                     ->icon(Heroicon::OutlinedLink)
                     ->size('sm')
                     ->color(fn (): string => $connections->of($user(), $host) === null ? 'primary' : 'gray')
                     // Back to this profile, in the tenant it is open in.
                     ->url(fn (): string => route('connections.personal.redirect', array_filter(['host' => $host, 'tenant' => Filament::getTenant()?->getAttribute('slug')]))),
                 Action::make('disconnect'.ucfirst($host))
-                    ->label('Disconnect')
+                    ->label(__('Disconnect'))
                     ->size('sm')
                     ->color('gray')
                     ->visible(fn (): bool => $connections->of($user(), $host) !== null || $connections->signsIn($user(), $host))
                     ->requiresConfirmation()
-                    ->modalHeading("Disconnect {$name}?")
+                    ->modalHeading(__('Disconnect :host?', ['host' => $name]))
                     ->modalDescription($host === PersonalConnections::GITHUB
-                        ? 'Your replies are written by the app again, with your name above them, and the account no longer signs you in.'
-                        : 'Your replies are written by the team\'s connection again, with your name above them, and the account no longer signs you in.')
+                        ? __('Your replies are written by the app again, with your name above them, and the account no longer signs you in.')
+                        : __('Your replies are written by the team\'s connection again, with your name above them, and the account no longer signs you in.'))
                     ->action(function () use ($connections, $user, $host, $name): void {
                         $connections->disconnect($user(), $host);
-                        Notification::make()->title("{$name} is disconnected")->success()->send();
+                        Notification::make()->title(__(':host is disconnected', ['host' => $name]))->success()->send();
                     }),
             ]);
     }
@@ -210,23 +218,23 @@ class EditProfile extends BaseEditProfile
      */
     private static function assistantsSection(): Section
     {
-        return Section::make('In Claude and other AI assistants')
-            ->description('An assistant reads the reviews and acts on them as you, and no more than your account may. Add the address, and it signs you in here.')
+        return Section::make(__('In Claude and other AI assistants'))
+            ->description(__('An assistant reads the reviews and acts on them as you, and no more than your account may. Add the address, and it signs you in here.'))
             ->collapsible()
             ->collapsed()
             ->schema([
                 TextEntry::make('mcp_user')
-                    ->label('For a chat')
+                    ->label(__('For a chat'))
                     ->state(url('mcp/user'))
                     ->copyable()
                     ->fontFamily('mono')
-                    ->helperText(fn (): string => 'In Claude: Settings → Connectors → Add custom connector, named '.app(PlatformSettings::class)->mcpName().'. Your tenants, the open pull requests and whose turn each is, the reviews and their findings.'),
+                    ->helperText(fn (): string => __('In Claude: Settings → Connectors → Add custom connector, named :name. Your tenants, the open pull requests and whose turn each is, the reviews and their findings.', ['name' => app(PlatformSettings::class)->mcpName()])),
                 TextEntry::make('mcp_agent')
-                    ->label('For a coding agent, such as Claude Code')
+                    ->label(__('For a coding agent, such as Claude Code'))
                     ->state(fn (): string => 'claude mcp add --transport http '.app(PlatformSettings::class)->mcpName().' '.url('mcp/agent'))
                     ->copyable()
                     ->fontFamily('mono')
-                    ->helperText('Run it in the checkout. The agent reads the ticket and the review\'s instructions, can review a change before it is pushed, and settle a review\'s findings.'),
+                    ->helperText(__('Run it in the checkout. The agent reads the ticket and the review\'s instructions, can review a change before it is pushed, and settle a review\'s findings.')),
             ]);
     }
 }

@@ -20,7 +20,7 @@ class ListOpenFindings extends ListRecords
 
     public function getSubheading(): ?string
     {
-        return 'Findings a pull request was merged with while its last review still had them open. Review defaults sets how often they are checked against the main branch.';
+        return __('Findings a pull request was merged with while its last review still had them open. Review defaults sets how often they are checked against the main branch.');
     }
 
     /**
@@ -31,8 +31,8 @@ class ListOpenFindings extends ListRecords
     public function getTabs(): array
     {
         $views = [
-            'all' => ['All repositories', fn (Builder $query): Builder => $query],
-            self::MY_REPOSITORIES => ['My repositories', $this->inMyRepositories()],
+            'all' => [__('All repositories'), fn (Builder $query): Builder => $query],
+            self::MY_REPOSITORIES => [__('My repositories'), $this->inMyRepositories()],
         ];
 
         return array_map(fn (array $view): Tab => Tab::make($view[0])

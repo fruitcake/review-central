@@ -21,17 +21,17 @@ class ListReviewQuestions extends ListRecords
 
     public function getSubheading(): string|Htmlable|null
     {
-        return 'Asked of the reviewer on a pull request, with @review or under one of its comments, or on a review\'s page.';
+        return __('Asked of the reviewer on a pull request, with @review or under one of its comments, or on a review\'s page.');
     }
 
     public function getTabs(): array
     {
         $views = [
-            'all' => ['All', fn (Builder $query): Builder => $query],
-            self::MY_REPOSITORIES => ['My repositories', $this->inMyRepositories()],
-            'pending' => ['Being answered', fn (Builder $query): Builder => $query->whereIn('status', [ReviewQuestion::STATUS_ASKED, ReviewQuestion::STATUS_UNSURE])],
-            'answered' => ['Answered', fn (Builder $query): Builder => $query->where('status', ReviewQuestion::STATUS_ANSWERED)],
-            'unanswered' => ['No answer', fn (Builder $query): Builder => $query->whereIn('status', [ReviewQuestion::STATUS_FAILED, ReviewQuestion::STATUS_IGNORED])],
+            'all' => [__('All'), fn (Builder $query): Builder => $query],
+            self::MY_REPOSITORIES => [__('My repositories'), $this->inMyRepositories()],
+            'pending' => [__('Being answered'), fn (Builder $query): Builder => $query->whereIn('status', [ReviewQuestion::STATUS_ASKED, ReviewQuestion::STATUS_UNSURE])],
+            'answered' => [__('Answered'), fn (Builder $query): Builder => $query->where('status', ReviewQuestion::STATUS_ANSWERED)],
+            'unanswered' => [__('No answer'), fn (Builder $query): Builder => $query->whereIn('status', [ReviewQuestion::STATUS_FAILED, ReviewQuestion::STATUS_IGNORED])],
         ];
 
         return array_map(fn (array $view): Tab => Tab::make($view[0])

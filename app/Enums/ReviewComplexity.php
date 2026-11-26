@@ -16,7 +16,11 @@ enum ReviewComplexity: string
 
     public function text(): string
     {
-        return ucfirst($this->value);
+        return match ($this) {
+            self::Simple => __('Simple'),
+            self::Normal => __('Normal'),
+            self::Complex => __('Complex'),
+        };
     }
 
     /** The steps above the minimum it runs at. */

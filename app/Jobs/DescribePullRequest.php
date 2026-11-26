@@ -14,6 +14,7 @@ use App\SourceControl\Reviewers;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Traits\Localizable;
 use Throwable;
 
 /**
@@ -26,7 +27,7 @@ use Throwable;
  */
 class DescribePullRequest implements ShouldQueue
 {
-    use Queueable;
+    use Localizable, Queueable;
 
     public int $tries = 1;
 
@@ -65,12 +66,13 @@ class DescribePullRequest implements ShouldQueue
         }
 
         $run = $record->latestRun();
-        $turn = PullRequestTurn::of($record, $run);
+        // The material is for the model, which writes in English: whose turn it is too.
+        $turn = $this->withLocale('en', fn (): PullRequestTurn => PullRequestTurn::of($record, $run));
 
         try {
             // The team's model, or a tier read for this provider; the provider's small one where it picked none.
             $model = ReviewSettings::defaults($record->repository->tenant)->turn_model;
-            $note = $driver->describes($connection, self::instructions(), $this->material($record, $turn), filled($model) ? $model : null);
+            $note = $driver->describes($connection, self::instructions(), $this->withLocale('en', fn (): string => $this->material($record, $turn)), filled($model) ? $model : null);
         } catch (Throwable $exception) {
             report($exception);
 

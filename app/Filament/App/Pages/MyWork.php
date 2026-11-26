@@ -34,8 +34,6 @@ class MyWork extends Page
     /** How many of the latest reviews of their repositories it lists. */
     public const REVIEWS = 8;
 
-    protected static ?string $title = 'My work';
-
     protected static ?string $slug = 'my-work';
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedInboxStack;
@@ -44,9 +42,19 @@ class MyWork extends Page
 
     protected string $view = 'filament.app.my-work';
 
+    public function getTitle(): string|Htmlable
+    {
+        return __('My work');
+    }
+
+    public static function getNavigationLabel(): string
+    {
+        return __('My work');
+    }
+
     public function getSubheading(): string|Htmlable|null
     {
-        return 'What waits for you in '.CurrentTenant::get()->name.'. Your pull requests and reviews are found by the accounts on your profile.';
+        return __('What waits for you in :team. Your pull requests and reviews are found by the accounts on your profile.', ['team' => CurrentTenant::get()->name]);
     }
 
     /**

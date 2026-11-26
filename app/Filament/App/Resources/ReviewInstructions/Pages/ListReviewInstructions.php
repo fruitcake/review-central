@@ -18,12 +18,12 @@ class ListReviewInstructions extends ListRecords
     {
         return [
             Action::make('fromDefault')
-                ->label('Start from a default')
+                ->label(__('Start from a default'))
                 ->color('gray')
-                ->modalDescription('Copies a default instruction into your own, unchanged, so you can edit it. From then on your repositories read your copy and no longer follow changes to the default.')
+                ->modalDescription(__('Copies a default instruction into your own, unchanged, so you can edit it. From then on your repositories read your copy and no longer follow changes to the default.'))
                 ->schema([
                     Select::make('key')
-                        ->label('Default instruction')
+                        ->label(__('Default instruction'))
                         ->options(fn (): array => ReviewInstructions::defaultsWithoutCopy(CurrentTenant::get())->pluck('title', 'key')->all())
                         ->required(),
                 ])

@@ -40,9 +40,17 @@ class ReviewRule extends Model
     /** @use HasFactory<ReviewRuleFactory> */
     use HasFactory;
 
-    public const SEVERITIES = ['HIGH' => 'High', 'MEDIUM' => 'Medium', 'LOW' => 'Low'];
-
     protected $guarded = [];
+
+    /**
+     * The severities a rule can set, as the user reads them.
+     *
+     * @return array<string, string>
+     */
+    public static function severities(): array
+    {
+        return ['HIGH' => __('High'), 'MEDIUM' => __('Medium'), 'LOW' => __('Low')];
+    }
 
     /**
      * @return array<string, string>

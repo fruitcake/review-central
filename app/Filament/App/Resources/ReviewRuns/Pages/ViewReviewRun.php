@@ -87,41 +87,41 @@ class ViewReviewRun extends ViewRecord
         return [
             ReviewRunResource::dismissAction(),
             Action::make('stop')
-                ->label('Stop')
+                ->label(__('Stop'))
                 ->icon(Heroicon::OutlinedStop)
                 ->color('danger')
                 ->visible(fn (): bool => ReviewStops::stoppable($this->record))
                 ->requiresConfirmation()
-                ->modalHeading('Stop this review')
-                ->modalDescription(ReviewRunResource::STOP_DESCRIPTION)
-                ->modalSubmitActionLabel('Stop')
+                ->modalHeading(__('Stop this review'))
+                ->modalDescription(ReviewRunResource::stopDescription())
+                ->modalSubmitActionLabel(__('Stop'))
                 ->action(function (ReviewStops $stops): void {
                     ReviewRunResource::stopped($this->record, $stops);
                     $this->record->refresh();
                 }),
             Action::make('compare')
-                ->label('Compare with')
+                ->label(__('Compare with'))
                 ->icon(Heroicon::OutlinedScale)
                 ->color('gray')
                 ->visible(fn (): bool => TenantRole::isAdmin() && $this->record->pull_request_id !== null)
-                ->modalHeading('Compare this review with other setups')
-                ->modalDescription('Each row reviews this pull request as a trial: recorded here and kept off the pull request. They show side by side with this review, and one model can then judge their findings together. Each costs what a review costs.')
+                ->modalHeading(__('Compare this review with other setups'))
+                ->modalDescription(__('Each row reviews this pull request as a trial: recorded here and kept off the pull request. They show side by side with this review, and one model can then judge their findings together. Each costs what a review costs.'))
                 ->schema([
                     Toggle::make('at_run_commit')
-                        ->label(fn (): string => 'At this review\'s commit, '.substr((string) $this->record->commit, 0, 12))
+                        ->label(fn (): string => __('At this review\'s commit, :commit', ['commit' => substr((string) $this->record->commit, 0, 12)]))
                         ->default(true)
-                        ->helperText('Each setup reviews the code this review read, even when the pull request has moved on since. Off, each reviews the pull request as it is now. An earlier commit is always reviewed as though nobody had, and not from the diff alone.'),
+                        ->helperText(__('Each setup reviews the code this review read, even when the pull request has moved on since. Off, each reviews the pull request as it is now. An earlier commit is always reviewed as though nobody had, and not from the diff alone.')),
                     ReviewRunResource::ignoreExistingField(),
                     Repeater::make('rows')
-                        ->label('Setups')
+                        ->label(__('Setups'))
                         ->schema(ReviewRunResource::trialFields(withExisting: false))
                         ->columns(2)
                         ->default(fn (): array => [[], []])
                         ->minItems(1)
                         ->maxItems(ReviewComparison::MAX_ROWS)
-                        ->addActionLabel('Add a setup'),
+                        ->addActionLabel(__('Add a setup')),
                 ])
-                ->modalSubmitActionLabel('Start')
+                ->modalSubmitActionLabel(__('Start'))
                 ->action(function (array $data, ReviewComparisons $comparisons): void {
                     $rows = array_map(ReviewRunResource::trialOptions(...), array_values($data['rows'] ?? []));
                     $user = auth()->user();
@@ -130,24 +130,24 @@ class ViewReviewRun extends ViewRecord
                     $this->redirect(ReviewComparisonResource::getUrl('view', ['record' => $comparison]));
                 }),
             Action::make('rerun')
-                ->label('Re-run')
+                ->label(__('Re-run'))
                 ->icon(Heroicon::OutlinedArrowPath)
                 ->color('gray')
-                ->modalHeading('Re-run this review')
+                ->modalHeading(__('Re-run this review'))
                 ->modalDescription(fn (): string => $this->record->pull_request_id === null
-                    ? 'Starts a new review of this branch as it is now, and costs what a review costs.'
-                    : 'Reviews this pull request again, as it is now, with the setup below: this run\'s, to change what you want to compare. Kept here and off the pull request, unless you post it.')
+                    ? __('Starts a new review of this branch as it is now, and costs what a review costs.')
+                    : __('Reviews this pull request again, as it is now, with the setup below: this run\'s, to change what you want to compare. Kept here and off the pull request, unless you post it.'))
                 ->fillForm(fn (Runners $runners, ReviewCredentials $credentials): array => $this->rerunState($runners, $credentials))
                 ->schema(fn (): array => $this->record->pull_request_id === null ? [] : [
                     Toggle::make('post')
-                        ->label('Post it on the pull request')
+                        ->label(__('Post it on the pull request'))
                         ->default(false)
                         ->live()
-                        ->helperText('Off, it is a trial: recorded here, under Trials, and nothing is said on the pull request. On, it is the pull request\'s own next review, with the repository\'s settings: comments, findings and the build status.'),
+                        ->helperText(__('Off, it is a trial: recorded here, under Trials, and nothing is said on the pull request. On, it is the pull request\'s own next review, with the repository\'s settings: comments, findings and the build status.')),
                     Group::make(ReviewRunResource::trialFields())
                         ->visible(fn (Get $get): bool => ! $get('post')),
                 ])
-                ->modalSubmitActionLabel('Run')
+                ->modalSubmitActionLabel(__('Run'))
                 ->action(function (array $data, ReviewRequest $reviews, ReviewTrial $trials): void {
                     $run = $this->record;
 
@@ -160,11 +160,11 @@ class ViewReviewRun extends ViewRecord
 
                         $trials->start(CurrentTenant::get(), $run->repository->sourceControl()->pullRequestUrl($run->pull_request_id), ReviewRunResource::trialOptions($data));
 
-                        Notification::make()->title('The re-run is started')->body('It shows under Trials, and here as one of this pull request\'s runs.')->success()->send();
+                        Notification::make()->title(__('The re-run is started'))->body(__('It shows under Trials, and here as one of this pull request\'s runs.'))->success()->send();
                     } catch (ReviewTrialRefused $exception) {
-                        Notification::make()->title('This pull request cannot be re-run')->body($exception->getMessage())->danger()->persistent()->send();
+                        Notification::make()->title(__('This pull request cannot be re-run'))->body($exception->getMessage())->danger()->persistent()->send();
                     } catch (Throwable $exception) {
-                        Notification::make()->title('The review could not be started')->body($exception->getMessage())->danger()->send();
+                        Notification::make()->title(__('The review could not be started'))->body($exception->getMessage())->danger()->send();
                     }
                 }),
         ];
@@ -233,12 +233,12 @@ class ViewReviewRun extends ViewRecord
     public function makeRuleAction(): Action
     {
         return Action::make('makeRule')
-            ->label('Make it a rule')
+            ->label(__('Make it a rule'))
             ->link()
             ->size('sm')
             ->visible(fn (): bool => TenantRole::isAdmin())
-            ->modalHeading('Make it a rule')
-            ->modalDescription('The reviewer reads the team\'s rules on every review. A rule saved as "Not a defect here" stops it raising this again.')
+            ->modalHeading(__('Make it a rule'))
+            ->modalDescription(__('The reviewer reads the team\'s rules on every review. A rule saved as "Not a defect here" stops it raising this again.'))
             ->fillForm(function (array $arguments): array {
                 $finding = $this->finding((string) ($arguments['finding'] ?? ''));
 
@@ -259,7 +259,7 @@ class ViewReviewRun extends ViewRecord
                     'source' => $finding === null ? null : "{$this->record->uuid}:{$finding['id']}",
                 ]);
 
-                Notification::make()->title('The rule is saved')->body('The next review reads it.')->success()->send();
+                Notification::make()->title(__('The rule is saved'))->body(__('The next review reads it.'))->success()->send();
             });
     }
 
@@ -291,14 +291,14 @@ class ViewReviewRun extends ViewRecord
         $asked = $questions->askInPanel($this->record, $user, $this->question);
 
         if (is_string($asked)) {
-            Notification::make()->title('The reviewer cannot be asked here')->body($asked)->warning()->send();
+            Notification::make()->title(__('The reviewer cannot be asked here'))->body($asked)->warning()->send();
 
             return;
         }
 
         $this->question = '';
 
-        Notification::make()->title('Asked')->body('The answer appears here once the reviewer has looked, usually within a few minutes.')->success()->send();
+        Notification::make()->title(__('Asked'))->body(__('The answer appears here once the reviewer has looked, usually within a few minutes.'))->success()->send();
     }
 
     /**

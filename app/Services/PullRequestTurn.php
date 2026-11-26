@@ -53,7 +53,7 @@ final readonly class PullRequestTurn
     {
         $run ??= $lookUp ? $record->latestRun() : null;
         $author = $record->authorPerson();
-        $authorName = $record->author ?? 'The author';
+        $authorName = $record->author ?? __('The author');
         $reviewers = collect($record->reviewers ?? []);
         $since = $record->head_since;
         $before = fn (array $reviewer): bool => $since !== null && $reviewer['at'] !== null && Carbon::parse($reviewer['at'])->lt($since);
@@ -66,21 +66,31 @@ final readonly class PullRequestTurn
         $staleApprovals = $approved->filter($before);
         $pending = $reviewers->whereNull('state');
         $manual = $current && $run->status === ReviewRun::STATUS_FINISHED && $run->needsManualReview()
-            ? ' The AI review left points for a person to check.'
+            ? ' '.__('The AI review left points for a person to check.')
             : '';
+        $openFindings = $run?->openFindings() ?? 0;
+        $approvedAt = $staleApprovals->first()['at'] ?? null;
 
         [$rule, $role, $people, $action, $reason] = match (true) {
-            $record->draft => ['draft', self::AUTHOR, [$author], 'Finish the draft', "It is a draft: {$authorName} marks it ready for review when it is."],
-            $record->awaiting_approval => ['approval', self::TEAM, [], 'Start the review', 'Its code is from a fork or from an account this team does not trust: someone in the team starts the review here.'],
-            $run !== null && RunPresenter::live($run) => ['ai', self::AI, [], 'AI review running', 'The AI review of the newest commits is running.'],
-            MergeState::current($record) === true => ['conflicts', self::AUTHOR, [$author], 'Resolve the merge conflicts', 'It does not merge into '.($record->destination_branch ?? 'its destination')." as it stands: {$authorName} merges that in first."],
-            $staleChanges->isNotEmpty() => ['re-review-changes', self::REVIEWERS, $staleChanges->all(), 'Review again', "{$names($staleChanges)} asked for changes, and there are new commits since."],
-            $changes->isNotEmpty() => ['changes', self::AUTHOR, [$author], 'Address the requested changes', "{$names($changes)} asked for changes."],
-            $current && $run->status === ReviewRun::STATUS_FINISHED && strtoupper((string) $run->result) === 'FAILED' => ['ai-changes', self::AUTHOR, [$author], 'Address the AI review', 'The AI review asked for changes'.($run->openFindings() > 0 ? ": {$run->openFindings()} open ".($run->openFindings() === 1 ? 'finding' : 'findings').'.' : '.')],
-            $reviewers->isEmpty() => ['unassigned', self::NOBODY, [], 'Assign a reviewer', 'Nobody is asked to review it yet.'.$manual],
-            $staleApprovals->isNotEmpty() => ['re-review', self::REVIEWERS, $staleApprovals->all(), 'Review again', "{$names($staleApprovals)} approved ".self::date($staleApprovals->first()['at']).', before the newest commits.'.$manual],
-            $pending->isNotEmpty() => ['review', self::REVIEWERS, $pending->all(), 'Review', "Waiting for a review from {$names($pending)}.".$manual],
-            default => ['merge', self::AUTHOR, [$author], 'Merge', "Approved by {$names($approved)}: {$authorName} can merge.".$manual],
+            $record->draft => ['draft', self::AUTHOR, [$author], __('Finish the draft'), __('It is a draft: :author marks it ready for review when it is.', ['author' => $authorName])],
+            $record->awaiting_approval => ['approval', self::TEAM, [], __('Start the review'), __('Its code is from a fork or from an account this team does not trust: someone in the team starts the review here.')],
+            $run !== null && RunPresenter::live($run) => ['ai', self::AI, [], __('AI review running'), __('The AI review of the newest commits is running.')],
+            MergeState::current($record) === true => ['conflicts', self::AUTHOR, [$author], __('Resolve the merge conflicts'), $record->destination_branch === null
+                ? __('It does not merge into its destination as it stands: :author merges that in first.', ['author' => $authorName])
+                : __('It does not merge into :branch as it stands: :author merges that in first.', ['branch' => $record->destination_branch, 'author' => $authorName])],
+            $staleChanges->isNotEmpty() => ['re-review-changes', self::REVIEWERS, $staleChanges->all(), __('Review again'), __(':names asked for changes, and there are new commits since.', ['names' => $names($staleChanges)])],
+            $changes->isNotEmpty() => ['changes', self::AUTHOR, [$author], __('Address the requested changes'), __(':names asked for changes.', ['names' => $names($changes)])],
+            $current && $run->status === ReviewRun::STATUS_FINISHED && strtoupper((string) $run->result) === 'FAILED' => ['ai-changes', self::AUTHOR, [$author], __('Address the AI review'), match (true) {
+                $openFindings === 0 => __('The AI review asked for changes.'),
+                $openFindings === 1 => __('The AI review asked for changes: :count open finding.', ['count' => $openFindings]),
+                default => __('The AI review asked for changes: :count open findings.', ['count' => $openFindings]),
+            }],
+            $reviewers->isEmpty() => ['unassigned', self::NOBODY, [], __('Assign a reviewer'), __('Nobody is asked to review it yet.').$manual],
+            $staleApprovals->isNotEmpty() => ['re-review', self::REVIEWERS, $staleApprovals->all(), __('Review again'), ($approvedAt === null
+                ? __(':names approved earlier, before the newest commits.', ['names' => $names($staleApprovals)])
+                : __(':names approved on :date, before the newest commits.', ['names' => $names($staleApprovals), 'date' => LocalTime::of(Carbon::parse($approvedAt))->translatedFormat('j M')])).$manual],
+            $pending->isNotEmpty() => ['review', self::REVIEWERS, $pending->all(), __('Review'), __('Waiting for a review from :names.', ['names' => $names($pending)]).$manual],
+            default => ['merge', self::AUTHOR, [$author], __('Merge'), __('Approved by :names: :author can merge.', ['names' => $names($approved), 'author' => $authorName]).$manual],
         };
 
         $people = array_values(array_map(fn (array $person): array => [
@@ -114,10 +124,10 @@ final readonly class PullRequestTurn
     public function who(): string
     {
         return match ($this->role) {
-            self::TEAM => 'Someone in the team',
-            self::AI => 'The AI review',
-            self::NOBODY => 'Nobody yet',
-            default => self::names(array_column($this->people, 'name')) ?: 'Someone',
+            self::TEAM => __('Someone in the team'),
+            self::AI => __('The AI review'),
+            self::NOBODY => __('Nobody yet'),
+            default => self::names(array_column($this->people, 'name')) ?: __('Someone'),
         };
     }
 
@@ -145,12 +155,7 @@ final readonly class PullRequestTurn
         return match (count($names)) {
             0 => '',
             1 => (string) $names[0],
-            default => implode(', ', array_slice($names, 0, -1)).' and '.end($names),
+            default => __(':names and :last', ['names' => implode(', ', array_slice($names, 0, -1)), 'last' => end($names)]),
         };
-    }
-
-    protected static function date(?string $at): string
-    {
-        return $at === null ? 'earlier' : 'on '.LocalTime::of(Carbon::parse($at))->format('j M');
     }
 }

@@ -22,9 +22,9 @@ enum ReviewCommandAccess: string
     public function label(): string
     {
         return match ($this) {
-            self::Anyone => 'Anyone who can comment on the pull request',
-            self::Listed => 'Only the trusted accounts',
-            self::Nobody => 'Nobody: reviews start on a push, or from here',
+            self::Anyone => __('Anyone who can comment on the pull request'),
+            self::Listed => __('Only the trusted accounts'),
+            self::Nobody => __('Nobody: reviews start on a push, or from here'),
         };
     }
 

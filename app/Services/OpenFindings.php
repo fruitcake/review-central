@@ -64,7 +64,7 @@ class OpenFindings
                 'line' => $finding->line,
                 'details' => $finding->details,
                 'status' => $finding->status,
-                'status_text' => OpenFinding::LABELS[$finding->status] ?? $finding->status,
+                'status_text' => OpenFinding::statusLabels()[$finding->status] ?? $finding->status,
                 'note' => $finding->note,
                 'merged_at' => $finding->created_at?->toIso8601String(),
                 'checked_at' => $finding->checked_at?->toIso8601String(),

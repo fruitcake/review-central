@@ -38,7 +38,7 @@ class GeminiDriver extends ApiKeyDriver
     protected function keyNotes(): array
     {
         return [
-            'A key from Google AI Studio, for the Gemini API. A Google Cloud API key works too when it may call the Generative Language API.',
+            __('A key from Google AI Studio, for the Gemini API. A Google Cloud API key works too when it may call the Generative Language API.'),
         ];
     }
 

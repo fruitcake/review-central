@@ -43,11 +43,11 @@ class ReviewSettingsForm
             // in which order, at which model and effort.
             Text::make(fn (Get $get): HtmlString => self::summary($get, $defaults))->key('summary'),
             Repeater::make('providers')
-                ->label('Reviewers, in order')
+                ->label(__('Reviewers, in order'))
                 ->live()
                 ->schema([
                     Select::make('provider')
-                        ->label('Reviewer')
+                        ->label(__('Reviewer'))
                         ->options([
                             ReviewProvider::ClaudeCode->value => ReviewProvider::ClaudeCode->text(),
                             ReviewProvider::CodexCli->value => ReviewProvider::CodexCli->text(),
@@ -56,6 +56,7 @@ class ReviewSettingsForm
                         ->required()
                         ->distinct(),
                     TextInput::make('share')
+                        ->label(__('Share'))
                         ->integer()
                         ->minValue(0)
                         ->maxValue(100)
@@ -63,22 +64,28 @@ class ReviewSettingsForm
                         ->required()
                         ->dehydrateStateUsing(fn (mixed $state): int => (int) $state),
                     TextInput::make('budget')
-                        ->label('Monthly budget')
+                        ->label(__('Monthly budget'))
                         ->numeric()
                         ->minValue(0)
                         ->prefix(fn (): string => app(Currency::class)->symbol(CurrentTenant::get()))
-                        ->placeholder('No limit')
-                        ->hint(fn (Get $get): ?string => filled($get('provider')) ? 'Spent: '.Currency::show(ReviewSettings::spentThisMonth(CurrentTenant::get())[$get('provider')] ?? 0) : null)
+                        ->placeholder(__('No limit'))
+                        ->hint(function (Get $get): ?string {
+                            if (blank($get('provider'))) {
+                                return null;
+                            }
+
+                            return __('Spent: :amount', ['amount' => Currency::show(ReviewSettings::spentThisMonth(CurrentTenant::get())[$get('provider')] ?? 0)]);
+                        })
                         ->dehydrateStateUsing(fn (mixed $state): ?float => filled($state) ? (float) $state : null),
                 ])
                 ->columns(3)
                 ->defaultItems(0)
                 ->reorderable()
-                ->addActionLabel('Add reviewer')
-                ->helperText('Each pull request gets one of these, picked by share among those there is a key for, and keeps it for every push. One with a share of 0 is a fallback: it runs only when none with a share can, the first of them in this order. '
-                    .'One whose reviews have cost its monthly budget is passed over for the rest of the month: to use one until its budget is spent and another after, give the first a share and a budget and the second a share of 0. '
-                    .($defaults === null ? 'Empty leaves it to the keys: Claude Code with an Anthropic key, else Codex.' : 'Empty uses the defaults.')),
-            Fieldset::make('By pull request')->columns(3)->schema(self::strategyFields($defaults)),
+                ->addActionLabel(__('Add reviewer'))
+                ->helperText(__('Each pull request gets one of these, picked by share among those there is a key for, and keeps it for every push. One with a share of 0 is a fallback: it runs only when none with a share can, the first of them in this order.')
+                    .' '.__('One whose reviews have cost its monthly budget is passed over for the rest of the month: to use one until its budget is spent and another after, give the first a share and a budget and the second a share of 0.')
+                    .' '.($defaults === null ? __('Empty leaves it to the keys: Claude Code with an Anthropic key, else Codex.') : __('Empty uses the defaults.'))),
+            Fieldset::make(__('By pull request'))->columns(3)->schema(self::strategyFields($defaults)),
             ...($withProviders ? [
                 Fieldset::make(ReviewProvider::ClaudeCode->text())->columns(2)->schema(self::claudeFields($defaults)),
                 Fieldset::make(ReviewProvider::CodexCli->text())->columns(2)->schema(self::codexFields($defaults)),
@@ -92,99 +99,110 @@ class ReviewSettingsForm
                     self::pickedPerPullRequest(self::effort($defaults, 'ocr_effort'), $defaults),
                 ]),
             // The team's, for the pull request overview: not a repository's.
-            ...($defaults === null ? [Fieldset::make('Notes on whose turn')
+            ...($defaults === null ? [Fieldset::make(__('Notes on whose turn'))
                 ->columns(2)
                 ->schema([
                     Select::make('turn_notes')
-                        ->label('Write them')
-                        ->options(['true' => 'On', 'false' => 'Off'])
-                        ->placeholder('On')
-                        ->helperText('Under Pull requests, a small model says in a sentence or two what the one at turn has to do, and sums up the pull request, each time its state changes. Off, the fixed rules\' words show.'),
-                    self::modelField('turn_model', ['cheapest' => 'cheapest (Laravel AI)', 'default' => 'default (Laravel AI)', 'smartest' => 'smartest (Laravel AI)'] + array_diff_key(self::claudeModels() + self::openAiModels(), array_flip([...ReviewSettings::TIERS, ...self::CLAUDE_ALIASES])))
-                        ->label('With model')
-                        ->placeholder('The provider\'s cheapest')
-                        ->helperText('A tier is read for the AI provider that writes them: the first of Anthropic, OpenAI, the others. A model by name has to be one of that provider.'),
+                        ->label(__('Write them'))
+                        ->options(self::onOff())
+                        ->placeholder(__('On'))
+                        ->helperText(__('Under Pull requests, a small model says in a sentence or two what the one at turn has to do, and sums up the pull request, each time its state changes. Off, the fixed rules\' words show.')),
+                    self::modelField('turn_model', [
+                        'cheapest' => __(':tier (Laravel AI)', ['tier' => 'cheapest']),
+                        'default' => __(':tier (Laravel AI)', ['tier' => 'default']),
+                        'smartest' => __(':tier (Laravel AI)', ['tier' => 'smartest']),
+                    ] + array_diff_key(self::claudeModels() + self::openAiModels(), array_flip([...ReviewSettings::TIERS, ...self::CLAUDE_ALIASES])))
+                        ->label(__('With model'))
+                        ->placeholder(__('The provider\'s cheapest'))
+                        ->helperText(__('A tier is read for the AI provider that writes them: the first of Anthropic, OpenAI, the others. A model by name has to be one of that provider.')),
                 ]),
-                Fieldset::make('Open findings after a merge')
+                Fieldset::make(__('Open findings after a merge'))
                     ->schema([
                         Select::make('findings_check')
-                            ->label('Check them against the main branch')
-                            ->options(['weekly' => 'Weekly', 'monthly' => 'Monthly'])
-                            ->placeholder('Off: kept, not checked')
-                            ->helperText('A pull request merged with findings still open leaves them under Open findings. Checked, a small model reads each one\'s file on the main branch, one request per file, and says whether it is still there, resolved, or cannot be told from the file.'),
+                            ->label(__('Check them against the main branch'))
+                            ->options(['weekly' => __('Weekly'), 'monthly' => __('Monthly')])
+                            ->placeholder(__('Off: kept, not checked'))
+                            ->helperText(__('A pull request merged with findings still open leaves them under Open findings. Checked, a small model reads each one\'s file on the main branch, one request per file, and says whether it is still there, resolved, or cannot be told from the file.')),
                     ])] : []),
             Select::make('language')
-                ->label('Language')
-                ->options(ReviewSettings::LANGUAGES)
-                ->placeholder(fn (): string => $defaults !== null && filled($defaults->language) ? 'Default: '.(ReviewSettings::LANGUAGES[$defaults->language] ?? $defaults->language) : 'English')
-                ->helperText('What the review writes for people: findings, the summary, answers. Code, paths and the report\'s headings stay as they are.'),
+                ->label(__('Language'))
+                ->options(ReviewSettings::languageOptions())
+                ->placeholder(fn (): string => $defaults !== null && filled($defaults->language) ? __('Default: :value', ['value' => ReviewSettings::languageOptions()[$defaults->language] ?? $defaults->language]) : __('English'))
+                ->helperText(__('What the review writes for people: findings, the summary, answers. Code, paths and the report\'s headings stay as they are.')),
             Select::make('ticket_grading')
-                ->label('Grade against the ticket')
-                ->options(['true' => 'On', 'false' => 'Off'])
-                ->placeholder(match ($defaults?->ticket_grading) {
-                    'true' => 'Default: on',
-                    'false' => 'Default: off',
-                    default => 'On',
-                })
-                ->helperText('On: the summary grades the change against the ticket\'s acceptance criteria, one by one. Off: the ticket is read for intent only, for teams whose tickets hold no criteria.'),
+                ->label(__('Grade against the ticket'))
+                ->options(self::onOff())
+                ->placeholder(self::onOffPlaceholder($defaults?->ticket_grading, __('On')))
+                ->helperText(__('On: the summary grades the change against the ticket\'s acceptance criteria, one by one. Off: the ticket is read for intent only, for teams whose tickets hold no criteria.')),
             Select::make('extra_passes')
-                ->label('Extra passes')
-                ->options(['true' => 'On', 'false' => 'Off'])
-                ->placeholder(match ($defaults?->extra_passes) {
-                    'true' => 'Default: on',
-                    'false' => 'Default: off',
-                    default => 'Off for Claude Code, on for Codex',
-                })
-                ->helperText('The reviewer\'s own review first, for candidates the review then checks. For Claude Code, where the image has them, the review-toolkit agents and /code-review, each from scratch: they find a little more at several times the cost of a review. For Codex, `codex exec review`, which costs far less. Pi has none.'),
-            self::module($defaults, 'ocr', 'OpenCodeReview picks the files', 'For Claude Code, Codex and Pi: OpenCodeReview says which changed files to review and gives a checklist per file. Off, the reviewer reviews every changed file against the repository\'s own rules and the stack guide. OpenCodeReview as the reviewer is not affected.'),
-            self::module($defaults, 'scan', 'Scan before the review', 'Before the reviewer starts, added lines are checked for secrets and composer.lock against Packagist\'s advisories, and the reviewer weighs what they find.'),
-            self::module($defaults, 'floor_guard', 'Floor guard', 'The reviewer lists every place the change made a check easier to pass, such as a skipped test, a suppression or an assertion that went away, and weighs each one.'),
-            self::module($defaults, 'reach', 'Reach of a changed check', 'For Laravel: when a change adds or changes a check, such as canBook or allows, the reviewer gets the entry points that reach it and those that reach the same class\'s writes without it. About a thousand tokens, only on a change that touches a check.'),
+                ->label(__('Extra passes'))
+                ->options(self::onOff())
+                ->placeholder(self::onOffPlaceholder($defaults?->extra_passes, __('Off for Claude Code, on for Codex')))
+                ->helperText(__('The reviewer\'s own review first, for candidates the review then checks. For Claude Code, where the image has them, the review-toolkit agents and /code-review, each from scratch: they find a little more at several times the cost of a review. For Codex, `codex exec review`, which costs far less. Pi has none.')),
+            self::module($defaults, 'ocr', __('OpenCodeReview picks the files'), __('For Claude Code, Codex and Pi: OpenCodeReview says which changed files to review and gives a checklist per file. Off, the reviewer reviews every changed file against the repository\'s own rules and the stack guide. OpenCodeReview as the reviewer is not affected.')),
+            self::module($defaults, 'scan', __('Scan before the review'), __('Before the reviewer starts, added lines are checked for secrets and composer.lock against Packagist\'s advisories, and the reviewer weighs what they find.')),
+            self::module($defaults, 'floor_guard', __('Floor guard'), __('The reviewer lists every place the change made a check easier to pass, such as a skipped test, a suppression or an assertion that went away, and weighs each one.')),
+            self::module($defaults, 'reach', __('Reach of a changed check'), __('For Laravel: when a change adds or changes a check, such as canBook or allows, the reviewer gets the entry points that reach it and those that reach the same class\'s writes without it. About a thousand tokens, only on a change that touches a check.')),
             Select::make('code_index')
-                ->label('Code index')
-                ->options(['true' => 'On', 'false' => 'Off'])
-                ->placeholder(match ($defaults?->code_index) {
-                    'true' => 'Default: on',
-                    'false' => 'Default: off',
-                    default => 'Off',
-                })
-                ->helperText('For Laravel: before the review, Mago analyses the checkout and the reach of a changed check follows the calls it resolves by type, rather than every method of the same name. More precise, at about 20 seconds and 3 GB of memory, only for a change that touches a check; it runs composer install when the checkout has no vendor/. Without the memory, or when it fails, the reach goes by name as before. To try in a trial first.'),
+                ->label(__('Code index'))
+                ->options(self::onOff())
+                ->placeholder(self::onOffPlaceholder($defaults?->code_index, __('Off')))
+                ->helperText(__('For Laravel: before the review, Mago analyses the checkout and the reach of a changed check follows the calls it resolves by type, rather than every method of the same name. More precise, at about 20 seconds and 3 GB of memory, only for a change that touches a check; it runs composer install when the checkout has no vendor/. Without the memory, or when it fails, the reach goes by name as before. To try in a trial first.')),
             Select::make('verify')
-                ->label('Second check')
-                ->options(['true' => 'On', 'false' => 'Off'])
-                ->placeholder(match ($defaults?->verify) {
-                    'true' => 'Default: on',
-                    'false' => 'Default: off',
-                    default => 'Off',
-                })
-                ->helperText('Up to five new findings that would block the merge are each checked once more, in a fresh session that did not write them. Each check adds to the review\'s time and cost.'),
-            Fieldset::make('What holds the merge')->columns(3)->schema(self::thresholdFields($defaults)),
+                ->label(__('Second check'))
+                ->options(self::onOff())
+                ->placeholder(self::onOffPlaceholder($defaults?->verify, __('Off')))
+                ->helperText(__('Up to five new findings that would block the merge are each checked once more, in a fresh session that did not write them. Each check adds to the review\'s time and cost.')),
+            Fieldset::make(__('What holds the merge'))->columns(3)->schema(self::thresholdFields($defaults)),
             TextInput::make('max_rounds')
-                ->label('Follow-up rounds with new findings')
+                ->label(__('Follow-up rounds with new findings'))
                 ->integer()
                 ->minValue(0)
                 ->maxValue(50)
-                ->placeholder(fn (): string => $defaults !== null && $defaults->max_rounds !== null ? "Default: {$defaults->max_rounds}" : (string) ReviewFollowUps::MAX_ROUNDS)
-                ->helperText('After this many reviews of a pull request after its first, nothing new is recorded: the open findings are still checked, and what the review would add goes under Open questions for a person. From the third follow-up on, a new finding below HIGH no longer holds the merge. Against a review, a fix, a review on and on.'),
+                ->placeholder(fn (): string => $defaults !== null && $defaults->max_rounds !== null ? __('Default: :value', ['value' => $defaults->max_rounds]) : (string) ReviewFollowUps::MAX_ROUNDS)
+                ->helperText(__('After this many reviews of a pull request after its first, nothing new is recorded: the open findings are still checked, and what the review would add goes under Open questions for a person. From the third follow-up on, a new finding below HIGH no longer holds the merge. Against a review, a fix, a review on and on.')),
             TextInput::make('pull_request_budget')
-                ->label('Budget per pull request')
+                ->label(__('Budget per pull request'))
                 ->numeric()
                 ->minValue(0)
                 ->prefix(fn (): string => app(Currency::class)->symbol(CurrentTenant::get()))
-                ->placeholder(fn (): string => $defaults !== null && $defaults->pull_request_budget !== null ? 'Default: '.Currency::showOwn((float) $defaults->pull_request_budget) : 'No limit')
-                ->helperText('Once the reviews of one pull request have cost this, a push no longer starts one, and the pull request is told so once. A /review comment still starts one, each time. Trials do not count. Against a pull request that is pushed to over and over.')
+                ->placeholder(fn (): string => $defaults !== null && $defaults->pull_request_budget !== null ? __('Default: :value', ['value' => Currency::showOwn((float) $defaults->pull_request_budget)]) : __('No limit'))
+                ->helperText(__('Once the reviews of one pull request have cost this, a push no longer starts one, and the pull request is told so once. A /review comment still starts one, each time. Trials do not count. Against a pull request that is pushed to over and over.'))
                 ->dehydrateStateUsing(fn (mixed $state): ?float => filled($state) ? (float) $state : null),
             Select::make('follow_ups')
-                ->label('New commit during a review')
-                ->options([0 => 'Start a fresh review for it', 1 => 'Carry on with it, once', 2 => 'Carry on with it, up to twice'])
+                ->label(__('New commit during a review'))
+                ->options([0 => __('Start a fresh review for it'), 1 => __('Carry on with it, once'), 2 => __('Carry on with it, up to twice')])
                 ->placeholder(match ($defaults?->follow_ups) {
-                    null => $defaults === null ? 'Start a fresh review for it' : 'Default: start a fresh review for it',
-                    0 => 'Default: start a fresh review for it',
-                    1 => 'Default: carry on, once',
-                    default => 'Default: carry on, up to twice',
+                    null => $defaults === null ? __('Start a fresh review for it') : __('Default: start a fresh review for it'),
+                    0 => __('Default: start a fresh review for it'),
+                    1 => __('Default: carry on, once'),
+                    default => __('Default: carry on, up to twice'),
                 })
-                ->helperText('For reviews that run in a container on this server. Carrying on publishes the review first, then reviews the new commit in the same checkout: no new clone, and Claude resumes its session, so it starts from what it already read and found.'),
+                ->helperText(__('For reviews that run in a container on this server. Carrying on publishes the review first, then reviews the new commit in the same checkout: no new clone, and Claude resumes its session, so it starts from what it already read and found.')),
         ];
+    }
+
+    /**
+     * The choices of a setting that is on or off.
+     *
+     * @return array<string, string>
+     */
+    protected static function onOff(): array
+    {
+        return ['true' => __('On'), 'false' => __('Off')];
+    }
+
+    /**
+     * The placeholder of an on/off setting: the team's choice where it made one,
+     * else what holds when nobody does.
+     */
+    protected static function onOffPlaceholder(?string $default, string $otherwise): string
+    {
+        return match ($default) {
+            'true' => __('Default: on'),
+            'false' => __('Default: off'),
+            default => $otherwise,
+        };
     }
 
     /**
@@ -195,41 +213,50 @@ class ReviewSettingsForm
      */
     public static function strategyFields(?ReviewSetting $defaults = null): array
     {
-        $team = fn (string $text, ?string $value, array $options): string => $defaults === null ? $text : 'As the team: '.lcfirst(filled($value) ? ($options[$value] ?? $value) : $text);
+        $team = fn (string $text, ?string $value, array $options): string => $defaults === null ? $text : __('As the team: :value', ['value' => lcfirst(filled($value) ? ($options[$value] ?? $value) : $text)]);
         $efforts = collect(ReviewSettings::STRATEGY_EFFORTS)->mapWithKeys(fn (ReviewEffort $effort): array => [$effort->value => $effort->text()])->all();
         $tierModels = rescue(fn (): array => ReviewSettings::tierModels('anthropic'), [], false);
-        $tiers = collect(ReviewSettings::STRATEGY_TIERS)->mapWithKeys(fn (string $tier): array => [$tier => $tier.' (Laravel AI)'.(isset($tierModels[$tier]) ? ": now {$tierModels[$tier]} for Claude" : '')])->all()
-            + [ReviewSettings::OWN_MODEL => 'Each reviewer\'s own, as set below'];
+        $tiers = collect(ReviewSettings::STRATEGY_TIERS)->mapWithKeys(fn (string $tier): array => [$tier => isset($tierModels[$tier])
+            ? __(':tier (Laravel AI): now :model for Claude', ['tier' => $tier, 'model' => $tierModels[$tier]])
+            : __(':tier (Laravel AI)', ['tier' => $tier])])->all()
+            + [ReviewSettings::OWN_MODEL => __('Each reviewer\'s own, as set below')];
 
         return [
             Select::make('strategy')
-                ->label('Classify each pull request')
+                ->label(__('Classify each pull request'))
                 ->options(ReviewStrategy::options())
-                ->placeholder($team('Off', $defaults?->strategy, ReviewStrategy::options()))
+                ->placeholder($team(__('Off'), $defaults?->strategy, ReviewStrategy::options()))
                 ->live(),
             Select::make('strategy_effort')
-                ->label('Effort for a simple one')
+                ->label(__('Effort for a simple one'))
                 ->options($efforts)
                 ->placeholder($team(ReviewSettings::STRATEGY_EFFORT->text(), $defaults?->strategy_effort, $efforts))
                 ->live(),
             Select::make('strategy_model')
-                ->label('Model for a simple one')
+                ->label(__('Model for a simple one'))
                 ->options($tiers)
                 ->placeholder($team(ReviewSettings::STRATEGY_TIER, $defaults?->strategy_model, $tiers))
                 ->live(),
-            Text::make('Before its review, a small model reads a pull request\'s title, description, changed files and migrations, and calls it simple, normal or complex. A simple one runs at the effort and model set here, a normal one a step higher, a complex one two, up to Extra high and smartest. '
-                .'Running at what it picks replaces the effort of every reviewer below, and the model of Claude Code and Codex unless the model is each reviewer\'s own. Once per commit, with the AI provider that writes the notes on whose turn.')
+            Text::make(__('Before its review, a small model reads a pull request\'s title, description, changed files and migrations, and calls it simple, normal or complex. A simple one runs at the effort and model set here, a normal one a step higher, a complex one two, up to Extra high and smartest.')
+                .' '.__('Running at what it picks replaces the effort of every reviewer below, and the model of Claude Code and Codex unless the model is each reviewer\'s own. Once per commit, with the AI provider that writes the notes on whose turn.'))
                 ->columnSpanFull(),
         ];
     }
 
-    /** A threshold as a person reads it. */
-    public const THRESHOLD_LABELS = [
-        'never' => 'Never',
-        'any' => 'Any severity',
-        'medium' => 'MEDIUM and HIGH',
-        'high' => 'HIGH only',
-    ];
+    /**
+     * A threshold as a person reads it.
+     *
+     * @return array<string, string>
+     */
+    public static function thresholdLabels(): array
+    {
+        return [
+            'never' => __('Never'),
+            'any' => __('Any severity'),
+            'medium' => __('MEDIUM and HIGH'),
+            'high' => __('HIGH only'),
+        ];
+    }
 
     /**
      * From which severity a finding holds the merge: for every category, and for
@@ -244,24 +271,39 @@ class ReviewSettingsForm
 
         // A category that neither the team nor the platform names follows Every category, as set here.
         $placeholder = fn (string $key): string => match (true) {
-            isset($team[$key]) => 'As the team: '.self::THRESHOLD_LABELS[$team[$key]],
-            isset($platform[$key]) => 'Not set: '.self::THRESHOLD_LABELS[$platform[$key]],
-            default => 'As every category',
+            isset($team[$key]) => __('As the team: :value', ['value' => self::thresholdLabels()[$team[$key]]]),
+            isset($platform[$key]) => __('Not set: :value', ['value' => self::thresholdLabels()[$platform[$key]]]),
+            default => __('As every category'),
         };
 
         $select = fn (string $key, string $label): Select => Select::make("fail_on.{$key}")
             ->label($label)
-            ->options(self::THRESHOLD_LABELS)
+            ->options(self::thresholdLabels())
             ->placeholder($placeholder($key));
 
         return [
-            $select('default', 'Every category'),
-            ...array_map(fn (string $category): Select => $select($category, ucfirst($category)), ReviewPublisher::CATEGORIES),
-            Text::make('A finding holds the merge from this severity up: on Bitbucket it gets a task, on GitHub the review requests changes, and the commit\'s status is red. '
-                .'A category left empty follows Every category, except where the platform sets it apart: security on any severity, tests on HIGH only, maintainability never. '
-                .'Below confidence 8, already there before the change, or past the third follow-up and below HIGH, a finding never holds the merge.')
+            $select('default', __('Every category')),
+            ...array_map(fn (string $category): Select => $select($category, self::categoryLabel($category)), ReviewPublisher::CATEGORIES),
+            Text::make(__('A finding holds the merge from this severity up: on Bitbucket it gets a task, on GitHub the review requests changes, and the commit\'s status is red.')
+                .' '.__('A category left empty follows Every category, except where the platform sets it apart: security on any severity, tests on HIGH only, maintainability never.')
+                .' '.__('Below confidence 8, already there before the change, or past the third follow-up and below HIGH, a finding never holds the merge.'))
                 ->columnSpanFull(),
         ];
+    }
+
+    /**
+     * A finding's category as a person reads it.
+     */
+    public static function categoryLabel(string $category): string
+    {
+        return match ($category) {
+            'correctness' => __('Correctness'),
+            'security' => __('Security'),
+            'performance' => __('Performance'),
+            'maintainability' => __('Maintainability'),
+            'tests' => __('Tests'),
+            default => ucfirst($category),
+        };
     }
 
     /**
@@ -274,16 +316,16 @@ class ReviewSettingsForm
         return [
             self::pickedPerPullRequest(self::model($defaults, 'claude_model', self::claudeModels()), $defaults, model: true),
             self::pickedPerPullRequest(self::effort($defaults, 'claude_effort'), $defaults),
-            self::model($defaults, 'claude_advisor', ['none' => 'none: no advisor', ...self::claudeModels()])
-                ->label('Advisor')
-                ->helperText('A stronger model Claude consults at the moments that decide a review; none for no advisor.'),
+            self::model($defaults, 'claude_advisor', ['none' => __('none: no advisor'), ...self::claudeModels()])
+                ->label(__('Advisor'))
+                ->helperText(__('A stronger model Claude consults at the moments that decide a review; none for no advisor.')),
             TextInput::make('claude_max_budget')
-                ->label('Budget per review ($)')
+                ->label(__('Budget per review ($)'))
                 ->maxLength(16)
                 ->regex('/^(none|(?=.*[1-9])\d+(\.\d{1,2})?)$/')
-                ->validationMessages(['regex' => 'A dollar amount above 0, such as 10 or 7.5, or none for no cap.'])
+                ->validationMessages(['regex' => __('A dollar amount above 0, such as 10 or 7.5, or none for no cap.')])
                 ->placeholder(self::placeholder($defaults, 'claude_max_budget'))
-                ->helperText('The most one Claude review may spend. It stops there without a report, and the review ends as "Did not finish". Empty uses $10; none for no cap.'),
+                ->helperText(__('The most one Claude review may spend. It stops there without a report, and the review ends as "Did not finish". Empty uses $10; none for no cap.')),
         ];
     }
 
@@ -329,13 +371,13 @@ class ReviewSettingsForm
         $steps = collect(ReviewComplexity::cases())->map(function (ReviewComplexity $complexity) use ($effort, $tier): string {
             $pick = ReviewSettings::pick($effort, $tier, $complexity);
 
-            return strtolower($complexity->text()).': '.$pick['effort']->text().', '.($pick['tier'] ?? 'own model');
+            return __(':complexity: :effort, :model', ['complexity' => strtolower($complexity->text()), 'effort' => $pick['effort']->text(), 'model' => $pick['tier'] ?? __('own model')]);
         })->implode('; ');
 
-        return '<p><strong>'.($mode === ReviewStrategy::Apply ? 'By pull request:' : 'By pull request, recorded only:').'</strong> '.e($steps).'.'
+        return '<p><strong>'.e($mode === ReviewStrategy::Apply ? __('By pull request:') : __('By pull request, recorded only:')).'</strong> '.e($steps).'.'
             .($mode === ReviewStrategy::Apply
-                ? ' <span class="rc-muted">That replaces the effort below'.($tier === ReviewSettings::OWN_MODEL ? '.' : ', and Claude Code\'s and Codex\'s model.').'</span>'
-                : ' <span class="rc-muted">Each review says what it would have picked, and runs at what is set below.</span>').'</p>';
+                ? ' <span class="rc-muted">'.e($tier === ReviewSettings::OWN_MODEL ? __('That replaces the effort below.') : __('That replaces the effort below, and Claude Code\'s and Codex\'s model.')).'</span>'
+                : ' <span class="rc-muted">'.e(__('Each review says what it would have picked, and runs at what is set below.')).'</span>').'</p>';
     }
 
     /**
@@ -348,7 +390,7 @@ class ReviewSettingsForm
         $entries = array_values(array_filter((array) ($get('providers') ?? []), fn (mixed $entry): bool => is_array($entry) && filled($entry['provider'] ?? null)));
 
         if ($entries === [] && $defaults !== null) {
-            return new HtmlString('<p class="rc-muted">No reviewers of its own: it uses the team\'s, from Review defaults, with the model and effort set below where they are.</p>');
+            return new HtmlString('<p class="rc-muted">'.e(__('No reviewers of its own: it uses the team\'s, from Review defaults, with the model and effort set below where they are.')).'</p>');
         }
 
         if ($entries === []) {
@@ -359,26 +401,26 @@ class ReviewSettingsForm
             };
 
             return new HtmlString($picked === null
-                ? '<p><strong>No reviewer can run:</strong> add an AI provider first.</p>'
-                : '<p><strong>Every pull request is reviewed by '.e($picked->text()).'</strong>, '.e(self::runsAt($get, $picked, $defaults)).'. None is listed, so the keys decide: Claude Code with an Anthropic key, else Codex.</p>');
+                ? '<p>'.__('<strong>No reviewer can run:</strong> add an AI provider first.').'</p>'
+                : '<p>'.__('<strong>Every pull request is reviewed by :reviewer</strong>, :runs_at. None is listed, so the keys decide: Claude Code with an Anthropic key, else Codex.', ['reviewer' => e($picked->text()), 'runs_at' => e(self::runsAt($get, $picked, $defaults))]).'</p>');
         }
 
         $items = collect($entries)->map(function (array $entry) use ($get, $keys, $defaults): string {
             $provider = ReviewProvider::tryFrom((string) $entry['provider']);
             $share = (int) ($entry['share'] ?? 0);
             $notes = array_filter([
-                $share === 0 ? 'only when none with a share can run' : null,
-                filled($entry['budget'] ?? null) ? 'up to '.Currency::showOwn((float) $entry['budget']).' a month' : null,
-                $provider !== null && ! in_array($provider->value, $keys, true) ? 'no key for it, so passed over' : null,
-            ]);
+                $share === 0 ? __('only when none with a share can run') : null,
+                filled($entry['budget'] ?? null) ? __('up to :amount a month', ['amount' => Currency::showOwn((float) $entry['budget'])]) : null,
+                $provider !== null && ! in_array($provider->value, $keys, true) ? __('no key for it, so passed over') : null,
+            ], is_string(...));
 
             return '<li><strong>'.e($provider?->text() ?? (string) $entry['provider']).'</strong>'
-                .($share > 0 ? ' · share '.$share : '')
+                .($share > 0 ? ' · '.e(__('share :share', ['share' => $share])) : '')
                 .($provider === null ? '' : ', '.e(self::runsAt($get, $provider, $defaults)))
                 .($notes === [] ? '' : ' <span class="rc-muted">('.e(implode('; ', $notes)).')</span>').'</li>';
         })->implode('');
 
-        return new HtmlString('<p><strong>Each pull request is reviewed by one of these</strong>, by share, and keeps it for every push:</p><ul class="rc-summary-list">'.$items.'</ul>');
+        return new HtmlString('<p>'.__('<strong>Each pull request is reviewed by one of these</strong>, by share, and keeps it for every push:').'</p><ul class="rc-summary-list">'.$items.'</ul>');
     }
 
     /**
@@ -399,13 +441,27 @@ class ReviewSettingsForm
 
         // Left to the reviewer, it is known only once a review ran: the newest says what it took.
         $last = $named === null || $value($effort) === null ? self::lastRun($provider) : null;
-        $own = fn (?string $used): string => 'not set, '.$provider->text().' picks'.($used === null ? '' : " (the last review with it used {$used})");
+        $own = fn (?string $used): string => $used === null
+            ? __('not set, :reviewer picks', ['reviewer' => $provider->text()])
+            : __('not set, :reviewer picks (the last review with it used :used)', ['reviewer' => $provider->text(), 'used' => $used]);
 
         // An effort left empty everywhere is the platform's, which the precheck sets.
         $chosen = $value($effort) ?? self::platformEffort($provider);
 
-        return 'model '.($named === null ? $own($last?->model) : $named.($tierModel === null ? '' : " (Laravel AI's, now {$tierModel})"))
-            .', effort '.($chosen === null ? $own($last?->effort) : (ReviewEffort::tryFrom($chosen)?->text() ?? $chosen).($value($effort) === null ? " (the platform's default)" : ''));
+        $chosenText = $chosen === null ? null : (ReviewEffort::tryFrom($chosen)?->text() ?? $chosen);
+
+        return __('model :model, effort :effort', [
+            'model' => match (true) {
+                $named === null => $own($last?->model),
+                $tierModel === null => $named,
+                default => __(':model (Laravel AI\'s, now :tier_model)', ['model' => $named, 'tier_model' => $tierModel]),
+            },
+            'effort' => match (true) {
+                $chosenText === null => $own($last?->effort),
+                $value($effort) === null => __(':effort (the platform\'s default)', ['effort' => $chosenText]),
+                default => $chosenText,
+            },
+        ]);
     }
 
     /**
@@ -446,26 +502,26 @@ class ReviewSettingsForm
         };
         $platform = str_ends_with($field, '_effort') && $provider !== null ? self::platformEffort($provider) : null;
         if ($platform !== null && ! $default instanceof ReviewEffort && blank($default)) {
-            $text = 'Not set: '.(ReviewEffort::tryFrom($platform)?->text() ?? $platform).", the platform's default";
+            $text = __('Not set: :effort, the platform\'s default', ['effort' => ReviewEffort::tryFrom($platform)?->text() ?? $platform]);
 
-            return $defaults === null ? $text : 'As the team: '.lcfirst($text);
+            return $defaults === null ? $text : __('As the team: :value', ['value' => lcfirst($text)]);
         }
 
         // Left empty: not set, so the reviewer picks itself, the same way every
         // time; as opposed to the Laravel AI SDK's default, a tier picked by name.
-        $auto = 'Not set: '.match (true) {
-            str_starts_with($field, 'claude_advisor') => 'no advisor',
-            str_starts_with($field, 'claude_') => 'Claude Code picks',
-            str_starts_with($field, 'codex_') => 'Codex picks',
-            str_starts_with($field, 'ocr_') => 'OpenCodeReview picks',
-            default => 'the reviewer picks',
+        $auto = match (true) {
+            str_starts_with($field, 'claude_advisor') => __('Not set: no advisor'),
+            str_starts_with($field, 'claude_') => __('Not set: Claude Code picks'),
+            str_starts_with($field, 'codex_') => __('Not set: Codex picks'),
+            str_starts_with($field, 'ocr_') => __('Not set: OpenCodeReview picks'),
+            default => __('Not set: the reviewer picks'),
         };
 
         return match (true) {
             $defaults === null => $auto,
-            $default instanceof ReviewEffort => 'As the team: '.$default->text(),
-            is_string($default) && $default !== '' => 'As the team: '.$default,
-            default => 'As the team: '.lcfirst($auto),
+            $default instanceof ReviewEffort => __('As the team: :value', ['value' => $default->text()]),
+            is_string($default) && $default !== '' => __('As the team: :value', ['value' => $default]),
+            default => __('As the team: :value', ['value' => lcfirst($auto)]),
         };
     }
 
@@ -496,13 +552,13 @@ class ReviewSettingsForm
 
             // What was typed, as a model of its own, where it is a name a model can have.
             return preg_match(self::MODEL_NAME, $term) === 1 && ! array_key_exists($term, $found)
-                ? [$term => "{$term} (as typed)"] + $found
+                ? [$term => __(':model (as typed)', ['model' => $term])] + $found
                 : $found;
         };
 
         return Select::make($field)
             ->live()
-            ->label('Model')
+            ->label(__('Model'))
             ->searchable()
             // A fixed list as it is, so it needs no request to the server to show.
             ->options($choices instanceof Closure ? $list : $choices)
@@ -528,9 +584,9 @@ class ReviewSettingsForm
     {
         // A union, not a spread: a model the SDK names keeps its label and its place.
         return [
-            'opus' => 'opus: the newest Opus',
-            'sonnet' => 'sonnet: the newest Sonnet',
-            'haiku' => 'haiku: the newest Haiku',
+            'opus' => __('opus: the newest Opus'),
+            'sonnet' => __('sonnet: the newest Sonnet'),
+            'haiku' => __('haiku: the newest Haiku'),
         ] + self::tiers('anthropic') + self::priced('/^claude-[a-z0-9.-]+$/');
     }
 
@@ -558,7 +614,7 @@ class ReviewSettingsForm
         $tiers = [];
 
         foreach ($models as $tier => $model) {
-            $tiers[$tier] = "{$tier} (Laravel AI): now {$model}";
+            $tiers[$tier] = __(':tier (Laravel AI): now :model', ['tier' => $tier, 'model' => $model]);
         }
 
         foreach ($models as $tier => $model) {
@@ -602,16 +658,22 @@ class ReviewSettingsForm
         return $field
             ->disabled($picks)
             ->dehydrated()
-            ->hint(fn (Get $get): ?string => $picks($get) ? 'Picked per pull request' : null)
+            ->hint(function (Get $get) use ($picks): ?string {
+                if (! $picks($get)) {
+                    return null;
+                }
+
+                return __('Picked per pull request');
+            })
             ->hintIcon(fn (Get $get): ?string => $picks($get) ? 'heroicon-o-sparkles' : null)
-            ->hintIconTooltip('The classification under By pull request runs each review at the effort and model it picks, in place of this.');
+            ->hintIconTooltip(__('The classification under By pull request runs each review at the effort and model it picks, in place of this.'));
     }
 
     protected static function effort(?ReviewSetting $defaults, string $field): Select
     {
         return Select::make($field)
             ->live()
-            ->label('Effort')
+            ->label(__('Effort'))
             ->options(collect(ReviewEffort::cases())->mapWithKeys(fn (ReviewEffort $effort): array => [$effort->value => $effort->text()])->all())
             ->placeholder(self::placeholder($defaults, $field));
     }
@@ -623,12 +685,8 @@ class ReviewSettingsForm
     {
         return Select::make($field)
             ->label($label)
-            ->options(['true' => 'On', 'false' => 'Off'])
-            ->placeholder(match ($defaults?->{$field}) {
-                'true' => 'Default: on',
-                'false' => 'Default: off',
-                default => 'On',
-            })
+            ->options(self::onOff())
+            ->placeholder(self::onOffPlaceholder($defaults?->{$field}, __('On')))
             ->helperText($helperText);
     }
 

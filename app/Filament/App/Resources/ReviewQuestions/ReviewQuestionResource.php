@@ -29,22 +29,40 @@ class ReviewQuestionResource extends Resource
 {
     protected static ?string $model = ReviewQuestion::class;
 
-    protected static ?string $navigationLabel = 'Questions';
-
-    protected static ?string $modelLabel = 'question';
-
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedChatBubbleLeftRight;
 
     protected static ?int $navigationSort = 12;
 
-    /** What a status reads as, and its tone. */
-    public const STATUSES = [
-        ReviewQuestion::STATUS_ASKED => ['Being answered', 'neutral'],
-        ReviewQuestion::STATUS_UNSURE => ['Deciding whether it is for the reviewer', 'neutral'],
-        ReviewQuestion::STATUS_ANSWERED => ['Answered', 'approved'],
-        ReviewQuestion::STATUS_FAILED => ['No answer', 'changes'],
-        ReviewQuestion::STATUS_IGNORED => ['Not for the reviewer', 'low'],
-    ];
+    /**
+     * What a status reads as, and its tone.
+     *
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function statuses(): array
+    {
+        return [
+            ReviewQuestion::STATUS_ASKED => [__('Being answered'), 'neutral'],
+            ReviewQuestion::STATUS_UNSURE => [__('Deciding whether it is for the reviewer'), 'neutral'],
+            ReviewQuestion::STATUS_ANSWERED => [__('Answered'), 'approved'],
+            ReviewQuestion::STATUS_FAILED => [__('No answer'), 'changes'],
+            ReviewQuestion::STATUS_IGNORED => [__('Not for the reviewer'), 'low'],
+        ];
+    }
+
+    public static function getModelLabel(): string
+    {
+        return __('question');
+    }
+
+    public static function getPluralModelLabel(): string
+    {
+        return __('questions');
+    }
+
+    public static function getNavigationLabel(): string
+    {
+        return __('Questions');
+    }
 
     public static function getNavigationBadge(): ?string
     {
@@ -79,41 +97,42 @@ class ReviewQuestionResource extends Resource
             ->poll(fn () => self::pending()->exists() ? '10s' : null)
             ->columns([
                 TextColumn::make('question')
-                    ->label('Question')
+                    ->label(__('Question'))
                     ->wrap()
                     ->formatStateUsing(fn (string $state): string => Str::limit($state, 160))
                     ->description(fn (ReviewQuestion $record): string => $record->repository->slug.' #'.$record->pull_request_id
-                        .($record->about !== null ? ' · under a finding' : '')
-                        .' · '.($record->comment_id === null ? 'asked here' : 'on the pull request'))
+                        .($record->about !== null ? ' · '.__('under a finding') : '')
+                        .' · '.($record->comment_id === null ? __('asked here') : __('on the pull request')))
                     ->searchable(),
-                TextColumn::make('author')->label('Asked by')->placeholder('Someone'),
+                TextColumn::make('author')->label(__('Asked by'))->placeholder(__('Someone')),
                 TextColumn::make('status')
-                    ->formatStateUsing(fn (string $state): HtmlString => ReviewRunResource::chip(...(self::STATUSES[$state] ?? [ucfirst($state), 'neutral']))),
-                TextColumn::make('created_at')->label('Asked')->since()->sortable(),
-                TextColumn::make('cost')->formatStateUsing(fn (mixed $state): string => Currency::show($state))->placeholder('—'),
+                    ->label(__('Status'))
+                    ->formatStateUsing(fn (string $state): HtmlString => ReviewRunResource::chip(...(self::statuses()[$state] ?? [ucfirst($state), 'neutral']))),
+                TextColumn::make('created_at')->label(__('Asked'))->since()->sortable(),
+                TextColumn::make('cost')->label(__('Cost'))->formatStateUsing(fn (mixed $state): string => Currency::show($state))->placeholder('—'),
             ])
             ->recordActions([
                 Action::make('answer')
-                    ->label('Answer')
+                    ->label(__('Answer'))
                     ->icon(Heroicon::OutlinedChatBubbleBottomCenterText)
                     ->color('gray')
                     ->visible(fn (ReviewQuestion $record): bool => $record->status === ReviewQuestion::STATUS_ANSWERED)
                     ->modalHeading(fn (ReviewQuestion $record): string => Str::limit($record->question, 120))
                     ->modalSubmitAction(false)
-                    ->modalCancelActionLabel('Close')
+                    ->modalCancelActionLabel(__('Close'))
                     ->schema(fn (ReviewQuestion $record): array => [
-                        TextEntry::make('about')->label('Under the finding')->state($record->about)->visible($record->about !== null)->markdown(),
+                        TextEntry::make('about')->label(__('Under the finding'))->state($record->about)->visible($record->about !== null)->markdown(),
                         TextEntry::make('answer')->hiddenLabel()->state($record->answer)->markdown(),
                     ]),
                 Action::make('pullRequest')
-                    ->label('Open on the pull request')
-                    ->tooltip('Open on the pull request')
+                    ->label(__('Open on the pull request'))
+                    ->tooltip(__('Open on the pull request'))
                     ->icon(Heroicon::OutlinedArrowTopRightOnSquare)
                     ->iconButton()
                     ->color('gray')
                     ->url(fn (ReviewQuestion $record): ?string => rescue(fn (): string => $record->repository->sourceControl()->pullRequestUrl($record->pull_request_id), null, false), shouldOpenInNewTab: true),
                 Action::make('review')
-                    ->label('Review')
+                    ->label(__('Review'))
                     ->color('gray')
                     ->url(fn (ReviewQuestion $record): ?string => filled($record->getAttribute('latest_review')) ? ReviewRunResource::getUrl('view', ['record' => $record->getAttribute('latest_review')]) : null)
                     ->visible(fn (ReviewQuestion $record): bool => filled($record->getAttribute('latest_review'))),

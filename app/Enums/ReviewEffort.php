@@ -18,10 +18,10 @@ enum ReviewEffort: string
     public function text(): string
     {
         return match ($this) {
-            self::Low => 'Low',
-            self::Medium => 'Medium',
-            self::High => 'High',
-            self::Xhigh => 'Extra high',
+            self::Low => __('Low'),
+            self::Medium => __('Medium'),
+            self::High => __('High'),
+            self::Xhigh => __('Extra high'),
         };
     }
 }

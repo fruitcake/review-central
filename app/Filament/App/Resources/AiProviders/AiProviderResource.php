@@ -29,13 +29,24 @@ class AiProviderResource extends ConnectionResource
 
     protected static ?string $slug = 'ai-providers';
 
-    protected static ?string $navigationLabel = 'AI providers';
-
-    protected static ?string $modelLabel = 'AI provider';
-
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedSparkles;
 
     protected static ?int $navigationSort = 29;
+
+    public static function getNavigationLabel(): string
+    {
+        return __('AI providers');
+    }
+
+    public static function getModelLabel(): string
+    {
+        return __('AI provider');
+    }
+
+    public static function getPluralModelLabel(): string
+    {
+        return __('AI providers');
+    }
 
     public static function form(Schema $schema): Schema
     {
@@ -44,7 +55,7 @@ class AiProviderResource extends ConnectionResource
                 ...self::serviceFields(ConnectionKind::Llm),
                 // Only the key here: which reviewer runs on it, and how, is the team's
                 // review defaults', where the other choices of a review are.
-                Text::make(fn (): HtmlString => new HtmlString('Which reviewer runs with this key, in which order, and at which model and effort is set under <a href="'.e(ReviewDefaults::getUrl()).'" class="underline">Review defaults</a>.'))
+                Text::make(fn (): HtmlString => new HtmlString(__('Which reviewer runs with this key, in which order, and at which model and effort is set under <a href=":url" class="underline">Review defaults</a>.', ['url' => e(ReviewDefaults::getUrl())])))
                     ->key('reviewersNote')
                     ->visible(fn (Get $get): bool => filled($get('driver'))),
             ])

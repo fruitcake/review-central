@@ -40,8 +40,6 @@ class ReviewDefaults extends Page
         return TenantRole::isAdmin();
     }
 
-    protected static ?string $title = 'Review defaults';
-
     protected static ?string $slug = 'review-settings';
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedAdjustmentsHorizontal;
@@ -62,39 +60,49 @@ class ReviewDefaults extends Page
         ]);
     }
 
+    public function getTitle(): string|Htmlable
+    {
+        return __('Review defaults');
+    }
+
+    public static function getNavigationLabel(): string
+    {
+        return __('Review defaults');
+    }
+
     public function getSubheading(): string|Htmlable|null
     {
-        return 'For every repository of '.CurrentTenant::get()->name.' that does not set its own: which reviewer runs, and at which model and effort. The AI providers hold only the keys.';
+        return __('For every repository of :team that does not set its own: which reviewer runs, and at which model and effort. The AI providers hold only the keys.', ['team' => CurrentTenant::get()->name]);
     }
 
     public function form(Schema $schema): Schema
     {
         return $schema
             ->components([
-                Section::make('Who reviews')->schema(ReviewSettingsForm::fields()),
-                Section::make('Trusted accounts')
-                    ->description('For every repository of this team. The accounts whose pull requests a repository that reviews only theirs reviews by itself, and who may comment /review when only they may. The others\' pull requests wait under Pull requests for someone here to start them.')
+                Section::make(__('Who reviews'))->schema(ReviewSettingsForm::fields()),
+                Section::make(__('Trusted accounts'))
+                    ->description(__('For every repository of this team. The accounts whose pull requests a repository that reviews only theirs reviews by itself, and who may comment /review when only they may. The others\' pull requests wait under Pull requests for someone here to start them.'))
                     ->schema([
                         TagsInput::make('review_command_accounts')
-                            ->label('Accounts')
-                            ->helperText('Bitbucket nicknames or GitHub user names, as in the address of their profile, or account IDs. A display name is not enough: anyone can take any.')
-                            ->placeholder('Add an account')
+                            ->label(__('Accounts'))
+                            ->helperText(__('Bitbucket nicknames or GitHub user names, as in the address of their profile, or account IDs. A display name is not enough: anyone can take any.'))
+                            ->placeholder(__('Add an account'))
                             ->required(fn (Get $get): bool => $get('review_command') === ReviewCommandAccess::Listed->value),
                     ]),
-                Section::make('Starting a review by comment')
-                    ->description('For every repository of this team. Commenting /review on a pull request starts a review of it. On a repository outside contributors can comment on, that is anyone spending this team\'s budget. On a repository that reviews only the trusted accounts\' pull requests, only they can. A review still starts on every push, and from this panel, whatever this says.')
+                Section::make(__('Starting a review by comment'))
+                    ->description(__('For every repository of this team. Commenting /review on a pull request starts a review of it. On a repository outside contributors can comment on, that is anyone spending this team\'s budget. On a repository that reviews only the trusted accounts\' pull requests, only they can. A review still starts on every push, and from this panel, whatever this says.'))
                     ->schema([
                         Select::make('review_command')
-                            ->label('Who may comment /review')
+                            ->label(__('Who may comment /review'))
                             ->options(ReviewCommandAccess::options())
                             ->required()
                             ->live(),
                     ]),
-                Section::make('Pull requests from forks')
-                    ->description('For every repository of this team. A pull request from a fork is anyone\'s code: reviewed, it runs in the sandbox with this team\'s AI key and on its budget. Off, such a pull request is reviewed only when someone here starts it from this panel. Only GitHub keeps a fork\'s head in the repository itself; on Bitbucket a fork\'s pull request can be reviewed from the diff alone, as a trial.')
+                Section::make(__('Pull requests from forks'))
+                    ->description(__('For every repository of this team. A pull request from a fork is anyone\'s code: reviewed, it runs in the sandbox with this team\'s AI key and on its budget. Off, such a pull request is reviewed only when someone here starts it from this panel. Only GitHub keeps a fork\'s head in the repository itself; on Bitbucket a fork\'s pull request can be reviewed from the diff alone, as a trial.'))
                     ->schema([
                         Toggle::make('review_forks')
-                            ->label('Review pull requests from forks by themselves, on a push and on a comment'),
+                            ->label(__('Review pull requests from forks by themselves, on a push and on a comment')),
                     ]),
             ])
             ->statePath('data');
@@ -107,7 +115,7 @@ class ReviewDefaults extends Page
                 ->id('form')
                 ->livewireSubmitHandler('save')
                 ->footer([
-                    Actions::make([Action::make('save')->label('Save')->submit('save')->keyBindings(['mod+s'])])->key('form-actions'),
+                    Actions::make([Action::make('save')->label(__('Save'))->submit('save')->keyBindings(['mod+s'])])->key('form-actions'),
                 ]),
         ]);
     }
@@ -125,6 +133,6 @@ class ReviewDefaults extends Page
             'review_forks' => (bool) ($state['review_forks'] ?? false),
         ]);
 
-        Notification::make()->title('Saved')->success()->send();
+        Notification::make()->title(__('Saved'))->success()->send();
     }
 }

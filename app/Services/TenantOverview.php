@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\ConnectionKind;
+use App\Filament\Components\ReviewSettingsForm;
 use App\Filament\LocalTime;
 use App\Filament\RunPresenter;
 use App\Models\Repository;
@@ -93,12 +94,12 @@ class TenantOverview
         foreach ([ConnectionKind::SourceControl, ConnectionKind::Llm] as $needed) {
             if (! $kinds->contains($needed->value)) {
                 $items[] = [
-                    'tag' => 'Setup', 'tone' => 'danger',
-                    'title' => $needed === ConnectionKind::Llm ? 'No AI provider yet' : 'No source control connection yet',
+                    'tag' => __('Setup'), 'tone' => 'danger',
+                    'title' => $needed === ConnectionKind::Llm ? __('No AI provider yet') : __('No source control connection yet'),
                     'body' => $needed === ConnectionKind::Llm
-                        ? 'A review needs an AI provider to run on. Without one no review can run.'
-                        : 'Repositories are read and commented on through a source control connection.',
-                    'action' => $needed === ConnectionKind::Llm ? 'Add an AI provider' : 'Add a source control connection',
+                        ? __('A review needs an AI provider to run on. Without one no review can run.')
+                        : __('Repositories are read and commented on through a source control connection.'),
+                    'action' => $needed === ConnectionKind::Llm ? __('Add an AI provider') : __('Add a source control connection'),
                     'target' => $needed === ConnectionKind::Llm ? 'ai-providers' : 'source-control',
                 ];
             }
@@ -108,10 +109,10 @@ class TenantOverview
 
         if ($unable->isNotEmpty()) {
             $items[] = [
-                'tag' => 'Setup', 'tone' => 'danger',
-                'title' => $unable->count() === 1 ? "{$unable->first()->slug} cannot start reviews" : "{$unable->count()} repositories cannot start reviews",
-                'body' => 'The runner it runs on is turned off on this installation. Its pull requests are not reviewed.',
-                'action' => 'Fix setup', 'target' => 'repositories',
+                'tag' => __('Setup'), 'tone' => 'danger',
+                'title' => $unable->count() === 1 ? __(':repository cannot start reviews', ['repository' => $unable->first()->slug]) : __(':count repositories cannot start reviews', ['count' => $unable->count()]),
+                'body' => __('The runner it runs on is turned off on this installation. Its pull requests are not reviewed.'),
+                'action' => __('Fix setup'), 'target' => 'repositories',
             ];
         }
 
@@ -119,10 +120,12 @@ class TenantOverview
 
         if ($stale > 0) {
             $items[] = [
-                'tag' => 'Findings', 'tone' => 'danger',
-                'title' => "{$stale} high ".($stale === 1 ? 'finding' : 'findings').' open for over '.self::STALE_DAYS.' days',
-                'body' => 'On pull requests whose last review requested changes and that were not reviewed since.',
-                'action' => 'Review findings', 'target' => 'action',
+                'tag' => __('Findings'), 'tone' => 'danger',
+                'title' => $stale === 1
+                    ? __(':count high finding open for over :days days', ['count' => $stale, 'days' => self::STALE_DAYS])
+                    : __(':count high findings open for over :days days', ['count' => $stale, 'days' => self::STALE_DAYS]),
+                'body' => __('On pull requests whose last review requested changes and that were not reviewed since.'),
+                'action' => __('Review findings'), 'target' => 'action',
             ];
         }
 
@@ -132,10 +135,10 @@ class TenantOverview
             $timeouts = $failed->where('status', ReviewRun::STATUS_TIMEOUT)->count();
 
             $items[] = [
-                'tag' => 'Runs', 'tone' => 'neutral',
-                'title' => $failed->count().' '.($failed->count() === 1 ? 'review' : 'reviews').' did not finish',
-                'body' => $timeouts > 0 ? "{$timeouts} of them were stopped after an hour without a result." : 'They started, and stopped before they reported a result.',
-                'action' => 'See the reviews that did not finish', 'target' => 'failed',
+                'tag' => __('Runs'), 'tone' => 'neutral',
+                'title' => $failed->count() === 1 ? __(':count review did not finish', ['count' => 1]) : __(':count reviews did not finish', ['count' => $failed->count()]),
+                'body' => $timeouts > 0 ? __(':count of them were stopped after an hour without a result.', ['count' => $timeouts]) : __('They started, and stopped before they reported a result.'),
+                'action' => __('See the reviews that did not finish'), 'target' => 'failed',
             ];
         }
 
@@ -180,37 +183,45 @@ class TenantOverview
 
         return [
             [
-                'label' => 'Reviews', 'value' => (string) $runs->count(), 'tone' => 'neutral', 'bar' => null,
-                'note' => $previous === 0
-                    ? "None in the {$days} days before"
-                    : sprintf('%+d%% vs previous %dd', (int) round(($runs->count() - $previous) / $previous * 100), $days),
+                'label' => __('Reviews'), 'value' => (string) $runs->count(), 'tone' => 'neutral', 'bar' => null,
+                'note' => self::comparedTo($runs->count(), $previous, $days),
             ],
             [
-                'label' => 'Changes requested', 'tone' => 'neutral', 'bar' => null,
+                'label' => __('Changes requested'), 'tone' => 'neutral', 'bar' => null,
                 'value' => $finished->isEmpty() ? '—' : round($blocked / $finished->count() * 100).'%',
-                'note' => $finished->isEmpty() ? 'No finished reviews yet' : "{$blocked} of {$finished->count()} finished",
+                'note' => $finished->isEmpty() ? __('No finished reviews yet') : __(':count of :total finished', ['count' => $blocked, 'total' => $finished->count()]),
             ],
             [
-                'label' => 'Findings accepted', 'tone' => 'primary', 'bar' => null,
+                'label' => __('Findings accepted'), 'tone' => 'primary', 'bar' => null,
                 'value' => $acceptance['percent'] === null ? '—' : "{$acceptance['percent']}%",
-                'note' => $acceptance['rated'] === 0 ? 'No findings rated yet' : "{$acceptance['accepted']} of {$acceptance['rated']} rated findings",
+                'note' => $acceptance['rated'] === 0 ? __('No findings rated yet') : __(':count of :total rated findings', ['count' => $acceptance['accepted'], 'total' => $acceptance['rated']]),
             ],
             [
-                'label' => 'Median duration', 'tone' => 'neutral', 'bar' => null,
+                'label' => __('Median duration'), 'tone' => 'neutral', 'bar' => null,
                 'value' => $durations->isEmpty() ? '—' : (string) RunPresenter::duration((int) $durations[intdiv($durations->count(), 2)]),
-                'note' => $durations->isEmpty() ? 'No finished reviews yet' : 'p90 '.RunPresenter::duration((int) $durations[(int) ceil($durations->count() * 0.9) - 1]),
+                'note' => $durations->isEmpty() ? __('No finished reviews yet') : 'p90 '.RunPresenter::duration((int) $durations[(int) ceil($durations->count() * 0.9) - 1]),
             ],
             [
-                'label' => 'Cost this month', 'value' => Currency::showOwn($month, $tenant), 'tone' => $spent !== null && $spent > 85 ? 'danger' : 'neutral',
-                'note' => ($spent === null ? 'No budget set' : "{$spent}% of ".Currency::showOwn($budget, $tenant, 0).' budget')
-                    .($sandboxes > 0 ? ' · sandboxes '.Currency::showOwn($sandboxes, $tenant) : ''),
+                'label' => __('Cost this month'), 'value' => Currency::showOwn($month, $tenant), 'tone' => $spent !== null && $spent > 85 ? 'danger' : 'neutral',
+                'note' => ($spent === null ? __('No budget set') : __(':percent% of :budget budget', ['percent' => $spent, 'budget' => Currency::showOwn($budget, $tenant, 0)]))
+                    .($sandboxes > 0 ? ' · '.__('sandboxes :cost', ['cost' => Currency::showOwn($sandboxes, $tenant)]) : ''),
                 'bar' => $spent === null ? null : min(100, $spent),
             ],
             [
-                'label' => 'Did not finish', 'value' => (string) $failed, 'tone' => $failed > 0 ? 'danger' : 'neutral', 'bar' => null,
-                'note' => $runs->isEmpty() ? 'No reviews yet' : round($failed / $runs->count() * 100, 1).'% of runs',
+                'label' => __('Did not finish'), 'value' => (string) $failed, 'tone' => $failed > 0 ? 'danger' : 'neutral', 'bar' => null,
+                'note' => $runs->isEmpty() ? __('No reviews yet') : __(':percent% of runs', ['percent' => round($failed / $runs->count() * 100, 1)]),
             ],
         ];
+    }
+
+    /**
+     * How the number of reviews compares to the period before.
+     */
+    protected static function comparedTo(int $count, int $previous, int $days): string
+    {
+        return $previous === 0
+            ? __('None in the :days days before', ['days' => $days])
+            : __(':change% vs previous :period', ['change' => sprintf('%+d', (int) round(($count - $previous) / $previous * 100)), 'period' => "{$days}d"]);
     }
 
     /**
@@ -260,7 +271,7 @@ class TenantOverview
         $all = collect(array_merge(...array_values($verdicts) ?: [[]]))->groupBy('category');
 
         return array_map(fn (string $category): array => [
-            'name' => ucfirst($category),
+            'name' => ReviewSettingsForm::categoryLabel($category),
             'findings' => $found[$category],
             'rated' => ($all[$category] ?? collect())->count(),
             'accepted' => ($all[$category] ?? collect())->where('fair', true)->count(),

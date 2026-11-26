@@ -37,7 +37,7 @@ class OpenRouterDriver extends ApiKeyDriver
     protected function keyNotes(): array
     {
         return [
-            'A key can have a credit limit of its own: set one to cap what reviews spend.',
+            __('A key can have a credit limit of its own: set one to cap what reviews spend.'),
         ];
     }
 

@@ -20,21 +20,21 @@ class RunPresenter
     public static function outcome(ReviewRun $run): array
     {
         return match (true) {
-            $run->status === ReviewRun::STATUS_QUEUED => ['label' => 'Queued', 'tone' => 'running'],
-            $run->status === ReviewRun::STATUS_RUNNING => ['label' => 'Reviewing…', 'tone' => 'running'],
-            $run->status === ReviewRun::STATUS_PENDING => ['label' => 'Waiting its turn', 'tone' => 'running'],
-            $run->status === ReviewRun::STATUS_RESTARTED => ['label' => 'Started again', 'tone' => 'neutral'],
+            $run->status === ReviewRun::STATUS_QUEUED => ['label' => __('Queued'), 'tone' => 'running'],
+            $run->status === ReviewRun::STATUS_RUNNING => ['label' => __('Reviewing…'), 'tone' => 'running'],
+            $run->status === ReviewRun::STATUS_PENDING => ['label' => __('Waiting its turn'), 'tone' => 'running'],
+            $run->status === ReviewRun::STATUS_RESTARTED => ['label' => __('Started again'), 'tone' => 'neutral'],
             // A branch's security review has nowhere to be posted: its report is its outcome.
             $run->status === ReviewRun::STATUS_UNPUBLISHED && $run->kind === SecurityReview::KIND => strtoupper((string) $run->result) === 'FAILED'
-                ? ['label' => 'Findings to act on', 'tone' => 'changes']
-                : ['label' => 'Nothing to act on', 'tone' => 'approved'],
-            $run->status === ReviewRun::STATUS_UNPUBLISHED => ['label' => 'Trial, not posted', 'tone' => 'neutral'],
-            $run->status === ReviewRun::STATUS_TIMEOUT => ['label' => 'Timed out', 'tone' => 'failed'],
-            $run->status === ReviewRun::STATUS_STOPPED => ['label' => 'Stopped', 'tone' => 'neutral'],
-            $run->status === ReviewRun::STATUS_FAILED => ['label' => 'Did not finish', 'tone' => 'failed'],
-            $run->status === ReviewRun::STATUS_FINISHED && strtoupper((string) $run->result) === 'FAILED' => ['label' => 'Changes requested', 'tone' => 'changes'],
-            $run->status === ReviewRun::STATUS_FINISHED && $run->needsManualReview() => ['label' => 'Manual review', 'tone' => 'manual'],
-            $run->status === ReviewRun::STATUS_FINISHED => ['label' => 'Approved', 'tone' => 'approved'],
+                ? ['label' => __('Findings to act on'), 'tone' => 'changes']
+                : ['label' => __('Nothing to act on'), 'tone' => 'approved'],
+            $run->status === ReviewRun::STATUS_UNPUBLISHED => ['label' => __('Trial, not posted'), 'tone' => 'neutral'],
+            $run->status === ReviewRun::STATUS_TIMEOUT => ['label' => __('Timed out'), 'tone' => 'failed'],
+            $run->status === ReviewRun::STATUS_STOPPED => ['label' => __('Stopped'), 'tone' => 'neutral'],
+            $run->status === ReviewRun::STATUS_FAILED => ['label' => __('Did not finish'), 'tone' => 'failed'],
+            $run->status === ReviewRun::STATUS_FINISHED && strtoupper((string) $run->result) === 'FAILED' => ['label' => __('Changes requested'), 'tone' => 'changes'],
+            $run->status === ReviewRun::STATUS_FINISHED && $run->needsManualReview() => ['label' => __('Manual review'), 'tone' => 'manual'],
+            $run->status === ReviewRun::STATUS_FINISHED => ['label' => __('Approved'), 'tone' => 'approved'],
             default => ['label' => ucfirst((string) $run->status), 'tone' => 'neutral'],
         };
     }
@@ -45,17 +45,19 @@ class RunPresenter
     public static function standing(ReviewRun $run): string
     {
         return match ($run->status) {
-            ReviewRun::STATUS_QUEUED => 'The review is queued: it waits for a worker, or for the review of the commit before it to finish.',
-            ReviewRun::STATUS_RUNNING => 'The review is still running.',
-            ReviewRun::STATUS_PENDING => 'Another review of this pull request was running, so this one waits and is started again when that one is done.',
-            ReviewRun::STATUS_RESTARTED => 'This review waited for another one and was then started again'.($run->restarted_as === null ? '.' : " as run #{$run->restarted_as}."),
+            ReviewRun::STATUS_QUEUED => __('The review is queued: it waits for a worker, or for the review of the commit before it to finish.'),
+            ReviewRun::STATUS_RUNNING => __('The review is still running.'),
+            ReviewRun::STATUS_PENDING => __('Another review of this pull request was running, so this one waits and is started again when that one is done.'),
+            ReviewRun::STATUS_RESTARTED => $run->restarted_as === null
+                ? __('This review waited for another one and was then started again.')
+                : __('This review waited for another one and was then started again as run #:run.', ['run' => $run->restarted_as]),
             ReviewRun::STATUS_SKIPPED => $run->superseded_by === null
-                ? 'Not reviewed: there was nothing new to review.'
-                : 'Not reviewed: a newer commit was reviewed instead.',
-            ReviewRun::STATUS_FAILED => 'The review did not finish. Its log, where there is one, says where it stopped; "Re-run" starts a new one.',
-            ReviewRun::STATUS_TIMEOUT => 'The review never reported back and was stopped. "Re-run" starts a new one.',
-            ReviewRun::STATUS_STOPPED => 'Stopped before it finished. "Re-run" starts a new one.',
-            default => 'No summary.',
+                ? __('Not reviewed: there was nothing new to review.')
+                : __('Not reviewed: a newer commit was reviewed instead.'),
+            ReviewRun::STATUS_FAILED => __('The review did not finish. Its log, where there is one, says where it stopped; "Re-run" starts a new one.'),
+            ReviewRun::STATUS_TIMEOUT => __('The review never reported back and was stopped. "Re-run" starts a new one.'),
+            ReviewRun::STATUS_STOPPED => __('Stopped before it finished. "Re-run" starts a new one.'),
+            default => __('No summary.'),
         };
     }
 
@@ -84,9 +86,12 @@ class RunPresenter
      */
     public static function reviewer(ReviewRun $run): ?string
     {
+        if ($run->agent === null) {
+            return null;
+        }
+
         return match (true) {
-            $run->agent === null => null,
-            $run->agent === DiffReview::AGENT => 'The diff alone',
+            $run->agent === DiffReview::AGENT => __('The diff alone'),
             default => ReviewProvider::tryFrom($run->agent)?->text() ?? $run->agent,
         };
     }

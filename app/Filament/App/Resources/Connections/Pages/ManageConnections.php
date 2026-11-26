@@ -8,10 +8,20 @@ use App\Models\Connection;
 use App\Services\Connections;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ManageRecords;
+use Illuminate\Contracts\Support\Htmlable;
 
 class ManageConnections extends ManageRecords
 {
     protected static string $resource = ConnectionResource::class;
+
+    /**
+     * The page's name in the menu, rather than the model label in title case,
+     * which reads oddly in Dutch.
+     */
+    public function getTitle(): string|Htmlable
+    {
+        return static::getResource()::getNavigationLabel();
+    }
 
     protected function getHeaderActions(): array
     {

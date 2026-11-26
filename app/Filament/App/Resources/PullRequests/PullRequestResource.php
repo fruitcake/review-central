@@ -46,10 +46,6 @@ class PullRequestResource extends Resource
 {
     protected static ?string $model = OpenPullRequest::class;
 
-    protected static ?string $navigationLabel = 'Pull requests';
-
-    protected static ?string $modelLabel = 'pull request';
-
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedArrowsRightLeft;
 
     protected static ?int $navigationSort = 11;
@@ -85,6 +81,21 @@ class PullRequestResource extends Resource
             ->whereColumn('pull_request_id', 'open_pull_requests.pull_request_id');
     }
 
+    public static function getNavigationLabel(): string
+    {
+        return __('Pull requests');
+    }
+
+    public static function getModelLabel(): string
+    {
+        return __('pull request');
+    }
+
+    public static function getPluralModelLabel(): string
+    {
+        return __('pull requests');
+    }
+
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()->whereHas('repository', fn (Builder $query): Builder => $query->where('tenant_id', CurrentTenant::get()->getKey()));
@@ -99,7 +110,7 @@ class PullRequestResource extends Resource
 
     public static function getNavigationBadgeTooltip(): ?string
     {
-        return 'Waiting for someone to start the review';
+        return __('Waiting for someone to start the review');
     }
 
     public static function table(Table $table): Table
@@ -114,42 +125,48 @@ class PullRequestResource extends Resource
             ->defaultSort('updated_at', 'desc')
             ->columns([
                 TextColumn::make('title')
-                    ->label('Pull request')
+                    ->label(__('Pull request'))
                     ->wrap()
-                    ->placeholder('Untitled')
-                    ->description(fn (OpenPullRequest $record): string => $record->repository->slug.' #'.$record->pull_request_id.($record->branch === null ? '' : ' · '.$record->branch).(MergeState::current($record) === true ? ' · Merge conflicts' : ''))
+                    ->placeholder(__('Untitled'))
+                    ->description(fn (OpenPullRequest $record): string => $record->repository->slug.' #'.$record->pull_request_id.($record->branch === null ? '' : ' · '.$record->branch).(MergeState::current($record) === true ? ' · '.__('Merge conflicts') : ''))
                     ->searchable(['title', 'branch']),
                 TextColumn::make('author')
-                    ->label('By')
-                    ->placeholder('Someone')
-                    ->description(fn (OpenPullRequest $record): ?string => $record->repository->tenant->trusts($record->author_id, $record->author_nickname) ? 'Trusted' : null)
+                    ->label(__('By'))
+                    ->placeholder(__('Someone'))
+                    ->description(function (OpenPullRequest $record): ?string {
+                        if (! $record->repository->tenant->trusts($record->author_id, $record->author_nickname)) {
+                            return null;
+                        }
+
+                        return __('Trusted');
+                    })
                     ->searchable(['author', 'author_nickname']),
                 TextColumn::make('turn')
-                    ->label('Whose turn')
+                    ->label(__('Whose turn'))
                     ->wrap()
                     ->state(fn (OpenPullRequest $record): HtmlString => self::turnCell($record)),
                 TextColumn::make('state')
-                    ->label('AI review')
+                    ->label(__('AI review'))
                     ->state(fn (OpenPullRequest $record): HtmlString => ReviewRunResource::chip(...self::standing($record))),
-                TextColumn::make('reviews_count')->label('Reviews')->numeric(),
-                TextColumn::make('reviews_cost')->label('Cost')->formatStateUsing(fn (mixed $state): string => Currency::show($state))->placeholder('—'),
-                TextColumn::make('updated_at')->label('Last change')->since()->sortable(),
+                TextColumn::make('reviews_count')->label(__('Reviews'))->numeric(),
+                TextColumn::make('reviews_cost')->label(__('Cost'))->formatStateUsing(fn (mixed $state): string => Currency::show($state))->placeholder('—'),
+                TextColumn::make('updated_at')->label(__('Last change'))->since()->sortable(),
             ])
             ->filters([
                 SelectFilter::make('repository_id')
-                    ->label('Repository')
+                    ->label(__('Repository'))
                     ->options(fn (): array => CurrentTenant::get()->repositories()->get()->mapWithKeys(fn (Repository $repository): array => [$repository->getKey() => $repository->fullName()])->all()),
             ])
             ->recordAction('details')
             ->recordActions([
                 Action::make('details')
-                    ->label('Details')
+                    ->label(__('Details'))
                     ->icon(Heroicon::OutlinedInformationCircle)
                     ->iconButton()
-                    ->tooltip('Whose turn, and what happened so far')
+                    ->tooltip(__('Whose turn, and what happened so far'))
                     ->color('gray')
                     ->slideOver()
-                    ->modalHeading(fn (OpenPullRequest $record): string => $record->title ?? 'Untitled')
+                    ->modalHeading(fn (OpenPullRequest $record): string => $record->title ?? __('Untitled'))
                     ->modalDescription(fn (OpenPullRequest $record): string => $record->repository->slug.' #'.$record->pull_request_id)
                     ->modalContent(fn (OpenPullRequest $record): View => view('filament.app.pull-request', self::details($record)))
                     ->extraModalFooterActions(fn (OpenPullRequest $record): array => [
@@ -159,7 +176,7 @@ class PullRequestResource extends Resource
                         self::stopAction($record),
                         Action::make('readTicket')
                             // Read from its source here, before any review did, or again since.
-                            ->label(fn (): string => (self::ticketOf($record)['url'] ?? null) === null ? 'Read the ticket' : 'Refresh the ticket')
+                            ->label(fn (): string => (self::ticketOf($record)['url'] ?? null) === null ? __('Read the ticket') : __('Refresh the ticket'))
                             ->icon(Heroicon::OutlinedArrowPath)
                             ->color('gray')
                             ->visible(fn (): bool => self::ticketOf($record) !== null)
@@ -167,27 +184,27 @@ class PullRequestResource extends Resource
                                 $ticket = app(TicketLookup::class)->readForDetails($record);
 
                                 if ($ticket === null || $ticket['error'] !== null) {
-                                    Notification::make()->title('The ticket could not be read')->body($ticket['error'] ?? 'The title names no ticket a source of this repository reads.')->danger()->send();
+                                    Notification::make()->title(__('The ticket could not be read'))->body($ticket['error'] ?? __('The title names no ticket a source of this repository reads.'))->danger()->send();
 
                                     return;
                                 }
 
-                                Notification::make()->title("{$ticket['reference']} is read from {$ticket['source']}")->success()->send();
+                                Notification::make()->title(__(':reference is read from :source', ['reference' => $ticket['reference'], 'source' => $ticket['source']]))->success()->send();
                             }),
                     ])
                     ->modalSubmitAction(false)
-                    ->modalCancelActionLabel('Close'),
+                    ->modalCancelActionLabel(__('Close')),
                 self::startAction(),
                 self::openReviewAction(),
                 Action::make('pullRequest')
-                    ->label('Open on the pull request')
-                    ->tooltip('Open on the pull request')
+                    ->label(__('Open on the pull request'))
+                    ->tooltip(__('Open on the pull request'))
                     ->icon(Heroicon::OutlinedArrowTopRightOnSquare)
                     ->iconButton()
                     ->color('gray')
                     ->url(fn (OpenPullRequest $record): ?string => rescue(fn (): string => $record->repository->sourceControl()->pullRequestUrl($record->pull_request_id), null, false), shouldOpenInNewTab: true),
                 Action::make('review')
-                    ->label('Last review')
+                    ->label(__('Last review'))
                     ->color('gray')
                     ->url(fn (OpenPullRequest $record): ?string => filled($record->getAttribute('latest_review')) ? ReviewRunResource::getUrl('view', ['record' => $record->getAttribute('latest_review')]) : null)
                     ->visible(fn (OpenPullRequest $record): bool => filled($record->getAttribute('latest_review'))),
@@ -211,7 +228,7 @@ class PullRequestResource extends Resource
 
         return new HtmlString(
             '<div class="rc-turn">'
-            .'<span class="rc-turn-who">'.e($turn->who()).($mine ? ' <span class="rc-chip rc-chip-primary">You</span>' : '').'</span>'
+            .'<span class="rc-turn-who">'.e($turn->who()).($mine ? ' <span class="rc-chip rc-chip-primary">'.e(__('You')).'</span>' : '').'</span>'
             .'<span class="rc-muted">'.e($note === null ? "{$turn->action}: {$turn->reason}" : Str::limit($note['next_step'], 220)).'</span>'
             .'</div>'
         );
@@ -222,7 +239,15 @@ class PullRequestResource extends Resource
      */
     public static function closedText(OpenPullRequest $record): string
     {
-        return ($record->closed_as === OpenPullRequest::MERGED ? 'Merged' : 'Declined').($record->closed_at === null ? '' : ' '.$record->closed_at->diffForHumans());
+        $merged = $record->closed_as === OpenPullRequest::MERGED;
+
+        if ($record->closed_at === null) {
+            return $merged ? __('Merged') : __('Declined');
+        }
+
+        $when = ['time' => $record->closed_at->diffForHumans()];
+
+        return $merged ? __('Merged :time', $when) : __('Declined :time', $when);
     }
 
     /**
@@ -248,7 +273,7 @@ class PullRequestResource extends Resource
             ->map(fn (array $entry): array => ['at' => Carbon::parse($entry['at']), 'text' => $entry['text'], 'kind' => $entry['kind'], 'url' => null, 'tone' => null])
             ->merge($runs->map(fn (ReviewRun $sibling): array => [
                 'at' => $sibling->finished_at ?? $sibling->started_at,
-                'text' => 'AI review of '.substr($sibling->commit, 0, 7).': '.Str::lower(RunPresenter::outcome($sibling)['label']),
+                'text' => __('AI review of :commit: :outcome', ['commit' => substr($sibling->commit, 0, 7), 'outcome' => Str::lower(RunPresenter::outcome($sibling)['label'])]),
                 'kind' => 'ai',
                 'url' => ReviewRunResource::getUrl('view', ['record' => $sibling]),
                 'tone' => RunPresenter::outcome($sibling)['tone'],
@@ -283,7 +308,7 @@ class PullRequestResource extends Resource
         $pullRequest = fn (?OpenPullRequest $record): OpenPullRequest => $for ?? $record ?? throw new \LogicException('No pull request to review.');
 
         return Action::make($for === null ? 'start' : 'startFromDetails')
-            ->label(fn (?OpenPullRequest $record): string => $pullRequest($record)->awaiting_approval ? 'Approve and review' : 'Review')
+            ->label(fn (?OpenPullRequest $record): string => $pullRequest($record)->awaiting_approval ? __('Approve and review') : __('Review'))
             ->icon(Heroicon::OutlinedPlay)
             ->color(fn (?OpenPullRequest $record): string => $pullRequest($record)->awaiting_approval ? 'primary' : 'gray')
             // Not a closed one, whose branch may be another pull request's by now; nor a fork's
@@ -296,13 +321,13 @@ class PullRequestResource extends Resource
                     && ReviewRequest::reviewable(['from_fork' => $record->from_fork, 'source' => ['branch' => ['name' => $record->branch]]]);
             })
             ->requiresConfirmation()
-            ->modalHeading(fn (?OpenPullRequest $record): string => "Review #{$pullRequest($record)->pull_request_id}?")
+            ->modalHeading(fn (?OpenPullRequest $record): string => __('Review #:number?', ['number' => $pullRequest($record)->pull_request_id]))
             ->modalDescription(function (?OpenPullRequest $record) use ($pullRequest): string {
                 $record = $pullRequest($record);
 
-                return ($record->from_fork || ! $record->repository->tenant->trusts($record->author_id, $record->author_nickname)
-                    ? 'Its code is not from an account this team trusts: the reviewer reads it in the sandbox, with this team\'s AI key and on its budget. '
-                    : '').'The review is posted on the pull request, and costs what a review costs.';
+                return $record->from_fork || ! $record->repository->tenant->trusts($record->author_id, $record->author_nickname)
+                    ? __('Its code is not from an account this team trusts: the reviewer reads it in the sandbox, with this team\'s AI key and on its budget. The review is posted on the pull request, and costs what a review costs.')
+                    : __('The review is posted on the pull request, and costs what a review costs.');
             })
             ->action(function (?OpenPullRequest $record, ReviewRequest $reviews) use ($pullRequest): void {
                 $record = $pullRequest($record);
@@ -310,10 +335,10 @@ class PullRequestResource extends Resource
                 try {
                     ReviewRunResource::started(
                         $reviews->start($record->repository, $record->branch, strict: true),
-                        "{$record->repository->slug} #{$record->pull_request_id}. It is under Reviews as queued until a worker begins it.",
+                        __(':pull_request. It is under Reviews as queued until a worker begins it.', ['pull_request' => "{$record->repository->slug} #{$record->pull_request_id}"]),
                     );
                 } catch (Throwable $exception) {
-                    Notification::make()->title('The review could not be started')->body($exception->getMessage())->danger()->send();
+                    Notification::make()->title(__('The review could not be started'))->body($exception->getMessage())->danger()->send();
                 }
             });
     }
@@ -327,7 +352,7 @@ class PullRequestResource extends Resource
         $running = fn (?OpenPullRequest $record): ?ReviewRun => ($for ?? $record) === null ? null : self::reviewing($for ?? $record);
 
         return Action::make($for === null ? 'openReview' : 'openReviewFromDetails')
-            ->label('Open the review')
+            ->label(__('Open the review'))
             ->icon(Heroicon::OutlinedArrowTopRightOnSquare)
             ->color('gray')
             ->visible(fn (?OpenPullRequest $record): bool => $running($record) !== null)
@@ -340,14 +365,14 @@ class PullRequestResource extends Resource
     private static function stopAction(OpenPullRequest $for): Action
     {
         return Action::make('stopReview')
-            ->label('Stop the review')
+            ->label(__('Stop the review'))
             ->icon(Heroicon::OutlinedStop)
             ->color('danger')
             ->visible(fn (): bool => ($run = self::reviewing($for)) !== null && ReviewStops::stoppable($run))
             ->requiresConfirmation()
-            ->modalHeading('Stop this review')
-            ->modalDescription(ReviewRunResource::STOP_DESCRIPTION)
-            ->modalSubmitActionLabel('Stop')
+            ->modalHeading(__('Stop this review'))
+            ->modalDescription(ReviewRunResource::stopDescription())
+            ->modalSubmitActionLabel(__('Stop'))
             ->action(fn (ReviewStops $stops) => ReviewRunResource::stopped(self::reviewing($for), $stops));
     }
 
@@ -471,12 +496,12 @@ class PullRequestResource extends Resource
         $current = $run !== null && $record->commit !== null && str_starts_with($record->commit, substr($run->commit, 0, 7));
 
         return match (true) {
-            $record->awaiting_approval => ['Waiting for approval', 'manual'],
-            $run !== null && RunPresenter::live($run) => ['Reviewing…', 'running'],
-            $record->draft => ['Draft', 'neutral'],
-            ! $record->repository->reviews_enabled && $run === null => ['Not reviewed by itself', 'neutral'],
-            $run === null => ['Not reviewed', 'neutral'],
-            ! $current => ['New commits since the review', 'neutral'],
+            $record->awaiting_approval => [__('Waiting for approval'), 'manual'],
+            $run !== null && RunPresenter::live($run) => [__('Reviewing…'), 'running'],
+            $record->draft => [__('Draft'), 'neutral'],
+            ! $record->repository->reviews_enabled && $run === null => [__('Not reviewed by itself'), 'neutral'],
+            $run === null => [__('Not reviewed'), 'neutral'],
+            ! $current => [__('New commits since the review'), 'neutral'],
             default => [RunPresenter::outcome($run)['label'], RunPresenter::outcome($run)['tone']],
         };
     }

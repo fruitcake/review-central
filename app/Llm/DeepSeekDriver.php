@@ -37,7 +37,7 @@ class DeepSeekDriver extends ApiKeyDriver
     protected function keyNotes(): array
     {
         return [
-            'Requests are refused until the account has a balance, under **Top up**.',
+            __('Requests are refused until the account has a balance, under **Top up**.'),
         ];
     }
 

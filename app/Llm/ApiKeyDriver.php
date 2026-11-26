@@ -75,18 +75,18 @@ abstract class ApiKeyDriver implements ExplainsSetup, LlmDriver
     public function setupGuide(): SetupGuide
     {
         return new SetupGuide(
-            title: "A {$this->label()} API key",
+            title: __('A :provider API key', ['provider' => $this->label()]),
             url: $this->keyPage(),
-            linkLabel: "API keys in the {$this->label()} console",
+            linkLabel: __('API keys in the :provider console', ['provider' => $this->label()]),
             steps: [
-                "Sign in at {$this->label()} and open the link. A new account may first need a payment method or credits before its keys work.",
-                'Create a key and name it after this installation, so it can be told apart and revoked later.',
-                'Copy the key, which is shown once, and paste it here.',
-                "Under Settings, fill in the model to review with, as {$this->label()} names it.",
+                __('Sign in at :provider and open the link. A new account may first need a payment method or credits before its keys work.', ['provider' => $this->label()]),
+                __('Create a key and name it after this installation, so it can be told apart and revoked later.'),
+                __('Copy the key, which is shown once, and paste it here.'),
+                __('Under Settings, fill in the model to review with, as :provider names it.', ['provider' => $this->label()]),
             ],
             notes: [
                 ...$this->keyNotes(),
-                "The review from the diff runs on this server with the key, and Pi in a container gets it as `{$this->variable()}`.",
+                __('The review from the diff runs on this server with the key, and Pi in a container gets it as `:variable`.', ['variable' => $this->variable()]),
             ],
         );
     }
@@ -94,7 +94,7 @@ abstract class ApiKeyDriver implements ExplainsSetup, LlmDriver
     public function credentialFields(): array
     {
         return [
-            Secret::make('api_key')->label('API key'),
+            Secret::make('api_key')->label(__('API key')),
         ];
     }
 
@@ -102,9 +102,9 @@ abstract class ApiKeyDriver implements ExplainsSetup, LlmDriver
     {
         return [
             ReviewSettingsForm::modelField('model', $this->modelChoices())
-                ->label('Model')
+                ->label(__('Model'))
                 ->required()
-                ->helperText("The model to review with: one {$this->label()} names, or its smartest, default or cheapest as the Laravel AI SDK names it when the review runs. A trial can name another."),
+                ->helperText(__('The model to review with: one :provider names, or its smartest, default or cheapest as the Laravel AI SDK names it when the review runs. A trial can name another.', ['provider' => $this->label()])),
         ];
     }
 

@@ -32,21 +32,21 @@ class ManageReviewRules extends ManageRecords
     {
         return [
             Action::make('import')
-                ->label('Import CSV')
+                ->label(__('Import CSV'))
                 ->icon(Heroicon::OutlinedArrowUpTray)
                 ->color('gray')
                 ->visible(fn (): bool => TenantRole::isAdmin())
-                ->modalHeading('Import rules from a CSV')
-                ->modalDescription('The first row names the columns: kind (check or convention) and title, and optionally body, paths (globs separated by ;), severity (HIGH, MEDIUM or LOW) and repository (workspace/name, or empty for every repository). A rule already here with the same kind, title and repository is skipped.')
+                ->modalHeading(__('Import rules from a CSV'))
+                ->modalDescription(__('The first row names the columns: kind (check or convention) and title, and optionally body, paths (globs separated by ;), severity (HIGH, MEDIUM or LOW) and repository (workspace/name, or empty for every repository). A rule already here with the same kind, title and repository is skipped.'))
                 ->schema([
                     FileUpload::make('file')
-                        ->label('CSV file')
+                        ->label(__('CSV file'))
                         ->acceptedFileTypes(['text/csv', 'text/plain', 'application/vnd.ms-excel'])
                         ->maxSize(5120)
                         ->storeFiles(false)
                         ->required(),
                 ])
-                ->modalSubmitActionLabel('Import')
+                ->modalSubmitActionLabel(__('Import'))
                 ->action(function (array $data, ReviewRules $rules): void {
                     $file = $data['file'] ?? null;
                     $user = auth()->user();
@@ -58,7 +58,7 @@ class ManageReviewRules extends ManageRecords
                     try {
                         $result = $rules->import($user, CurrentTenant::get(), (string) $file->get());
                     } catch (ActionRefused $exception) {
-                        Notification::make()->title('The rules could not be imported')->body($exception->getMessage())->danger()->persistent()->send();
+                        Notification::make()->title(__('The rules could not be imported'))->body($exception->getMessage())->danger()->persistent()->send();
 
                         return;
                     }
@@ -66,27 +66,30 @@ class ManageReviewRules extends ManageRecords
                     $skipped = count($result['skipped']);
 
                     $notification = Notification::make()
-                        ->title($result['created'] === 1 ? 'One rule imported' : "{$result['created']} rules imported")
-                        ->body($skipped === 0 ? null : "{$skipped} skipped: ".Str::limit(implode(' ', array_slice($result['skipped'], 0, 5)), 600))
+                        ->title($result['created'] === 1 ? __('One rule imported') : __(':count rules imported', ['count' => $result['created']]))
                         ->status($skipped === 0 ? 'success' : 'warning');
+
+                    if ($skipped > 0) {
+                        $notification->body(__(':count skipped: :reasons', ['count' => $skipped, 'reasons' => Str::limit(implode(' ', array_slice($result['skipped'], 0, 5)), 600)]));
+                    }
 
                     // What was skipped stays until it is read.
                     ($skipped === 0 ? $notification : $notification->persistent())->send();
                 }),
             Action::make('checkRepository')
-                ->label('Check the repository')
+                ->label(__('Check the repository'))
                 ->icon(Heroicon::OutlinedMagnifyingGlass)
                 ->color('gray')
                 ->visible(fn (): bool => TenantRole::isAdmin())
-                ->modalHeading('Check for rules the repository holds itself')
-                ->modalDescription('Reads the rule files on the repository\'s main branch (.ai/rules, .claude/rules, .github/instructions, .cursor/rules) and turns off each of its own rules found there, since the review reads those files already. Rules for every repository stay on. This runs by itself after each merge as well.')
+                ->modalHeading(__('Check for rules the repository holds itself'))
+                ->modalDescription(__('Reads the rule files on the repository\'s main branch (.ai/rules, .claude/rules, .github/instructions, .cursor/rules) and turns off each of its own rules found there, since the review reads those files already. Rules for every repository stay on. This runs by itself after each merge as well.'))
                 ->schema([
                     Select::make('repository_id')
-                        ->label('Repository')
+                        ->label(__('Repository'))
                         ->options(fn (): array => ReviewRuleResource::repositoryOptions())
                         ->required(),
                 ])
-                ->modalSubmitActionLabel('Check')
+                ->modalSubmitActionLabel(__('Check'))
                 ->action(function (array $data, ReviewRuleArchive $archive): void {
                     $repository = CurrentTenant::get()->repositories()->whereKey((int) $data['repository_id'])->first();
 
@@ -97,8 +100,12 @@ class ManageReviewRules extends ManageRecords
                     $result = $archive->check($repository, always: true);
 
                     Notification::make()
-                        ->title($result['archived'] === [] ? 'No rule turned off' : count($result['archived']).' rule(s) turned off')
-                        ->body($result['archived'] === [] ? $result['note'] : Str::limit(implode(' ', array_map(fn (array $rule): string => "\"{$rule['title']}\" is in {$rule['file']}.", $result['archived'])), 600))
+                        ->title(match (count($result['archived'])) {
+                            0 => __('No rule turned off'),
+                            1 => __('One rule turned off'),
+                            default => __(':count rules turned off', ['count' => count($result['archived'])]),
+                        })
+                        ->body($result['archived'] === [] ? $result['note'] : Str::limit(implode(' ', array_map(fn (array $rule): string => __('":title" is in :file.', ['title' => $rule['title'], 'file' => $rule['file']]), $result['archived'])), 600))
                         ->success()
                         ->send();
                 }),
@@ -114,8 +121,8 @@ class ManageReviewRules extends ManageRecords
     public function getTabs(): array
     {
         $views = [
-            'all' => ['All repositories', fn (Builder $query): Builder => $query],
-            self::MY_REPOSITORIES => ['My repositories', fn (Builder $query): Builder => $query->where(fn (Builder $query): Builder => $this->inMyRepositories()($query)->orWhereNull('repository_id'))],
+            'all' => [__('All repositories'), fn (Builder $query): Builder => $query],
+            self::MY_REPOSITORIES => [__('My repositories'), fn (Builder $query): Builder => $query->where(fn (Builder $query): Builder => $this->inMyRepositories()($query)->orWhereNull('repository_id'))],
         ];
 
         return array_map(fn (array $view): Tab => Tab::make($view[0])

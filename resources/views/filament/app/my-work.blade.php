@@ -12,26 +12,26 @@
     <div class="rc-stack">
         @if ($repositories->isEmpty() && $turn->isEmpty())
             <section class="rc-card rc-pad">
-                <strong>Nothing of yours found yet</strong>
+                <strong>{{ __('Nothing of yours found yet') }}</strong>
                 <p class="rc-muted">
-                    This page lists the pull requests you opened or were asked to review, by the Bitbucket or GitHub account on your profile.
-                    <a href="{{ EditProfile::urlForCurrentUser() }}">Connect or name your account →</a>
+                    {{ __('This page lists the pull requests you opened or were asked to review, by the Bitbucket or GitHub account on your profile.') }}
+                    <a href="{{ EditProfile::urlForCurrentUser() }}">{{ __('Connect or name your account') }} →</a>
                 </p>
             </section>
         @endif
 
         <section class="rc-card" aria-labelledby="rc-my-turn">
             <div class="rc-card-bar">
-                <h2 id="rc-my-turn">Your turn</h2>
-                <a href="{{ $targets['turn'] }}">All with you →</a>
+                <h2 id="rc-my-turn">{{ __('Your turn') }}</h2>
+                <a href="{{ $targets['turn'] }}">{{ __('All with you') }} →</a>
             </div>
             <div class="rc-scroll">
                 <table class="rc-table">
                     <thead>
                         <tr>
-                            <th scope="col">Pull request</th>
-                            <th scope="col">What to do</th>
-                            <th scope="col">AI review</th>
+                            <th scope="col">{{ __('Pull request') }}</th>
+                            <th scope="col">{{ __('What to do') }}</th>
+                            <th scope="col">{{ __('AI review') }}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -43,13 +43,13 @@
                                     @else
                                         <strong>{{ $record->title ?? 'Untitled' }}</strong>
                                     @endif
-                                    <span class="rc-muted">{{ $record->repository->slug }} #{{ $record->pull_request_id }} · {{ $record->author ?? 'Someone' }}</span>
+                                    <span class="rc-muted">{{ $record->repository->slug }} #{{ $record->pull_request_id }} · {{ $record->author ?? __('Someone') }}</span>
                                 </div></td>
                                 <td>{{ PullRequestResource::turnCell($record) }}</td>
                                 <td>{{ ReviewRunResource::chip(...PullRequestResource::standing($record)) }}</td>
                             </tr>
                         @empty
-                            <tr><td colspan="3" class="rc-muted">Nothing waits for you.</td></tr>
+                            <tr><td colspan="3" class="rc-muted">{{ __('Nothing waits for you.') }}</td></tr>
                         @endforelse
                     </tbody>
                 </table>
@@ -58,16 +58,16 @@
 
         <section class="rc-card" aria-labelledby="rc-my-pull-requests">
             <div class="rc-card-bar">
-                <h2 id="rc-my-pull-requests">Your pull requests</h2>
-                <a href="{{ $targets['pullRequests'] }}">Of your repositories →</a>
+                <h2 id="rc-my-pull-requests">{{ __('Your pull requests') }}</h2>
+                <a href="{{ $targets['pullRequests'] }}">{{ __('Of your repositories') }} →</a>
             </div>
             <div class="rc-scroll">
                 <table class="rc-table">
                     <thead>
                         <tr>
-                            <th scope="col">Pull request</th>
-                            <th scope="col">Whose turn</th>
-                            <th scope="col">AI review</th>
+                            <th scope="col">{{ __('Pull request') }}</th>
+                            <th scope="col">{{ __('Whose turn') }}</th>
+                            <th scope="col">{{ __('AI review') }}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -79,13 +79,13 @@
                                     @else
                                         <strong>{{ $record->title ?? 'Untitled' }}</strong>
                                     @endif
-                                    <span class="rc-muted">{{ $record->repository->slug }} #{{ $record->pull_request_id }}@if ($record->draft) · Draft @endif</span>
+                                    <span class="rc-muted">{{ $record->repository->slug }} #{{ $record->pull_request_id }}@if ($record->draft) · {{ __('Draft') }} @endif</span>
                                 </div></td>
                                 <td>{{ PullRequestResource::turnCell($record) }}</td>
                                 <td>{{ ReviewRunResource::chip(...PullRequestResource::standing($record)) }}</td>
                             </tr>
                         @empty
-                            <tr><td colspan="3" class="rc-muted">No open pull requests of yours.</td></tr>
+                            <tr><td colspan="3" class="rc-muted">{{ __('No open pull requests of yours.') }}</td></tr>
                         @endforelse
                     </tbody>
                 </table>
@@ -95,16 +95,16 @@
         <div class="rc-row">
             <section class="rc-card rc-grow-2" aria-labelledby="rc-my-repositories">
                 <div class="rc-card-bar">
-                    <h2 id="rc-my-repositories">Your repositories</h2>
-                    <a href="{{ $targets['repositories'] }}">All of yours →</a>
+                    <h2 id="rc-my-repositories">{{ __('Your repositories') }}</h2>
+                    <a href="{{ $targets['repositories'] }}">{{ __('All of yours') }} →</a>
                 </div>
                 <div class="rc-scroll">
                     <table class="rc-table">
                         <thead>
                             <tr>
-                                <th scope="col">Repository</th>
-                                <th scope="col" class="rc-num">Open PRs</th>
-                                <th scope="col" class="rc-num">Open findings</th>
+                                <th scope="col">{{ __('Repository') }}</th>
+                                <th scope="col" class="rc-num">{{ __('Open PRs') }}</th>
+                                <th scope="col" class="rc-num">{{ __('Open findings') }}</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -115,20 +115,20 @@
                                     <td class="rc-num">{{ $repository->findings_count }}</td>
                                 </tr>
                             @empty
-                                <tr><td colspan="3" class="rc-muted">None yet: a repository is yours once you opened or reviewed one of its pull requests.</td></tr>
+                                <tr><td colspan="3" class="rc-muted">{{ __('None yet: a repository is yours once you opened or reviewed one of its pull requests.') }}</td></tr>
                             @endforelse
                         </tbody>
                     </table>
                 </div>
                 @if ($repositories->sum('findings_count') > 0)
-                    <div class="rc-pad"><a href="{{ $targets['findings'] }}">Open findings of your repositories →</a></div>
+                    <div class="rc-pad"><a href="{{ $targets['findings'] }}">{{ __('Open findings of your repositories') }} →</a></div>
                 @endif
             </section>
 
             <section class="rc-card rc-grow-1" aria-labelledby="rc-my-reviews">
                 <div class="rc-card-bar">
-                    <h2 id="rc-my-reviews">Latest reviews</h2>
-                    <a href="{{ $targets['reviews'] }}">All →</a>
+                    <h2 id="rc-my-reviews">{{ __('Latest reviews') }}</h2>
+                    <a href="{{ $targets['reviews'] }}">{{ __('All') }} →</a>
                 </div>
                 <div class="rc-activity">
                     @forelse ($reviews as $run)
@@ -141,7 +141,7 @@
                             </span>
                         </a>
                     @empty
-                        <span class="rc-muted rc-pad">No reviews of your repositories yet.</span>
+                        <span class="rc-muted rc-pad">{{ __('No reviews of your repositories yet.') }}</span>
                     @endforelse
                 </div>
             </section>

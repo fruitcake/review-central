@@ -52,8 +52,8 @@ class ViewRepository extends ViewRecord
             $this->record->name,
             $this->record->runner()->label(),
             collect($this->record->review_stack ?? [])->map(fn (string $stack): string => ucfirst($stack))->implode(', ') ?: null,
-            $this->record->reviews_enabled ? null : 'Not reviewed by itself',
-            "last {$this->period()} days",
+            $this->record->reviews_enabled ? null : __('Not reviewed by itself'),
+            __('last :days days', ['days' => $this->period()]),
         ]));
     }
 
@@ -68,7 +68,7 @@ class ViewRepository extends ViewRecord
         return [
             ...$periods,
             Action::make('addRule')
-                ->label('Add a rule')
+                ->label(__('Add a rule'))
                 ->icon(Heroicon::OutlinedScale)
                 ->color('gray')
                 ->visible(fn (): bool => TenantRole::isAdmin())
@@ -77,12 +77,12 @@ class ViewRepository extends ViewRecord
                 ->action(function (array $data): void {
                     $this->record->tenant->reviewRules()->create($data);
 
-                    Notification::make()->title('The rule is saved')->body('The next review reads it.')->success()->send();
+                    Notification::make()->title(__('The rule is saved'))->body(__('The next review reads it.'))->success()->send();
                 }),
             RepositoryResource::hostAction(),
             ActionGroup::make([
                 RepositoryResource::fetchPullRequestsAction(),
-                RepositoryResource::readinessAction()->label('Can it be reviewed?'),
+                RepositoryResource::readinessAction()->label(__('Can it be reviewed?')),
                 RepositoryResource::reviewSettingsAction(),
                 EditAction::make()
                     ->using(fn (Repository $record, array $data, RepositorySetup $setup): Repository => $setup->update($record, $data)),

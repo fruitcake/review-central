@@ -14,6 +14,7 @@ use App\Models\ReviewRun;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Support\Traits\Localizable;
 use RuntimeException;
 use Throwable;
 
@@ -23,6 +24,8 @@ use Throwable;
  */
 class ReviewComparisons
 {
+    use Localizable;
+
     /** Characters of the pull request's diff the judging model reads. */
     public const DIFF_LENGTH = 150000;
 
@@ -252,7 +255,8 @@ class ReviewComparisons
         $reviews = [];
 
         foreach ($columns as $label => $column) {
-            $lines = ["## Review {$label}: ".self::setup($column['run'])
+            // The analysis prompt is English, whoever started the comparison.
+            $lines = ["## Review {$label}: ".$this->withLocale('en', fn (): string => self::setup($column['run']))
                 .(in_array($label, $older, true) ? '
 Of an older commit, '.substr($column['run']->commit, 0, 12).': a finding about code this diff no longer has is unclear, not false.' : '')];
 
@@ -290,9 +294,9 @@ Of an older commit, '.substr($column['run']->commit, 0, 12).': a finding about c
         return implode(' · ', array_filter([
             $run->agent,
             $run->model,
-            $run->effort === null ? null : "effort {$run->effort}",
+            $run->effort === null ? null : __('effort :effort', ['effort' => $run->effort]),
             $run->modules === null ? null : ReviewSettings::describeModules($run->modules),
-        ])) ?: 'the repository\'s setup';
+        ], is_string(...))) ?: __('the repository\'s setup');
     }
 
     /**

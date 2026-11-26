@@ -243,12 +243,19 @@ class PersonalConnections
         $connection = $this->of($user, $host);
         $name = self::HOSTS[$host] ?? $host;
 
-        return match (true) {
-            $connection === null => "Your {$name} account is not connected.",
-            $host === self::BITBUCKET && ! $this->canComment($connection->scopes ?? []) => 'Your Bitbucket account was connected without the right to comment on pull requests: connect it again on your profile.',
-            $this->accessToken($connection) === null => "{$name} no longer accepts your connection: connect your account again on your profile.",
-            default => null,
-        };
+        if ($connection === null) {
+            return __('Your :host account is not connected.', ['host' => $name]);
+        }
+
+        if ($host === self::BITBUCKET && ! $this->canComment($connection->scopes ?? [])) {
+            return __('Your Bitbucket account was connected without the right to comment on pull requests: connect it again on your profile.');
+        }
+
+        if ($this->accessToken($connection) === null) {
+            return __(':host no longer accepts your connection: connect your account again on your profile.', ['host' => $name]);
+        }
+
+        return null;
     }
 
     /**

@@ -37,7 +37,7 @@ class MistralDriver extends ApiKeyDriver
     protected function keyNotes(): array
     {
         return [
-            'A key works only once the workspace has a plan or credits under **Billing**.',
+            __('A key works only once the workspace has a plan or credits under **Billing**.'),
         ];
     }
 

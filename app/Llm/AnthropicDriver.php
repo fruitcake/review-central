@@ -75,15 +75,15 @@ class AnthropicDriver implements ExplainsSetup, LlmDriver
     public function credentialFields(): array
     {
         return [
-            Secret::make('api_key')->label('API key'),
+            Secret::make('api_key')->label(__('API key')),
         ];
     }
 
     public function settingFields(): array
     {
         return [
-            TextInput::make('base_url')->label('Base URL')->url()->rule(new PublicUrl)->placeholder('https://api.anthropic.com')
-                ->helperText('Only when the API is reached through a gateway.'),
+            TextInput::make('base_url')->label(__('Base URL'))->url()->rule(new PublicUrl)->placeholder('https://api.anthropic.com')
+                ->helperText(__('Only when the API is reached through a gateway.')),
         ];
     }
 
@@ -95,20 +95,20 @@ class AnthropicDriver implements ExplainsSetup, LlmDriver
     public function setupGuide(): SetupGuide
     {
         return new SetupGuide(
-            title: 'An Anthropic API key',
+            title: __('An Anthropic API key'),
             url: 'https://platform.claude.com/settings/keys',
-            linkLabel: 'API keys in the Claude Console',
+            linkLabel: __('API keys in the Claude Console'),
             steps: [
-                'Sign in to the Claude Console and open the link. A new organisation first needs credits or a payment method under **Billing**.',
-                'Choose **Create Key**, pick the workspace whose limits the reviews should fall under, and name the key after this installation.',
-                'Copy the key, which starts with `sk-ant-` and is shown once, and paste it here.',
+                __('Sign in to the Claude Console and open the link. A new organisation first needs credits or a payment method under **Billing**.'),
+                __('Choose **Create Key**, pick the workspace whose limits the reviews should fall under, and name the key after this installation.'),
+                __('Copy the key, which starts with `sk-ant-` and is shown once, and paste it here.'),
             ],
             permissions: [
-                'The workspace\'s models' => 'a key has no scopes: it can call every model its workspace may. Claude Code reviews with it, and so do the review from the diff and the questions on a pull request.',
+                __('The workspace\'s models') => __('a key has no scopes: it can call every model its workspace may. Claude Code reviews with it, and so do the review from the diff and the questions on a pull request.'),
             ],
             notes: [
-                'A workspace of its own for the reviews, with a spend limit, keeps them apart from the rest of what the organisation spends.',
-                'The base URL under Settings is only for a gateway that speaks the Anthropic API; the key is then what that gateway takes.',
+                __('A workspace of its own for the reviews, with a spend limit, keeps them apart from the rest of what the organisation spends.'),
+                __('The base URL under Settings is only for a gateway that speaks the Anthropic API; the key is then what that gateway takes.'),
             ],
         );
     }

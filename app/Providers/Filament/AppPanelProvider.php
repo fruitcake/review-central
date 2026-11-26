@@ -5,6 +5,7 @@ namespace App\Providers\Filament;
 use App\Filament\Auth\EditProfile;
 use App\Filament\Theme;
 use App\Http\Middleware\SendPanelRootHome;
+use App\Http\Middleware\UseUserLanguage;
 use App\Models\Tenant;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
@@ -46,7 +47,7 @@ class AppPanelProvider extends PanelProvider
             ->userMenuItems([
                 'profile' => fn (Action $action): Action => $action->url(EditProfile::urlForCurrentUser()),
                 Action::make('admin')
-                    ->label('Platform admin')
+                    ->label(__('Platform admin'))
                     ->icon(Heroicon::OutlinedCog6Tooth)
                     ->url(fn (): string => Filament::getPanel('admin')->getUrl())
                     ->visible(fn (): bool => (bool) auth()->user()?->is_admin),
@@ -68,6 +69,8 @@ class AppPanelProvider extends PanelProvider
             ->authMiddleware([
                 Authenticate::class,
                 SendPanelRootHome::class,
-            ]);
+            ])
+            // Persistent, so Livewire's own requests on the page speak it as well.
+            ->authMiddleware([UseUserLanguage::class], isPersistent: true);
     }
 }

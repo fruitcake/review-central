@@ -41,7 +41,7 @@ class OpenAiDriver implements ExplainsSetup, LlmDriver
     public function credentialFields(): array
     {
         return [
-            Secret::make('api_key')->label('API key'),
+            Secret::make('api_key')->label(__('API key')),
         ];
     }
 
@@ -58,22 +58,22 @@ class OpenAiDriver implements ExplainsSetup, LlmDriver
     public function setupGuide(): SetupGuide
     {
         return new SetupGuide(
-            title: 'An OpenAI API key',
+            title: __('An OpenAI API key'),
             url: 'https://platform.openai.com/api-keys',
-            linkLabel: 'API keys on the OpenAI platform',
+            linkLabel: __('API keys on the OpenAI platform'),
             steps: [
-                'Sign in to the OpenAI platform and open the link. The organisation needs credits or a payment method under **Billing** before a key works.',
-                'Choose **Create new secret key**, pick the project the reviews should be billed to, and name it after this installation.',
-                'Leave the permissions at **All**, or choose **Restricted** and set the permissions below.',
-                'Copy the key, which is shown once, and paste it here.',
+                __('Sign in to the OpenAI platform and open the link. The organisation needs credits or a payment method under **Billing** before a key works.'),
+                __('Choose **Create new secret key**, pick the project the reviews should be billed to, and name it after this installation.'),
+                __('Leave the permissions at **All**, or choose **Restricted** and set the permissions below.'),
+                __('Copy the key, which is shown once, and paste it here.'),
             ],
             permissions: [
-                'Models: Read' => 'lists the models, which is what **Test** asks.',
-                'Model capabilities: Write' => 'asks a model for an answer.',
-                'Responses API: Write' => 'what Codex and the review from the diff review through, where the console lists it apart.',
+                'Models: Read' => __('lists the models, which is what **Test** asks.'),
+                'Model capabilities: Write' => __('asks a model for an answer.'),
+                'Responses API: Write' => __('what Codex and the review from the diff review through, where the console lists it apart.'),
             ],
             notes: [
-                'A project of its own for the reviews, with a budget, keeps them apart from the rest of what the organisation spends.',
+                __('A project of its own for the reviews, with a budget, keeps them apart from the rest of what the organisation spends.'),
             ],
         );
     }
