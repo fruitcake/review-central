@@ -104,7 +104,7 @@ class Setup extends Page
                 ->color('gray')
                 ->visible(fn (): bool => WorkerDeployment::ready())
                 ->requiresConfirmation()
-                ->modalDescription('Wrangler deploys the Cloudflare Worker from this installation\'s copy, makes the bucket when it is not there, and gives the Worker the token this installation asks it with. On the reviews\' queue, whose worker needs Node 20 or later; a first deploy installs Wrangler and takes a few minutes.')
+                ->modalDescription('Wrangler deploys the Cloudflare Worker from this installation\'s copy, makes the bucket when it is not there, and gives the Worker the token this installation asks it with. On the reviews\' queue, whose worker needs Node 20 or later; a first deploy installs Wrangler and takes a few minutes. Cloudflare stops the sandboxes of reviews running now, and those reviews fail.')
                 ->action(function (): void {
                     DeployCloudflareWorker::ask();
 

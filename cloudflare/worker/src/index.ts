@@ -1158,6 +1158,18 @@ export class ReviewSandbox extends DurableObject<Env> {
 
     await container.setInactivityTimeout(Math.min(spec.timeout + 900, LONGEST) * 1000);
 
+    // Why the sandbox stopped, when it does before the run is over: a lost connection
+    // to it then is not one to wait out.
+    const stopped: { reason: string | null } = { reason: null };
+    container.monitor().then(
+      () => {
+        stopped.reason = "it ended";
+      },
+      (error: unknown) => {
+        stopped.reason = error instanceof Error ? error.message : String(error);
+      },
+    );
+
     // What it uses, for as long as the review runs: never in the way of it.
     const metrics: SandboxMetrics = { processors: null, memoryMb: null, samples: [] };
     const sampler = await container.exec(["sh", "-c", SAMPLER], { stdout: "pipe", stderr: "ignore" }).catch(() => null);
@@ -1258,6 +1270,11 @@ export class ReviewSandbox extends DurableObject<Env> {
             // No exit code: the step was killed before it could write one.
             return /^\d+$/.test(code) ? Number(code) : 143;
           } catch (error) {
+            // The step went with the sandbox: nothing to follow again.
+            if (!container.running) {
+              throw new Error(`The sandbox stopped during the step${stopped.reason === null ? "" : ` (${stopped.reason.slice(0, 300)})`}, and the step with it.`);
+            }
+
             if (++lost > MOST_REATTACHES) {
               throw error;
             }
