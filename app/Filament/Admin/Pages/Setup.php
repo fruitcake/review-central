@@ -122,7 +122,7 @@ class Setup extends Page
                 ->action(function (): void {
                     PrepareCloudflareSandbox::ask();
 
-                    Notification::make()->title('The sandbox is being prepared')->body('On the reviews\' queue. This page says when it is done: refresh in a few minutes.')->success()->send();
+                    Notification::make()->title('The sandbox is being prepared')->body('On the reviews\' queue. This page shows when it is done.')->success()->send();
                 }),
         ];
     }
@@ -169,6 +169,15 @@ class Setup extends Page
         }
 
         return is_array($last) ? $last : null;
+    }
+
+    /**
+     * Drops the last result, for an open page to check again on its next poll:
+     * for work that changes what it says, once it starts and once it is done.
+     */
+    public static function forget(): void
+    {
+        Cache::forget(self::WRONG_CACHE);
     }
 
     /**
