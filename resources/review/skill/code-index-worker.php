@@ -27,6 +27,7 @@ use Mago\Sdk\Analyzer\AfterAnalysisHook;
 use Mago\Sdk\Analyzer\Codebase;
 use Mago\Sdk\Analyzer\InvocationKind;
 use Mago\Sdk\Analyzer\Metadata\MemberIdentifier;
+use Mago\Sdk\Analyzer\Metadata\MetadataFlags;
 use Mago\Sdk\Analyzer\MethodReturnTypeProvider;
 use Mago\Sdk\Analyzer\MethodTarget;
 use Mago\Sdk\Analyzer\Plugin;
@@ -83,7 +84,7 @@ final class CodeIndex implements AfterAnalysisHook, Plugin
     {
         $registry->registerAfterAnalysisHook($this);
         $models = code_index_models(rtrim((string) getenv('REACH_ROOT'), '/').'/app');
-        $registry->registerMethodReturnTypeProvider(new EloquentStatics($models['scopes']));
+        $registry->registerMethodReturnTypeProvider(new EloquentStatics($models['scopes'], $models['marked']));
 
         if ($models['relations'] !== []) {
             $relations = new EloquentRelations($models['relations']);
@@ -258,8 +259,9 @@ final class EloquentStatics implements MethodReturnTypeProvider
 
     /**
      * @param  list<string>  $scopes  the project's local scopes, by the name they are called with
+     * @param  array<string, list<string>>  $marked  the ones marked with #[Scope], by the class that declares them
      */
-    public function __construct(private readonly array $scopes) {}
+    public function __construct(private readonly array $scopes, private readonly array $marked = []) {}
 
     public function getTargets(): array
     {
@@ -273,7 +275,7 @@ final class EloquentStatics implements MethodReturnTypeProvider
         $name = strtolower($invocation->name);
 
         if ($invocation->kind !== InvocationKind::StaticMethod) {
-            return in_array($name, $this->scopes, true) ? self::sameBuilder($invocation->receiverType) : null;
+            return in_array($name, $this->scopes, true) ? $this->sameBuilder($context->codebase, $invocation->receiverType, $name) : null;
         }
 
         $class = null;
@@ -297,21 +299,49 @@ final class EloquentStatics implements MethodReturnTypeProvider
 
         return match (true) {
             in_array($name, self::MODEL, true) => Type::namedObject($class),
-            in_array($name, self::BUILDER, true), in_array($name, $this->scopes, true) => Type::namedObject('Illuminate\Database\Eloquent\Builder', Type::namedObject($class)),
+            in_array($name, self::BUILDER, true), $this->isScopeOf($context->codebase, $class, $name) => Type::namedObject('Illuminate\Database\Eloquent\Builder', Type::namedObject($class)),
             default => null,
         };
     }
 
-    /** A builder of a model again, for a scope called on one; nothing for a call on anything else. */
-    private static function sameBuilder(?Type $receiver): ?Type
+    /** A builder of a model again, for a scope of that model called on one; nothing for a call on anything else. */
+    private function sameBuilder(Codebase $codebase, ?Type $receiver, string $name): ?Type
     {
         foreach ($receiver?->atomicTypes ?? [] as $atomic) {
-            if ($atomic instanceof NamedObjectType && strtolower($atomic->name) === 'illuminate\\database\\eloquent\\builder' && ($atomic->parameters ?? []) !== []) {
-                return Type::namedObject('Illuminate\Database\Eloquent\Builder', ...$atomic->parameters);
+            if (! $atomic instanceof NamedObjectType || strtolower($atomic->name) !== 'illuminate\\database\\eloquent\\builder') {
+                continue;
+            }
+
+            foreach ($atomic->parameters ?? [] as $parameter) {
+                foreach ($parameter->atomicTypes as $model) {
+                    if ($model instanceof NamedObjectType && $this->isScopeOf($codebase, $model->name, $name)) {
+                        return Type::namedObject('Illuminate\Database\Eloquent\Builder', ...$atomic->parameters);
+                    }
+                }
             }
         }
 
         return null;
+    }
+
+    /**
+     * Whether a model has a local scope of this name, declared by itself, a parent or
+     * a trait: a method of the name itself is the scope only when #[Scope] marks it.
+     */
+    private function isScopeOf(Codebase $codebase, string $class, string $name): bool
+    {
+        if (! in_array($name, $this->scopes, true)) {
+            return false;
+        }
+
+        $own = $codebase->getDeclaringMethod($class, $name);
+
+        // A @method in a docblock, as an IDE helper writes for a scope, is no method of its own.
+        if ($own !== null && ($own->flags->bits & MetadataFlags::MAGIC_METHOD) === 0) {
+            return in_array($name, $this->marked[strtolower((string) $own->identifier->class)] ?? [], true);
+        }
+
+        return $codebase->getDeclaringMethod($class, "scope{$name}") !== null;
     }
 
     /** Whether an id argument is several ids: an array, or a collection or other Arrayable. */
@@ -344,13 +374,14 @@ final class EloquentStatics implements MethodReturnTypeProvider
 final class EloquentRelations implements MethodReturnTypeProvider, PropertyTypeProvider
 {
     /**
-     * @param  array<string, array<string, array{relation: string, related: string, many: bool}>>  $relations  by the class or trait that declares them
+     * @param  array<string, array<string, array{method: string, relation: string, related: string, many: bool}>>  $relations  by the class or trait that declares them
      */
     public function __construct(private readonly array $relations) {}
 
     public function getTargets(): array
     {
-        $names = array_values(array_unique(array_merge(...array_map(array_keys(...), array_values($this->relations)))));
+        // As each is written: Mago matches a property's name by its case.
+        $names = array_values(array_unique(array_column(array_merge(...array_values($this->relations)), 'method')));
 
         return array_merge(array_map(MethodTarget::anyClass(...), $names), array_map(PropertyTarget::anyClass(...), $names));
     }
@@ -393,9 +424,11 @@ final class EloquentRelations implements MethodReturnTypeProvider, PropertyTypeP
 
     /**
      * The model a call or property is on, and the relation of that name it has,
-     * declared by itself, a parent or a trait.
+     * declared by itself, a parent or a trait, with its related model as this
+     * call has it: static is the model it is called on, and so is self in a
+     * trait. A related model the codebase does not know is left to Mago.
      *
-     * @return array{0: string, 1: array{relation: string, related: string, many: bool}}|null
+     * @return array{0: string, 1: array{method: string, relation: string, related: string, many: bool}}|null
      */
     private function relation(Codebase $codebase, ?Type $receiver, string $name): ?array
     {
@@ -406,11 +439,20 @@ final class EloquentRelations implements MethodReturnTypeProvider, PropertyTypeP
                 continue;
             }
 
-            $declaring = strtolower((string) $codebase->getDeclaringMethod($atomic->name, $name)?->identifier->class);
+            $declaringClass = (string) $codebase->getDeclaringMethod($atomic->name, $name)?->identifier->class;
+            $relation = $this->relations[strtolower($declaringClass)][$name] ?? null;
 
-            if (isset($this->relations[$declaring][$name])) {
-                return [$atomic->name, $this->relations[$declaring][$name]];
+            if ($relation === null) {
+                continue;
             }
+
+            $relation['related'] = match ($relation['related']) {
+                'static' => $atomic->name,
+                'self' => $codebase->traitExists($declaringClass) ? $atomic->name : $declaringClass,
+                default => $relation['related'],
+            };
+
+            return $codebase->classExists($relation['related']) ? [$atomic->name, $relation] : null;
         }
 
         return null;
