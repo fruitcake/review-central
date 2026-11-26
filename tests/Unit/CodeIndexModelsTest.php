@@ -22,6 +22,8 @@ it('reads each relation\'s related model in full, as the file imports or names i
         namespace App\Models;
 
         use App\Models\People\Member as Person;
+        use App\Domain\{Lesson, Teacher as Instructor};
+        use Illuminate\Database\Eloquent\Collection;
         use Illuminate\Database\Eloquent\Model;
         use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
@@ -45,6 +47,22 @@ it('reads each relation\'s related model in full, as the file imports or names i
                 return $this->belongsTo(static::class, 'parent_id');
             }
 
+            public function instructor()
+            {
+                return $this->belongsTo(Instructor::class);
+            }
+
+            /** Made from a relation, but no relation itself. */
+            public function upcomingLessons(): Collection
+            {
+                return $this->hasMany(Lesson::class)->where('date', '>', now())->get();
+            }
+
+            public function firstLesson()
+            {
+                return $this->hasMany(Lesson::class)->oldest()->first();
+            }
+
             public function label(): string
             {
                 return $this->name;
@@ -62,17 +80,25 @@ it('reads each relation\'s related model in full, as the file imports or names i
             {
                 return $this->belongsTo(\App\Models\Club::class);
             }
+
+            public function sameClub()
+            {
+                return $this->hasMany(self::class, 'club_id', 'club_id');
+            }
         }
         PHP);
 
     expect(code_index_models($this->dir)['relations'])->toEqual([
         'app\models\course' => [
-            'participants' => ['relation' => 'Illuminate\Database\Eloquent\Relations\BelongsToMany', 'related' => 'App\Models\People\Member', 'many' => true],
-            'lessons' => ['relation' => 'Illuminate\Database\Eloquent\Relations\HasMany', 'related' => 'App\Models\Lesson', 'many' => true],
-            'parent' => ['relation' => 'Illuminate\Database\Eloquent\Relations\BelongsTo', 'related' => 'App\Models\Course', 'many' => false],
+            'participants' => ['method' => 'participants', 'relation' => 'Illuminate\Database\Eloquent\Relations\BelongsToMany', 'related' => 'App\Models\People\Member', 'many' => true],
+            'lessons' => ['method' => 'lessons', 'relation' => 'Illuminate\Database\Eloquent\Relations\HasMany', 'related' => 'App\Domain\Lesson', 'many' => true],
+            // Which class static is, the call it is made on says: a subclass's parent is the subclass.
+            'parent' => ['method' => 'parent', 'relation' => 'Illuminate\Database\Eloquent\Relations\BelongsTo', 'related' => 'static', 'many' => false],
+            'instructor' => ['method' => 'instructor', 'relation' => 'Illuminate\Database\Eloquent\Relations\BelongsTo', 'related' => 'App\Domain\Teacher', 'many' => false],
         ],
         'app\models\concerns\belongstoclub' => [
-            'club' => ['relation' => 'Illuminate\Database\Eloquent\Relations\BelongsTo', 'related' => 'App\Models\Club', 'many' => false],
+            'club' => ['method' => 'club', 'relation' => 'Illuminate\Database\Eloquent\Relations\BelongsTo', 'related' => 'App\Models\Club', 'many' => false],
+            'sameclub' => ['method' => 'sameClub', 'relation' => 'Illuminate\Database\Eloquent\Relations\HasMany', 'related' => 'self', 'many' => true],
         ],
     ]);
 });
@@ -97,9 +123,13 @@ it('knows a local scope by the name it is called with, prefixed or marked as one
         }
         PHP);
 
-    expect(code_index_models($this->dir)['scopes'])->toEqualCanonicalizing(['currentclub', 'published']);
+    $models = code_index_models($this->dir);
+
+    // A method named as one is the scope only where #[Scope] marks it, which the worker asks per model.
+    expect($models['scopes'])->toEqualCanonicalizing(['currentclub', 'published'])
+        ->and($models['marked'])->toBe(['app\models\course' => ['published']]);
 });
 
 it('reads nothing where there is no app directory', function () {
-    expect(code_index_models("{$this->dir}/missing"))->toBe(['scopes' => [], 'relations' => []]);
+    expect(code_index_models("{$this->dir}/missing"))->toBe(['scopes' => [], 'marked' => [], 'relations' => []]);
 });
