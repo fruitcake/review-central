@@ -210,6 +210,9 @@ reviewer_reach() {
   [ -n "$_destination" ] || _destination=$(jq -r '.pull_request.destination_branch // empty' review-context.json 2>/dev/null)
   [ -n "$_destination" ] || return 0
   _php=$(reviewer_php) || return 0
+  # A phase of its own in the run's log, so its time is told apart from the reviewer's;
+  # on stderr, as stdout is the prompt. The reviewer's start marks where it ends.
+  echo "##[phase] reach" >&2
   # By name first: in a second or two it says whether the change touches a check at all,
   # and most do not; only then is the code index worth its time.
   _reach=$("$_php" "$HERE/reach.php" "origin/$_destination" "${BITBUCKET_COMMIT:-HEAD}" 2>/dev/null) || _reach=""

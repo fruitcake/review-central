@@ -265,6 +265,8 @@ it('builds the code index only for a change that touches a check, and goes by na
 
     expect($quiet->output())->toBe('')
         ->and($quiet->errorOutput())->toContain('Code index: not built, as the change touches no check.')
+        // Its own phase in the run's log, on stderr: stdout is the prompt.
+        ->and($quiet->errorOutput())->toContain('##[phase] reach')
         ->and(File::exists("{$this->dir}/curl-called"))->toBeFalse();
 
     // A check changed, and Mago cannot be had: the reach by name.
