@@ -200,6 +200,18 @@ reviewer_php() {
   php -r 'exit(PHP_MAJOR_VERSION >= 8 ? 0 : 1);' 2> /dev/null && command -v php
 }
 
+# How far a Laravel change reaches (reach.php): the entry points that reach a
+# check it adds or changes, and those that reach the same class's writes without
+# it. Only for the laravel stack, whose entry points it knows. Nothing otherwise.
+reviewer_reach() {
+  jq -e '(.settings.stack // []) | index("laravel")' review-context.json > /dev/null 2>&1 || return 0
+  _destination="${BITBUCKET_PR_DESTINATION_BRANCH:-}"
+  [ -n "$_destination" ] || _destination=$(jq -r '.pull_request.destination_branch // empty' review-context.json 2>/dev/null)
+  [ -n "$_destination" ] || return 0
+  _php=$(reviewer_php) || return 0
+  "$_php" "$HERE/reach.php" "origin/$_destination" "${BITBUCKET_COMMIT:-HEAD}" 2>/dev/null || true
+}
+
 # The same steps for a reviewer that reads SKILL.md as a file rather than being
 # handed it: said to belong to it, and left out where the file it reads still
 # holds them.

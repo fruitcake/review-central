@@ -197,6 +197,7 @@ jq -L "$HERE" 'include "strict-schema"; strict_schema' "$HERE/ai-review.schema.j
   cat "$HERE/codex-prompt.md"
   reviewer_skill_parts codex-cli
   reviewer_repository_rules
+  reviewer_reach
   reviewer_module_notes
   printf '\n'
   cat "$HERE/structured-output.md"
