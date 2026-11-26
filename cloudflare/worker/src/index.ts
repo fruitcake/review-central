@@ -40,7 +40,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
  * after one is told apart. tests/Feature/CloudflareWorkerVersionTest.php fails
  * on a change that leaves it as it was.
  */
-const WORKER_VERSION = "2026-11-26.1";
+const WORKER_VERSION = "2026-11-26.3";
 
 interface Env {
   REVIEW_SANDBOX: DurableObjectNamespace<ReviewSandbox>;
@@ -209,6 +209,33 @@ setsid sh -c 'd=$1; shift; echo $$ > "$d/pid"; "$@" > "$d/log" 2>&1; echo $? > "
 i=0
 while [ ! -s "$dir/pid" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
 cat "$dir/pid"`;
+
+/**
+ * Prints a step's output from a byte on (DETACH), every second what was added, and
+ * all of it once the step is over: its exit code is there, or a step killed before it
+ * wrote one is gone or a zombie. Not with tail --pid: the step's process is left to
+ * PID 1, which is sleep here and never reaps it, and a zombie counts as running.
+ * Nothing is killed while it prints, so a slow reader gets every byte.
+ */
+const FOLLOW = `dir=$1; pid=$2; from=$3
+while :; do
+  over=""
+  if [ -e "$dir/code" ]; then
+    over=1
+  elif ! stat=$(cat "/proc/$pid/stat" 2> /dev/null); then
+    over=1
+  else
+    set -- \${stat##*) }
+    [ "$1" = Z ] && over=1
+  fi
+  size=$(stat -c %s "$dir/log" 2> /dev/null || echo 0)
+  if [ "$size" -ge "$from" ]; then
+    tail -c "+$from" "$dir/log" | head -c "$((size - from + 1))"
+    from=$((size + 1))
+  fi
+  [ -n "$over" ] && exit 0
+  sleep 1
+done`;
 
 /**
  * Stops every process of a step's session, whose id is the step's process id: GNU
@@ -1206,8 +1233,8 @@ export class ReviewSandbox extends DurableObject<Env> {
           }
 
           try {
-            // From the next byte; ends a second after the step does.
-            const tail = await container.exec(["tail", "-c", `+${offset + 1}`, `--pid=${pid}`, "-F", `${dir}/log`], { stdout: "pipe", stderr: "ignore" });
+            // From the next byte; ends once the step is over and all it printed is read.
+            const tail = await container.exec(["sh", "-c", FOLLOW, "follow", dir, pid, String(offset + 1)], { stdout: "pipe", stderr: "ignore" });
             this.current = tail;
 
             if (tail.stdout !== null) {
