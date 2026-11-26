@@ -70,14 +70,28 @@
             </details>
         @endif
 
+        @php($trials = $siblings->filter(fn ($sibling): bool => $sibling->custom)->count())
         @if ($siblings->count() > 1)
-            <section class="rc-card rc-pad" aria-labelledby="rc-runs">
-                <h2 id="rc-runs">{{ __('Runs on this pull request') }}</h2>
+            {{-- Trials and comparisons are kept off the pull request, and here too until asked for; open on a trial's own page. --}}
+            <section class="rc-card rc-pad" aria-labelledby="rc-runs" x-data="{ trials: @js((bool) $run->custom) }">
+                <div class="rc-card-head">
+                    <h2 id="rc-runs">{{ __('Runs on this pull request') }}</h2>
+                    @if ($trials > 0)
+                        <button type="button" class="rc-link-button" x-on:click="trials = ! trials" x-bind:aria-expanded="trials">
+                            <span x-show="! trials" @if ($run->custom) x-cloak @endif>{{ __('Show trials (:count)', ['count' => $trials]) }}</span>
+                            <span x-show="trials" @unless ($run->custom) x-cloak @endunless>{{ __('Hide trials') }}</span>
+                        </button>
+                    @endif
+                </div>
+                @php($number = 0)
                 <div class="rc-timeline">
-                    @foreach ($siblings as $index => $sibling)
+                    @foreach ($siblings as $sibling)
                         @php($result = RunPresenter::outcome($sibling))
-                        <a href="{{ ReviewRunResource::getUrl('view', ['record' => $sibling]) }}" @class(['rc-timeline-run', 'rc-current' => $sibling->is($run)]) @if ($sibling->is($run)) aria-current="true" @endif>
-                            <span class="rc-timeline-top"><strong>{{ __('Run :number', ['number' => $index + 1]) }} · {{ \App\Filament\LocalTime::of($sibling->started_at)->translatedFormat('j M H:i') }}</strong><span class="rc-mono">{{ substr($sibling->commit, 0, 7) }}</span></span>
+                        @unless ($sibling->custom)
+                            @php($number++)
+                        @endunless
+                        <a href="{{ ReviewRunResource::getUrl('view', ['record' => $sibling]) }}" @class(['rc-timeline-run', 'rc-current' => $sibling->is($run)]) @if ($sibling->is($run)) aria-current="true" @endif @if ($sibling->custom && ! $sibling->is($run)) x-show="trials" @unless ($run->custom) x-cloak @endunless @endif>
+                            <span class="rc-timeline-top"><strong>{{ $sibling->custom ? __('Trial') : __('Run :number', ['number' => $number]) }} · {{ \App\Filament\LocalTime::of($sibling->started_at)->translatedFormat('j M H:i') }}</strong><span class="rc-mono">{{ substr($sibling->commit, 0, 7) }}</span></span>
                             <span class="rc-chip rc-chip-{{ $result['tone'] }}">{{ $result['label'] }}</span>
                             <span class="rc-muted">
                                 @if (RunPresenter::live($sibling))
