@@ -507,6 +507,12 @@ it('finds the data a check reads through a trait\'s relation and a renamed impor
                 Event::find($id)->participants()->attach(auth()->id());
             }
 
+            public function mixed($id)
+            {
+                Group::find($id)->participants()->count();
+                Event::find($id)->participants()->attach(auth()->id());
+            }
+
             public function grant()
             {
                 Allowed::create(['member_id' => auth()->id()]);
@@ -541,6 +547,10 @@ it('finds the data a check reads through a trait\'s relation and a renamed impor
         "app\\http\\controllers\\signupcontroller::store\tapp\\models\\concerns\\hasparticipants::participants",
         "app\\http\\controllers\\signupcontroller::both\tapp\\models\\group::participants",
         "app\\http\\controllers\\signupcontroller::both\tapp\\models\\event::participants",
+        // Both through the trait: the index cannot say which model the attach is on.
+        "app\\http\\controllers\\signupcontroller::mixed\tapp\\models\\group::find",
+        "app\\http\\controllers\\signupcontroller::mixed\tapp\\models\\event::find",
+        "app\\http\\controllers\\signupcontroller::mixed\tapp\\models\\concerns\\hasparticipants::participants",
         "app\\http\\controllers\\eventcontroller::join\tapp\\models\\event::find",
         "app\\http\\controllers\\eventcontroller::join\tapp\\models\\concerns\\hasparticipants::participants",
     ])."\n");
@@ -559,8 +569,9 @@ it('finds the data a check reads through a trait\'s relation and a renamed impor
         ->toContain('`allows` reads `Log`, `Group`, `AllowedMember` (of which `Log` (11 methods) are added to in too many places to list)')
         ->toContain('- `app/Http/Controllers/SignupController.php::store`, with `Group->participants()->attach()` at line 13')
         ->toContain('- `app/Http/Controllers/SignupController.php::both`, with `Group->participants()->attach()` at line 19, or on `Event`, which it calls it on as well')
-        ->toContain('- `app/Http/Controllers/SignupController.php::grant`, with `AllowedMember::create()` at line 24')
-        ->toContain('- `app/Http/Controllers/SignupController.php::invite`, with `AllowedMember::create()` at line 29')
+        ->toContain('- `app/Http/Controllers/SignupController.php::mixed`, with `Group->participants()->attach()` at line 25, or on `Event`, which it calls it on as well')
+        ->toContain('- `app/Http/Controllers/SignupController.php::grant`, with `AllowedMember::create()` at line 30')
+        ->toContain('- `app/Http/Controllers/SignupController.php::invite`, with `AllowedMember::create()` at line 35')
         // Event has the same trait; joining one is not joining a group.
         ->not->toContain('EventController')
         ->not->toContain('LogController');

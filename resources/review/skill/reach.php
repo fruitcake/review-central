@@ -496,6 +496,12 @@ $modelsReadBy = function (array $check) use (&$indexed, $bodyOf, $fullClassOf): 
  * @return array<string, string>
  */
 $relationsOf = function (string $model) use (&$indexed): array {
+    static $known = [];
+
+    if (isset($known[$model])) {
+        return $known[$model];
+    }
+
     $relations = [];
     $declarers = [$model, ...($indexed['ancestors'][$model] ?? [])];
 
@@ -521,7 +527,7 @@ $relationsOf = function (string $model) use (&$indexed): array {
         }
     }
 
-    return $relations;
+    return $known[$model] = $relations;
 };
 
 /** Every static call that adds a row, in app/: the file, the line, the class as written and the method. */
@@ -603,11 +609,20 @@ $addersTo = function (string $model) use (&$indexed, $linesOf, $enclosing, $full
 
             // The index says the method calls this relation on the model, not on which line:
             // where it also calls one of the same name on another class, either may be the one.
+            // A relation a trait or a parent declares is known by that declarer whatever model it
+            // is called on: then another model the method uses that has it may be the one too.
             $others = [];
 
             foreach ($indexed['callers'] as $callee => $callers) {
-                if (isset($callers[$source]) && str_ends_with($callee, "::{$relation}") && ! in_array(explode('::', $callee, 2)[0], [$model, $declarer], true)) {
-                    $others[] = $writtenClass(explode('::', $callee, 2)[0]);
+                $calleeClass = explode('::', $callee, 2)[0];
+
+                if (! isset($callers[$source]) || in_array($calleeClass, [$model, $declarer], true)) {
+                    continue;
+                }
+
+                if (str_ends_with($callee, "::{$relation}")
+                    || ($declarer !== $model && in_array('illuminate\\database\\eloquent\\model', $indexed['ancestors'][$calleeClass] ?? [], true) && ($relationsOf($calleeClass)[$relation] ?? null) === $declarer)) {
+                    $others[$calleeClass] = $writtenClass($calleeClass);
                 }
             }
 
