@@ -233,3 +233,15 @@ it('tells two route closures in one file apart with the code index too', functio
         ->toContain('- `routes/web.php::(closure at line 8)`, through `createParticipant`')
         ->not->toContain('- `routes/web.php::(closure at line 3)`, through');
 });
+
+it('gives no reach when the team turned it off', function () {
+    ($this->put)('app/Models/Lesson.php', str_replace('return null;', "return \$this->invited(\$member) ? null : 'Not invited';", File::get("{$this->dir}/app/Models/Lesson.php")));
+    ($this->git)('commit', '-qam', 'Only invited members');
+    ($this->git)('update-ref', 'refs/remotes/origin/main', 'main');
+    File::put("{$this->dir}/review-context.json", json_encode(['settings' => ['stack' => ['laravel']], 'pull_request' => ['destination_branch' => 'main']]));
+    $skill = realpath(__DIR__.'/../../resources/review/skill');
+    $reach = fn (array $env): string => Process::path($this->dir)->env($env)->run(['sh', '-c', ". {$skill}/reviewer-env.sh; HERE={$skill}; reviewer_reach"])->throw()->output();
+
+    expect($reach([]))->toContain('REACH:')
+        ->and($reach(['REVIEW_REACH' => 'false']))->toBe('');
+});

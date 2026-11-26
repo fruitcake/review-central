@@ -254,9 +254,9 @@ it('runs the parts of the review the team turned on, tells the reviewer and the 
 
     // Nothing set: OCR, the scan and the floor guard; Claude Code's costly passes and the second check off.
     expect(File::json("{$this->work}/review-context.json")['settings'])->toMatchArray(['ocr' => true, 'scan' => true, 'floor_guard' => true])
-        ->and(ReviewRun::query()->sole()->modules)->toBe(['ocr' => true, 'scan' => true, 'floor_guard' => true, 'code_index' => false, 'extra_passes' => false, 'verify' => false]);
+        ->and(ReviewRun::query()->sole()->modules)->toBe(['ocr' => true, 'scan' => true, 'floor_guard' => true, 'reach' => true, 'code_index' => false, 'extra_passes' => false, 'verify' => false]);
 
-    ReviewSettings::saveDefaults($this->repository->tenant, ['ocr' => 'false', 'scan' => 'false', 'floor_guard' => 'false']);
+    ReviewSettings::saveDefaults($this->repository->tenant, ['ocr' => 'false', 'scan' => 'false', 'floor_guard' => 'false', 'reach' => 'false']);
     ReviewRun::query()->delete();
     ReviewLock::release($this->repository, 'feature/export', '41');
 
@@ -265,7 +265,7 @@ it('runs the parts of the review the team turned on, tells the reviewer and the 
 
     expect($settings)->toMatchArray(['ocr' => false, 'scan' => false, 'floor_guard' => false])
         ->and($settings['server_variables'])->toMatchArray(['REVIEW_OCR' => 'false', 'REVIEW_SCAN' => 'false', 'REVIEW_FLOOR_GUARD' => 'false'])
-        ->and(ReviewRun::query()->sole()->modules)->toBe(['ocr' => false, 'scan' => false, 'floor_guard' => false, 'code_index' => false, 'extra_passes' => false, 'verify' => false])
+        ->and(ReviewRun::query()->sole()->modules)->toBe(['ocr' => false, 'scan' => false, 'floor_guard' => false, 'reach' => false, 'code_index' => false, 'extra_passes' => false, 'verify' => false])
         ->and(($this->log)())->toContain('Parts of the review: plain: the reviewer alone.');
 });
 
@@ -294,7 +294,7 @@ it('runs a trial with the parts it asks for over the repository\'s, its second c
 
     expect($settings)->toMatchArray(['ocr' => false, 'scan' => false, 'floor_guard' => true])
         ->and($settings['server_variables'])->toMatchArray(['REVIEW_OCR' => 'false', 'REVIEW_VERIFY' => 'true'])
-        ->and(ReviewRun::query()->sole()->modules)->toBe(['ocr' => false, 'scan' => false, 'floor_guard' => true, 'code_index' => false, 'extra_passes' => false, 'verify' => true]);
+        ->and(ReviewRun::query()->sole()->modules)->toBe(['ocr' => false, 'scan' => false, 'floor_guard' => true, 'reach' => true, 'code_index' => false, 'extra_passes' => false, 'verify' => true]);
 });
 
 it('gives the reviewer the team\'s rules for this repository, its own and those for every repository, after the instructions', function () {

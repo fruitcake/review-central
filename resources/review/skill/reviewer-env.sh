@@ -204,6 +204,7 @@ reviewer_php() {
 # check it adds or changes, and those that reach the same class's writes without
 # it. Only for the laravel stack, whose entry points it knows. Nothing otherwise.
 reviewer_reach() {
+  [ "${REVIEW_REACH:-true}" = "false" ] && return 0
   jq -e '(.settings.stack // []) | index("laravel")' review-context.json > /dev/null 2>&1 || return 0
   _destination="${BITBUCKET_PR_DESTINATION_BRANCH:-}"
   [ -n "$_destination" ] || _destination=$(jq -r '.pull_request.destination_branch // empty' review-context.json 2>/dev/null)

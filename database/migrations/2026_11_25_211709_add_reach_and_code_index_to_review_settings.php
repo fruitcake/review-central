@@ -11,15 +11,17 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('review_settings', function (Blueprint $table) {
-            // "true" or "false", as the other parts of the review; null inherits, and off by default.
-            $table->string('code_index', 5)->nullable()->after('floor_guard');
+            // "true" or "false", as the other parts of the review; null inherits. REACH is on
+            // by default, the code index it can follow off.
+            $table->string('reach', 5)->nullable()->after('floor_guard');
+            $table->string('code_index', 5)->nullable()->after('reach');
         });
     }
 
     public function down(): void
     {
         Schema::table('review_settings', function (Blueprint $table) {
-            $table->dropColumn('code_index');
+            $table->dropColumn(['reach', 'code_index']);
         });
     }
 };
