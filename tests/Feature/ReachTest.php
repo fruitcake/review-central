@@ -275,3 +275,43 @@ it('builds the code index only for a change that touches a check, and goes by na
     expect($byName->output())->toContain('by method name')
         ->and(File::exists("{$this->dir}/curl-called"))->toBeTrue();
 });
+
+it('takes a policy\'s methods, and a method a changed line guards, as checks', function () {
+    ($this->put)('app/Policies/LessonPolicy.php', "<?php\n\nclass LessonPolicy\n{\n    public function book(\$user, Lesson \$lesson)\n    {\n        return true;\n    }\n}\n");
+    ($this->put)('app/Http/Controllers/LessonController.php', <<<'PHP'
+        <?php
+
+        class LessonController
+        {
+            public function store(Lesson $lesson)
+            {
+                $lesson->participants()->create(['member_id' => auth()->id()]);
+            }
+
+            public function update(Lesson $lesson)
+            {
+                $lesson->participants()->update(['paid' => true]);
+            }
+
+            public function destroy(Lesson $lesson)
+            {
+                abort_unless(auth()->user()->isAdmin(), 403);
+                $lesson->participants()->delete();
+            }
+        }
+        PHP);
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Lessons');
+
+    // The policy decides by the lesson now, and store checks who may book.
+    ($this->put)('app/Policies/LessonPolicy.php', str_replace('return true;', 'return $lesson->open;', File::get("{$this->dir}/app/Policies/LessonPolicy.php")));
+    ($this->put)('app/Http/Controllers/LessonController.php', str_replace("    {\n        \$lesson->participants()->create", "    {\n        abort_if(! \$lesson->open, 403);\n        \$lesson->participants()->create", File::get("{$this->dir}/app/Http/Controllers/LessonController.php")));
+    ($this->git)('commit', '-qam', 'Only open lessons');
+
+    expect(($this->reach)())
+        ->toContain('`app/Policies/LessonPolicy.php::book`')
+        ->toContain('`app/Http/Controllers/LessonController.php::store`')
+        // A sibling action that writes without a guard; one with its own guard is left out.
+        ->toContain('- `app/Http/Controllers/LessonController.php::update`, which writes itself, with no guard of its own')
+        ->not->toContain('LessonController.php::destroy`, which');
+});
