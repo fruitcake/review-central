@@ -287,6 +287,8 @@ it('tells a Worker that was not deployed again after a change, and a prepare tha
 
 it('says a prepare nothing picked up is wrong, and where to look at one that takes long', function () {
     config(['review.cloudflare.url' => 'https://sandbox.example.com', 'review.cloudflare.token' => 'worker-token', 'review.cloudflare.setup' => true]);
+    // The job goes on the reviews' own connection, which a worker started without it would not listen on.
+    config(['review.container.connection' => 'redis', 'queue.default' => 'database']);
     Queue::fake();
     Http::fake(['sandbox.example.com/health*' => Http::response(['ok' => true, 'version' => CloudflareSandbox::workerVersion(), 'bucket' => true, 'snapshot' => false])]);
     PrepareCloudflareSandbox::ask();
@@ -295,7 +297,7 @@ it('says a prepare nothing picked up is wrong, and where to look at one that tak
     $this->travel(2)->minutes();
 
     expect(($this->find)('the tools are prepared'))->toMatchArray(['state' => SetupCheck::WRONG])
-        ->and(($this->find)('the tools are prepared')['fix'])->toContain('queue:work --queue=reviews');
+        ->and(($this->find)('the tools are prepared')['fix'])->toContain('queue:work redis --queue=reviews');
 
     Cache::put(PrepareCloudflareSandbox::PREPARING, $asked + ['started' => now()->getTimestamp()], now()->addHour());
 

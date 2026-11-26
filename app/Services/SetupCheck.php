@@ -626,7 +626,7 @@ class SetupCheck
                 'state' => $stuck ? self::WRONG : self::NOTE,
                 'title' => $title,
                 'detail' => 'Asked for at '.$clock($asked).', on the queue "'.config('review.container.queue').'"'.($stuck ? '; nothing has picked it up.' : '. This page shows when it is done.'),
-                'fix' => $stuck ? 'A worker for that queue picks it up: `php artisan horizon`, or `php artisan queue:work --queue='.config('review.container.queue').'`.' : null,
+                'fix' => $stuck ? 'A worker for that queue picks it up: `php artisan horizon`, or `php artisan queue:work '.(config('review.container.connection') ?: config('queue.default')).' --queue='.config('review.container.queue').'`.' : null,
             ];
         }
 
