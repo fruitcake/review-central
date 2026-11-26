@@ -7,6 +7,8 @@ namespace App\Filament\Admin\Pages;
 use App\Filament\Components\SetupGuideAction;
 use App\Jobs\DeployCloudflareWorker;
 use App\Jobs\PrepareCloudflareSandbox;
+use App\Models\ReviewRun;
+use App\Runners\CloudflareRunner;
 use App\Runners\Container\CloudflareSandbox;
 use App\Runners\Container\WorkerDeployment;
 use App\Services\SetupCheck;
@@ -104,7 +106,18 @@ class Setup extends Page
                 ->color('gray')
                 ->visible(fn (): bool => WorkerDeployment::ready())
                 ->requiresConfirmation()
-                ->modalDescription('Wrangler deploys the Cloudflare Worker from this installation\'s copy, makes the bucket when it is not there, and gives the Worker the token this installation asks it with. On the reviews\' queue, whose worker needs Node 20 or later; a first deploy installs Wrangler and takes a few minutes.')
+                ->modalDescription(function (): string {
+                    $about = 'Wrangler deploys the Cloudflare Worker from this installation\'s copy, makes the bucket when it is not there, and gives the Worker the token this installation asks it with. On the reviews\' queue, whose worker needs Node 20 or later; a first deploy installs Wrangler and takes a few minutes.';
+                    $running = self::runningInSandboxes();
+
+                    // A deploy resets the Worker's Durable Objects, and Cloudflare stops their sandboxes with them.
+                    return match ($running) {
+                        0 => $about,
+                        1 => $about.' One review runs in a Cloudflare sandbox now: the deploy stops it, and it fails. Deploy once it is done.',
+                        default => $about." {$running} reviews run in a Cloudflare sandbox now: the deploy stops them, and they fail. Deploy once they are done.",
+                    };
+                })
+                ->modalSubmitActionLabel(fn (): string => self::runningInSandboxes() > 0 ? 'Deploy anyway' : 'Confirm')
                 ->action(function (): void {
                     DeployCloudflareWorker::ask();
 
@@ -125,6 +138,14 @@ class Setup extends Page
                     Notification::make()->title('The sandbox is being prepared')->body('On the reviews\' queue. This page shows when it is done.')->success()->send();
                 }),
         ];
+    }
+
+    /**
+     * The reviews running in a Cloudflare sandbox now, which a deploy of the Worker stops.
+     */
+    private static function runningInSandboxes(): int
+    {
+        return ReviewRun::query()->running()->where('runner', CloudflareRunner::NAME)->count();
     }
 
     /**
