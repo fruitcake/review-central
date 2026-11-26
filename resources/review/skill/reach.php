@@ -40,6 +40,12 @@ const ENTRY = '#^(app/Http/Controllers/|app/Livewire/|app/Console/Commands/|app/
 /** A method named as a check. */
 const CHECK = '/^(can[A-Z]\w*|allows?|allows[A-Z]\w*|authori[sz]e\w*|check[A-Z]\w*|has\w*(Error|Errors|Access|Permission)|is\w*(Allowed|Accessible|Permitted|Authori[sz]ed)|\w*Access(Error|Errors)?|\w*Permission)$/';
 
+/** A line that guards who may go on: a check written inline, in the method it guards. */
+const GUARD = '/\babort\s*\(\s*403\b|\babort_(if|unless)\s*\(|->authori[sz]e\s*\(|\bGate::(allows|denies|authori[sz]e|check|any|none|inspect)\s*\(|->(can|cannot|cant)\s*\(|\b(AuthorizationException|AccessDeniedHttpException|AccessDeniedException)\b/';
+
+/** Where every public method is a check: Laravel's policies. */
+const POLICIES = 'app/Policies/';
+
 /** What makes a method an effect: it writes. */
 const WRITES = '/(->|::)(save|create|createMany|insert|update|updateOrCreate|firstOrCreate|attach|sync|syncWithoutDetaching|delete|forceDelete|restore|increment|decrement|push)\(/';
 
@@ -147,7 +153,27 @@ $classOf = function (string $file): ?string {
     return preg_match('/^\s*(?:final\s+|abstract\s+|readonly\s+)*(?:class|trait)\s+(\w+)/m', (string) @file_get_contents($file), $match) === 1 ? $match[1] : null;
 };
 
-// The checks the change adds or changes: methods named as one, with a changed line in them.
+$linesOf = function (string $file): array {
+    static $lines = [];
+
+    return $lines[$file] ??= @file($file) ?: [];
+};
+
+/** Whether a method is public: declared so, or with no visibility at all. */
+$isPublic = function (string $file, string $name) use ($functions, $linesOf): bool {
+    foreach ($functions($file) as $function) {
+        if ($function['name'] === $name) {
+            $declaration = $linesOf($file)[$function['start'] - 1] ?? '';
+
+            return preg_match('/\b(private|protected)\b/', $declaration) !== 1 && $name !== '__construct';
+        }
+    }
+
+    return false;
+};
+
+// The checks the change adds or changes: methods named as one, policies' methods, and
+// methods with a changed line that guards who may go on.
 $checks = [];
 
 foreach (array_filter(explode("\n", $sh(['diff', '--name-only', "{$mergeBase}...{$commit}", '--', 'app']))) as $file) {
@@ -163,7 +189,14 @@ foreach (array_filter(explode("\n", $sh(['diff', '--name-only', "{$mergeBase}...
         for ($line = (int) $hunk[1]; $line < (int) $hunk[1] + max($count, 1); $line++) {
             $name = $enclosing($file, $line);
 
-            if ($name !== null && preg_match(CHECK, $name) === 1) {
+            if ($name === null || str_starts_with($name, '(closure')) {
+                continue;
+            }
+
+            // Named as a check; any public method of a policy; or a method a changed line guards.
+            if (preg_match(CHECK, $name) === 1
+                || (str_starts_with($file, POLICIES) && $isPublic($file, $name))
+                || preg_match(GUARD, $linesOf($file)[$line - 1] ?? '') === 1) {
                 $checks["{$file}::{$name}"] = ['file' => $file, 'name' => $name];
             }
         }
@@ -371,7 +404,19 @@ foreach ($checks as $key => $check) {
     foreach ($functions($check['file']) as $function) {
         $body = implode('', array_slice($lines, $function['start'] - 1, $function['end'] - $function['start'] + 1));
 
-        if ($function['name'] === $check['name'] || str_starts_with($function['name'], '(closure') || in_array($function['name'], COMMON, true) || preg_match(WRITES, $body) !== 1) {
+        if ($function['name'] === $check['name'] || str_starts_with($function['name'], '(closure') || preg_match(WRITES, $body) !== 1) {
+            continue;
+        }
+
+        // In a controller or a component the class's other public actions are entry points
+        // themselves: one that writes, guards nothing and reaches the check by no path skips it.
+        if (preg_match(ENTRY, $check['file']) === 1 && $isPublic($check['file'], $function['name'])
+            && ! isset($entries["{$check['file']}::{$function['name']}"])
+            && preg_match(GUARD, $body) !== 1 && preg_match('/(->|::)'.preg_quote($check['name'], '/').'\s*\(/', $body) !== 1) {
+            $without["{$check['file']}::{$function['name']}"] = ['via' => [$function['name']], 'distance' => 0];
+        }
+
+        if (in_array($function['name'], COMMON, true)) {
             continue;
         }
 
@@ -390,7 +435,9 @@ foreach ($checks as $key => $check) {
         $out[] = "  These reach a method of `{$class}` that writes, without passing `{$check['name']}`:";
 
         foreach (array_slice($without, 0, LISTED, true) as $entry => $hit) {
-            $out[] = "  - `{$entry}`, through `".implode('`, `', array_unique($hit['via'])).'`';
+            $out[] = $hit['distance'] === 0
+                ? "  - `{$entry}`, which writes itself, with no guard of its own"
+                : "  - `{$entry}`, through `".implode('`, `', array_unique($hit['via'])).'`';
         }
 
         if (count($without) > LISTED) {

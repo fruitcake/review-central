@@ -62,6 +62,7 @@ echo "  REVIEW_STACK=${REVIEW_STACK:-auto} (auto | none | laravel, magento, hyva
 echo "  REVIEW_VERIFY=${REVIEW_VERIFY:-false} REVIEW_VERIFY_MODEL=${REVIEW_VERIFY_MODEL:-sonnet for Claude, the review model for Codex} (a second check on each finding that would block)"
 echo "  REVIEW_EXTRA_PASSES=${REVIEW_EXTRA_PASSES:-off for Claude, on for Codex} (the reviewer's own review first, for candidates)"
 echo "  REVIEW_OCR=${REVIEW_OCR:-true} REVIEW_SCAN=${REVIEW_SCAN:-true} REVIEW_FLOOR_GUARD=${REVIEW_FLOOR_GUARD:-true} (OpenCodeReview picks the files, the scan before the review, the floor guard)"
+echo "  REVIEW_REACH=${REVIEW_REACH:-true} REVIEW_CODE_INDEX=${REVIEW_CODE_INDEX:-false} (for Laravel: the paths that reach a changed check, and the code index they follow)"
 
 # A trigger into a custom pipeline sets no PR variables; the precheck resolved them
 # and passed them on, so fill them in here for anything that reads the usual names.
