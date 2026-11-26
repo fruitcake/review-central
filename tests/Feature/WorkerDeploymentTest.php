@@ -4,8 +4,12 @@ use App\Filament\Admin\Pages\Settings;
 use App\Filament\Admin\Pages\Setup;
 use App\Jobs\DeployCloudflareWorker;
 use App\Models\PlatformSetting;
+use App\Models\Repository;
+use App\Models\ReviewRun;
 use App\Models\User;
+use App\Runners\CloudflareRunner;
 use App\Runners\Container\WorkerDeployment;
+use App\Runners\ContainerRunner;
 use App\Services\PlatformSettings;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
@@ -166,6 +170,27 @@ it('is set up under Settings and deployed from the setup page', function () {
     livewire(Setup::class)->assertActionVisible('deployWorker')->callAction('deployWorker');
 
     Queue::assertPushed(DeployCloudflareWorker::class);
+});
+
+it('says which reviews a deploy would stop', function () {
+    Queue::fake();
+    $this->actingAs(User::factory()->create(['is_admin' => true]));
+    Filament::setCurrentPanel(Filament::getPanel('admin'));
+    app(PlatformSettings::class)->save([PlatformSettings::CLOUDFLARE_ACCOUNT => ACCOUNT, PlatformSettings::CLOUDFLARE_API_TOKEN => 'cf-api-token']);
+    app(PlatformSettings::class)->applyCloudflare();
+    $repository = Repository::factory()->create();
+    $run = fn (string $runner, string $status): ReviewRun => ReviewRun::query()->create([
+        'tenant_id' => $repository->tenant_id, 'repository_id' => $repository->id, 'workspace' => 'acme', 'slug' => 'shop', 'branch' => 'main',
+        'commit' => str_repeat('a', 40), 'status' => $status, 'runner' => $runner, 'started_at' => now(),
+    ]);
+    $run(CloudflareRunner::NAME, ReviewRun::STATUS_FINISHED);
+    $run(ContainerRunner::NAME, ReviewRun::STATUS_RUNNING);
+
+    livewire(Setup::class)->mountAction('deployWorker')->assertMountedActionModalDontSee('run in a Cloudflare sandbox now');
+
+    $run(CloudflareRunner::NAME, ReviewRun::STATUS_RUNNING);
+
+    livewire(Setup::class)->mountAction('deployWorker')->assertMountedActionModalSee('One review runs in a Cloudflare sandbox now');
 });
 
 it('keeps the settings out of a configuration cache, where a later change would not take', function () {
