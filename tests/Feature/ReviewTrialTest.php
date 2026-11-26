@@ -329,14 +329,18 @@ it('keeps a pull request\'s trials out of its runs until asked for, and shows th
     $first = $run(30, false);
     $trial = $run(20, true);
     $run(10, true);
-    $run(5, false);
+    $last = $run(5, false);
 
-    // Numbered among the reviews alone, and the trials there but hidden.
+    // Numbered among the reviews alone, at the top as in the runs, and the trials there but hidden.
     livewire(ViewReviewRun::class, ['record' => $first->uuid])
+        ->assertSee('Run 1 of 2')
         ->assertSeeInOrder(['Run 1', 'Trial', 'Trial', 'Run 2'])
         ->assertSee('Show trials (2)')
         ->assertSeeHtml('x-data="{ trials: false }"');
 
+    livewire(ViewReviewRun::class, ['record' => $last->uuid])->assertSee('Run 2 of 2');
+
     livewire(ViewReviewRun::class, ['record' => $trial->uuid])
+        ->assertDontSee(' of 2')
         ->assertSeeHtml('x-data="{ trials: true }"');
 });

@@ -9,8 +9,10 @@
     $outcome = RunPresenter::outcome($run);
     $ticket = $run->context['ticket'] ?? null;
     $pullRequest = $run->context['pull_request'] ?? [];
-    $position = $siblings->search(fn ($sibling) => $sibling->is($run));
-    $newest = $siblings->last();
+    // Numbered among the pull request's own reviews, as in its runs below: trials are not one of them.
+    $reviews = $siblings->reject(fn ($sibling): bool => (bool) $sibling->custom)->values();
+    $position = $reviews->search(fn ($sibling) => $sibling->is($run));
+    $newest = $reviews->last();
     $usage = collect($run->usage ?? [])->reduce(function (array $sum, array $types): array {
         foreach (['input', 'output', 'cache_read', 'cache_creation'] as $type) {
             $sum[$type] += (int) ($types[$type] ?? 0);
@@ -36,9 +38,14 @@
     <div class="rc-stack">
         <div class="rc-meta">
             <span class="rc-chip rc-chip-{{ $outcome['tone'] }}">{{ $outcome['label'] }}</span>
-            @if ($siblings->count() > 1)
+            @if ($run->custom && $run->pull_request_id !== null)
                 <span class="rc-muted">
-                    {{ __('Run :position of :total', ['position' => $position + 1, 'total' => $siblings->count()]) }}
+                    {{ __('Trial') }}
+                    @if ($newest !== null) · {{ __('the newest run: :outcome', ['outcome' => Str::lower(RunPresenter::outcome($newest)['label'])]) }} @endif
+                </span>
+            @elseif ($position !== false && $reviews->count() > 1)
+                <span class="rc-muted">
+                    {{ __('Run :position of :total', ['position' => $position + 1, 'total' => $reviews->count()]) }}
                     @if (! $newest->is($run)) · {{ __('the newest run: :outcome', ['outcome' => Str::lower(RunPresenter::outcome($newest)['label'])]) }} @endif
                 </span>
             @endif
