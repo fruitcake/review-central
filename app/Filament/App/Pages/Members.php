@@ -43,9 +43,19 @@ class Members extends Page implements HasTable
         return TenantRole::isAdmin();
     }
 
+    public function getTitle(): string|Htmlable
+    {
+        return __('Members');
+    }
+
+    public static function getNavigationLabel(): string
+    {
+        return __('Members');
+    }
+
     public function getSubheading(): string|Htmlable|null
     {
-        return 'An admin manages the connections and their keys, the apps, repositories, review settings, instructions and the members. A member reads the reviews, answers and rates their findings, asks the reviewer and starts a review.';
+        return __('An admin manages the connections and their keys, the apps, repositories, review settings, instructions and the members. A member reads the reviews, answers and rates their findings, asks the reviewer and starts a review.');
     }
 
     public function content(Schema $schema): Schema
@@ -67,60 +77,61 @@ class Members extends Page implements HasTable
                     ->limit(1)]))
             ->defaultSort('name')
             ->columns([
-                TextColumn::make('name')->searchable()->sortable(),
-                TextColumn::make('email')->searchable(),
+                TextColumn::make('name')->label(__('Name'))->searchable()->sortable(),
+                TextColumn::make('email')->label(__('Email'))->searchable(),
                 TextColumn::make('role')
-                    ->state(fn (User $record): string => TenantRole::LABELS[self::roleOf($record)])
+                    ->label(__('Role'))
+                    ->state(fn (User $record): string => TenantRole::labels()[self::roleOf($record)])
                     ->badge()
-                    ->color(fn (string $state): string => $state === 'Admin' ? 'primary' : 'gray'),
+                    ->color(fn (User $record): string => self::roleOf($record) === TenantRole::ADMIN ? 'primary' : 'gray'),
             ])
             ->headerActions([
                 Action::make('invite')
-                    ->label('Invite')
+                    ->label(__('Invite'))
                     ->icon(Heroicon::OutlinedUserPlus)
                     ->schema([
-                        TextInput::make('email')->email()->required()->maxLength(255),
-                        TextInput::make('name')->maxLength(255)->helperText('For someone who has no account here yet.'),
-                        Select::make('role')->options(TenantRole::LABELS)->default(TenantRole::MEMBER)->required()->selectablePlaceholder(false),
+                        TextInput::make('email')->label(__('Email'))->email()->required()->maxLength(255),
+                        TextInput::make('name')->label(__('Name'))->maxLength(255)->helperText(__('For someone who has no account here yet.')),
+                        Select::make('role')->label(__('Role'))->options(TenantRole::labels())->default(TenantRole::MEMBER)->required()->selectablePlaceholder(false),
                     ])
                     ->action(fn (array $data) => $this->invite(CurrentTenant::get(), $data)),
             ])
             ->recordActions([
                 Action::make('role')
-                    ->label('Change role')
+                    ->label(__('Change role'))
                     ->icon(Heroicon::OutlinedShieldCheck)
                     ->color('gray')
                     ->fillForm(fn (User $record): array => ['role' => self::roleOf($record)])
-                    ->schema([Select::make('role')->options(TenantRole::LABELS)->required()->selectablePlaceholder(false)])
+                    ->schema([Select::make('role')->label(__('Role'))->options(TenantRole::labels())->required()->selectablePlaceholder(false)])
                     ->action(function (User $record, array $data): void {
                         $tenant = CurrentTenant::get();
 
                         if ($data['role'] !== TenantRole::ADMIN && $this->lastAdmin($tenant, $record)) {
-                            Notification::make()->title('The team keeps at least one admin')->body('Make someone else an admin first.')->danger()->send();
+                            Notification::make()->title(__('The team keeps at least one admin'))->body(__('Make someone else an admin first.'))->danger()->send();
 
                             return;
                         }
 
                         $tenant->users()->updateExistingPivot($record->getKey(), ['role' => $data['role']]);
-                        Notification::make()->title("{$record->name} is now ".Str::lower(TenantRole::LABELS[$data['role']]))->success()->send();
+                        Notification::make()->title(__(':name is now :role', ['name' => $record->name, 'role' => Str::lower(TenantRole::labels()[$data['role']])]))->success()->send();
                     }),
                 Action::make('remove')
-                    ->label('Remove')
+                    ->label(__('Remove'))
                     ->icon(Heroicon::OutlinedUserMinus)
                     ->color('danger')
                     ->requiresConfirmation()
-                    ->modalDescription(fn (User $record): string => "{$record->name} can no longer open this team. Their account stays, for any other team they are in.")
+                    ->modalDescription(fn (User $record): string => __(':name can no longer open this team. Their account stays, for any other team they are in.', ['name' => $record->name]))
                     ->action(function (User $record): void {
                         $tenant = CurrentTenant::get();
 
                         if ($this->lastAdmin($tenant, $record)) {
-                            Notification::make()->title('The team keeps at least one admin')->body('Make someone else an admin first.')->danger()->send();
+                            Notification::make()->title(__('The team keeps at least one admin'))->body(__('Make someone else an admin first.'))->danger()->send();
 
                             return;
                         }
 
                         $tenant->users()->detach($record->getKey());
-                        Notification::make()->title("{$record->name} is removed from the team")->success()->send();
+                        Notification::make()->title(__(':name is removed from the team', ['name' => $record->name]))->success()->send();
                     }),
             ]);
     }
@@ -138,7 +149,7 @@ class Members extends Page implements HasTable
         $user = User::query()->where('email', $email)->first();
 
         if ($user !== null && $tenant->users()->whereKey($user->getKey())->exists()) {
-            Notification::make()->title("{$email} is in the team already")->body('Change their role in the list.')->warning()->send();
+            Notification::make()->title(__(':email is in the team already', ['email' => $email]))->body(__('Change their role in the list.'))->warning()->send();
 
             return;
         }
@@ -151,7 +162,7 @@ class Members extends Page implements HasTable
 
         $tenant->users()->attach($user->getKey(), ['role' => $role]);
 
-        Notification::make()->title("{$email} is in the team")->body($user->wasRecentlyCreated ? 'They are mailed a link to choose a password.' : 'They can open it with the account they have.')->success()->send();
+        Notification::make()->title(__(':email is in the team', ['email' => $email]))->body($user->wasRecentlyCreated ? __('They are mailed a link to choose a password.') : __('They can open it with the account they have.'))->success()->send();
     }
 
     /**

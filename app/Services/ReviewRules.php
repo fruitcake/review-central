@@ -105,7 +105,7 @@ class ReviewRules
 
         $severity = $severity === null ? null : strtoupper(trim($severity));
 
-        if ($severity !== null && ! array_key_exists($severity, ReviewRule::SEVERITIES)) {
+        if ($severity !== null && ! array_key_exists($severity, ReviewRule::severities())) {
             throw new ActionRefused('A severity is HIGH, MEDIUM or LOW, or left out for the reviewer to judge.');
         }
 

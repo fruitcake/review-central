@@ -28,18 +28,38 @@ class IntegrationAppResource extends Resource
 
     protected static ?string $model = IntegrationApp::class;
 
-    protected static ?string $navigationLabel = 'Apps';
-
-    protected static ?string $modelLabel = 'app';
-
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedPuzzlePiece;
 
     protected static ?int $navigationSort = 31;
 
+    public static function getNavigationLabel(): string
+    {
+        return __('Apps');
+    }
+
+    public static function getModelLabel(): string
+    {
+        return __('app');
+    }
+
+    public static function getPluralModelLabel(): string
+    {
+        return __('apps');
+    }
+
+    /**
+     * The page's own name, rather than the model label in title case, which reads
+     * oddly in Dutch.
+     */
+    public static function getBreadcrumb(): string
+    {
+        return static::getNavigationLabel();
+    }
+
     public static function form(Schema $schema): Schema
     {
         return $schema->components(IntegrationAppForm::fields(
-            collect(Integrations::TYPES)->filter(fn (array $type): bool => $type['tenants_add'])->map(fn (array $type): string => $type['label'])->all(),
+            collect(Integrations::types())->filter(fn (array $type): bool => $type['tenants_add'])->map(fn (array $type): string => $type['label'])->all(),
         ));
     }
 
@@ -47,16 +67,16 @@ class IntegrationAppResource extends Resource
     {
         return $table
             ->columns([
-                TextColumn::make('name')->searchable(),
-                TextColumn::make('type')->formatStateUsing(fn (string $state): string => Integrations::TYPES[$state]['label'] ?? $state),
-                TextColumn::make('updated_at')->label('Changed')->since(),
+                TextColumn::make('name')->label(__('Name'))->searchable(),
+                TextColumn::make('type')->label(__('Type'))->formatStateUsing(fn (string $state): string => Integrations::types()[$state]['label'] ?? $state),
+                TextColumn::make('updated_at')->label(__('Changed'))->since(),
             ])
             ->recordActions([
                 EditAction::make()
                     ->mutateRecordDataUsing(fn (array $data, IntegrationApp $record): array => IntegrationAppForm::fill($data, $record))
                     ->mutateDataUsing(fn (array $data, IntegrationApp $record): array => IntegrationAppForm::save($data, $record)),
                 DeleteAction::make()
-                    ->modalDescription('Connections that signed in through it have to be connected again, through another app or with a token.'),
+                    ->modalDescription(__('Connections that signed in through it have to be connected again, through another app or with a token.')),
             ]);
     }
 

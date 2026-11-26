@@ -107,16 +107,23 @@ class ReviewSettings
         'verify' => false,
     ];
 
-    /** What each module is called where a person reads it. */
-    public const MODULE_LABELS = [
-        'ocr' => 'OCR',
-        'scan' => 'scan',
-        'floor_guard' => 'floor guard',
-        'reach' => 'reach',
-        'code_index' => 'code index',
-        'extra_passes' => 'extra passes',
-        'verify' => 'second check',
-    ];
+    /**
+     * What each module is called where a person reads it.
+     *
+     * @return array<string, string>
+     */
+    public static function moduleLabels(): array
+    {
+        return [
+            'ocr' => 'OCR',
+            'scan' => __('scan'),
+            'floor_guard' => __('floor guard'),
+            'reach' => __('reach'),
+            'code_index' => __('code index'),
+            'extra_passes' => __('extra passes'),
+            'verify' => __('second check'),
+        ];
+    }
 
     /**
      * Which modules a review with these variables runs, for the reviewer it runs
@@ -162,16 +169,17 @@ class ReviewSettings
     {
         $on = array_keys(array_filter($modules));
         $off = array_keys(array_filter($modules, fn (bool $value): bool => ! $value));
-        $label = fn (array $fields): string => implode(', ', array_map(fn (string $field): string => self::MODULE_LABELS[$field] ?? $field, $fields));
+        $labels = self::moduleLabels();
+        $label = fn (array $fields): string => implode(', ', array_map(fn (string $field): string => $labels[$field] ?? $field, $fields));
 
         if ($on === [] && array_diff_key(self::MODULES, $modules) === []) {
-            return 'plain: the reviewer alone';
+            return __('plain: the reviewer alone');
         }
 
         return implode('; ', array_filter([
             $on === [] ? null : $label($on),
-            $off === [] ? null : 'without '.$label($off),
-        ]));
+            $off === [] ? null : __('without :modules', ['modules' => $label($off)]),
+        ], is_string(...)));
     }
 
     /**
@@ -201,6 +209,19 @@ class ReviewSettings
         'en' => 'English', 'nl' => 'Dutch', 'de' => 'German', 'fr' => 'French', 'es' => 'Spanish',
         'it' => 'Italian', 'pt' => 'Portuguese', 'pl' => 'Polish', 'sv' => 'Swedish', 'da' => 'Danish',
     ];
+
+    /**
+     * LANGUAGES as the user reads them, for choosing one.
+     *
+     * @return array<string, string>
+     */
+    public static function languageOptions(): array
+    {
+        return [
+            'en' => __('English'), 'nl' => __('Dutch'), 'de' => __('German'), 'fr' => __('French'), 'es' => __('Spanish'),
+            'it' => __('Italian'), 'pt' => __('Portuguese'), 'pl' => __('Polish'), 'sv' => __('Swedish'), 'da' => __('Danish'),
+        ];
+    }
 
     /**
      * What the review's own text leaves to the team, as the reviewer reads it: the

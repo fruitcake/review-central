@@ -29,11 +29,22 @@ class ReviewComparisonResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedScale;
 
-    protected static ?string $navigationLabel = 'Comparisons';
-
-    protected static ?string $modelLabel = 'comparison';
-
     protected static ?int $navigationSort = 11;
+
+    public static function getNavigationLabel(): string
+    {
+        return __('Comparisons');
+    }
+
+    public static function getModelLabel(): string
+    {
+        return __('comparison');
+    }
+
+    public static function getPluralModelLabel(): string
+    {
+        return __('comparisons');
+    }
 
     public static function table(Table $table): Table
     {
@@ -42,21 +53,27 @@ class ReviewComparisonResource extends Resource
             ->defaultSort('created_at', 'desc')
             ->columns([
                 TextColumn::make('pull_request_id')
-                    ->label('Pull request')
+                    ->label(__('Pull request'))
                     ->state(fn (ReviewComparison $record): string => "{$record->repository->slug} #{$record->pull_request_id}"),
                 TextColumn::make('rows')
-                    ->label('Setups')
+                    ->label(__('Setups'))
                     ->state(fn (ReviewComparison $record): int => count($record->rows) + 1),
                 TextColumn::make('analysis_status')
-                    ->label('Analysis')
+                    ->label(__('Analysis'))
                     ->badge()
-                    ->placeholder('Not yet'),
-                TextColumn::make('user.name')->label('By')->placeholder('—'),
+                    ->formatStateUsing(fn (string $state): string => match ($state) {
+                        ReviewComparison::ANALYSIS_RUNNING => __('running'),
+                        ReviewComparison::ANALYSIS_FINISHED => __('finished'),
+                        ReviewComparison::ANALYSIS_FAILED => __('failed'),
+                        default => $state,
+                    })
+                    ->placeholder(__('Not yet')),
+                TextColumn::make('user.name')->label(__('By'))->placeholder('—'),
                 TextColumn::make('created_at')
-                    ->label('Started')
-                    ->formatStateUsing(fn (ReviewComparison $record): string => LocalTime::of($record->created_at)->format('j M Y, H:i')),
+                    ->label(__('Started'))
+                    ->formatStateUsing(fn (ReviewComparison $record): string => LocalTime::of($record->created_at)->translatedFormat('j M Y, H:i')),
             ])
-            ->recordActions([ViewAction::make()->label('Open')->icon(null)]);
+            ->recordActions([ViewAction::make()->label(__('Open'))->icon(null)]);
     }
 
     public static function getPages(): array

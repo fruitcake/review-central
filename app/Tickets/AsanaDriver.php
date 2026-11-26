@@ -39,20 +39,20 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
     public function credentialFields(): array
     {
         return [
-            Secret::make('access_token')->label('Access token')
+            Secret::make('access_token')->label(__('Access token'))
                 // With this installation registered at Asana, signing in there does instead.
                 ->required(fn (string $operation): bool => $operation === 'create' && ! Integrations::offered($this))
                 ->helperText(fn (): string => Integrations::offered($this)
-                    ? 'A personal access token, or a service account token. Or leave it empty, save, and use "Connect" in the list to sign in at Asana instead.'
-                    : 'A personal access token, or a service account token. '.Integrations::unavailable($this, 'Asana')),
+                    ? __('A personal access token, or a service account token. Or leave it empty, save, and use "Connect" in the list to sign in at Asana instead.')
+                    : __('A personal access token, or a service account token.').' '.Integrations::unavailable($this, 'Asana')),
         ];
     }
 
     public function settingFields(): array
     {
         return [
-            TextInput::make('workspace')->label('Workspace ID')->required()->rule('regex:/^\d+$/')
-                ->helperText('The number of the Asana workspace the custom IDs are looked up in.'),
+            TextInput::make('workspace')->label(__('Workspace ID'))->required()->rule('regex:/^\d+$/')
+                ->helperText(__('The number of the Asana workspace the custom IDs are looked up in.')),
         ];
     }
 
@@ -64,21 +64,21 @@ class AsanaDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
     public function setupGuide(): SetupGuide
     {
         return new SetupGuide(
-            title: 'An Asana personal access token',
+            title: __('An Asana personal access token'),
             url: 'https://app.asana.com/0/my-apps',
-            linkLabel: 'Asana developer console',
+            linkLabel: __('Asana developer console'),
             steps: [
-                'Sign in at Asana as an account that can see the projects whose tasks the pull requests name, and open the developer console.',
-                'Under **Personal access tokens**, choose **Create new token**, name it, agree to the API terms and create it.',
-                'Copy the token, which Asana shows once, and paste it here.',
-                'Under Settings, fill in the workspace ID: the `gid` next to the workspace\'s name at `https://app.asana.com/api/1.0/workspaces`, opened while signed in.',
+                __('Sign in at Asana as an account that can see the projects whose tasks the pull requests name, and open the developer console.'),
+                __('Under **Personal access tokens**, choose **Create new token**, name it, agree to the API terms and create it.'),
+                __('Copy the token, which Asana shows once, and paste it here.'),
+                __('Under Settings, fill in the workspace ID: the `gid` next to the workspace\'s name at `https://app.asana.com/api/1.0/workspaces`, opened while signed in.'),
             ],
             permissions: [
-                'The account\'s own access' => 'the token reads what its account can see: tasks, their subtasks, comments and files, and the workspace\'s search for a task\'s number. Nothing is written.',
+                __('The account\'s own access') => __('the token reads what its account can see: tasks, their subtasks, comments and files, and the workspace\'s search for a task\'s number. Nothing is written.'),
             ],
             notes: [
-                'On Asana Enterprise, a service account\'s token, from the admin console under **Apps → Service accounts**, works too and belongs to no person.',
-                ...(Integrations::offered($this) ? ['Or leave the token empty, save, and use **Connect** in the list to sign in at Asana instead.'] : []),
+                __('On Asana Enterprise, a service account\'s token, from the admin console under **Apps → Service accounts**, works too and belongs to no person.'),
+                ...(Integrations::offered($this) ? [__('Or leave the token empty, save, and use **Connect** in the list to sign in at Asana instead.')] : []),
             ],
         );
     }

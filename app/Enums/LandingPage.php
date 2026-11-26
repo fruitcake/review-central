@@ -21,9 +21,9 @@ enum LandingPage: string
     public function label(): string
     {
         return match ($this) {
-            self::Platform => 'Platform dashboard',
-            self::Tenant => 'Tenant dashboard',
-            self::Personal => 'Personal dashboard',
+            self::Platform => __('Platform dashboard'),
+            self::Tenant => __('Tenant dashboard'),
+            self::Personal => __('Personal dashboard'),
         };
     }
 

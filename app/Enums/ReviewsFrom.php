@@ -19,8 +19,8 @@ enum ReviewsFrom: string
     public function label(): string
     {
         return match ($this) {
-            self::Everyone => 'Every pull request',
-            self::Trusted => 'Only those of the trusted accounts; the others wait for someone to start them',
+            self::Everyone => __('Every pull request'),
+            self::Trusted => __('Only those of the trusted accounts; the others wait for someone to start them'),
         };
     }
 

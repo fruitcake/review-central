@@ -20,13 +20,24 @@ class SourceControlResource extends ConnectionResource
 
     protected static ?string $slug = 'source-control';
 
-    protected static ?string $navigationLabel = 'Source control';
-
-    protected static ?string $modelLabel = 'source control connection';
-
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCodeBracketSquare;
 
     protected static ?int $navigationSort = 28;
+
+    public static function getNavigationLabel(): string
+    {
+        return __('Source control');
+    }
+
+    public static function getModelLabel(): string
+    {
+        return __('source control connection');
+    }
+
+    public static function getPluralModelLabel(): string
+    {
+        return __('source control connections');
+    }
 
     public static function getPages(): array
     {

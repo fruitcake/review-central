@@ -38,7 +38,10 @@ class ListReviewRuns extends ListRecords
 
     protected static string $resource = ReviewRunResource::class;
 
-    protected static ?string $title = 'Reviews';
+    public function getTitle(): string|Htmlable
+    {
+        return __('Reviews');
+    }
 
     public function getSubheading(): string|Htmlable|null
     {
@@ -47,7 +50,11 @@ class ListReviewRuns extends ListRecords
         $running = (clone $runs)->where('status', ReviewRun::STATUS_RUNNING)->count();
         $queued = CurrentTenant::get()->reviewRuns()->where('status', ReviewRun::STATUS_QUEUED)->count();
 
-        return "{$recent} ".($recent === 1 ? 'review' : 'reviews')." in the last 30 days · {$running} running now".($queued === 0 ? '' : " · {$queued} queued");
+        return collect([
+            $recent === 1 ? __(':count review in the last 30 days', ['count' => $recent]) : __(':count reviews in the last 30 days', ['count' => $recent]),
+            __(':count running now', ['count' => $running]),
+            $queued === 0 ? null : __(':count queued', ['count' => $queued]),
+        ])->filter()->implode(' · ');
     }
 
     /**
@@ -61,18 +68,18 @@ class ListReviewRuns extends ListRecords
         $count = fn (callable $scope): int => $scope(CurrentTenant::get()->reviewRuns()->getQuery())->count();
 
         $views = [
-            'all' => ['All', fn (Builder $query): Builder => $query->whereIn('status', [...TenantOverview::REVIEWS, ReviewRun::STATUS_QUEUED])],
-            self::MY_REPOSITORIES => ['My repositories', fn (Builder $query): Builder => $this->inMyRepositories()($query)->whereIn('status', [...TenantOverview::REVIEWS, ReviewRun::STATUS_QUEUED])],
-            'action' => ['Needs action', fn (Builder $query): Builder => $query->where(fn (Builder $query) => $query
+            'all' => [__('All'), fn (Builder $query): Builder => $query->whereIn('status', [...TenantOverview::REVIEWS, ReviewRun::STATUS_QUEUED])],
+            self::MY_REPOSITORIES => [__('My repositories'), fn (Builder $query): Builder => $this->inMyRepositories()($query)->whereIn('status', [...TenantOverview::REVIEWS, ReviewRun::STATUS_QUEUED])],
+            'action' => [__('Needs action'), fn (Builder $query): Builder => $query->where(fn (Builder $query) => $query
                 ->where(fn (Builder $query) => $query->whereIn('status', [ReviewRun::STATUS_FAILED, ReviewRun::STATUS_TIMEOUT])->whereNull('dismissed_at'))
                 ->orWhere(fn (Builder $query) => $query->where('status', ReviewRun::STATUS_FINISHED)->where('result', 'FAILED')))],
-            'running' => ['Queued or running', fn (Builder $query): Builder => $query->whereIn('status', [ReviewRun::STATUS_QUEUED, ReviewRun::STATUS_RUNNING])],
+            'running' => [__('Queued or running'), fn (Builder $query): Builder => $query->whereIn('status', [ReviewRun::STATUS_QUEUED, ReviewRun::STATUS_RUNNING])],
             // What someone set aside is still under All.
-            'failed' => ['Did not finish', fn (Builder $query): Builder => $query->whereIn('status', [ReviewRun::STATUS_FAILED, ReviewRun::STATUS_TIMEOUT])->whereNull('dismissed_at')],
-            'other' => ['Skipped or waiting', fn (Builder $query): Builder => $query->whereNotIn('status', [...TenantOverview::REVIEWS, ReviewRun::STATUS_QUEUED])->where('custom', false)],
+            'failed' => [__('Did not finish'), fn (Builder $query): Builder => $query->whereIn('status', [ReviewRun::STATUS_FAILED, ReviewRun::STATUS_TIMEOUT])->whereNull('dismissed_at')],
+            'other' => [__('Skipped or waiting'), fn (Builder $query): Builder => $query->whereNotIn('status', [...TenantOverview::REVIEWS, ReviewRun::STATUS_QUEUED])->where('custom', false)],
             // Kept off the pull request, so they are nowhere else.
-            'trials' => ['Trials', fn (Builder $query): Builder => $query->where('custom', true)->where('kind', '!=', SecurityReview::KIND)],
-            'security' => ['Security', fn (Builder $query): Builder => $query->where('kind', SecurityReview::KIND)],
+            'trials' => [__('Trials'), fn (Builder $query): Builder => $query->where('custom', true)->where('kind', '!=', SecurityReview::KIND)],
+            'security' => [__('Security'), fn (Builder $query): Builder => $query->where('kind', SecurityReview::KIND)],
         ];
 
         return array_map(fn (array $view): Tab => Tab::make($view[0])
@@ -99,8 +106,8 @@ class ListReviewRuns extends ListRecords
             $set('detected_branch', null);
             $set('detected', match (true) {
                 $input === '' => null,
-                preg_match('/^#?\\d+$/', $input) === 1 && blank($get('repository_id')) => 'Pick the repository below first, then detect again.',
-                default => "Nothing found for \"{$input}\": no open pull request of this team's repositories, or its repository is on more than one connection. Pick the repository below and detect again, or fill in the branch.",
+                preg_match('/^#?\\d+$/', $input) === 1 && blank($get('repository_id')) => __('Pick the repository below first, then detect again.'),
+                default => __('Nothing found for ":input": no open pull request of this team\'s repositories, or its repository is on more than one connection. Pick the repository below and detect again, or fill in the branch.', ['input' => $input]),
             });
 
             return;
@@ -109,7 +116,7 @@ class ListReviewRuns extends ListRecords
         $set('repository_id', $found['repository_id']);
         $set('branch', $found['branch']);
         $set('detected_branch', $found['branch']);
-        $set('detected', "Found: {$found['branch']}.");
+        $set('detected', __('Found: :branch.', ['branch' => $found['branch']]));
     }
 
     /**
@@ -177,31 +184,32 @@ class ListReviewRuns extends ListRecords
     {
         return [
             Action::make('review')
-                ->label('Review a pull request')
+                ->label(__('Review a pull request'))
                 ->icon(Heroicon::OutlinedPlay)
-                ->modalDescription('Starts a review of the open pull request on a branch, as a /review comment on it would. The review is posted on the pull request, and costs what a review costs.')
+                ->modalDescription(__('Starts a review of the open pull request on a branch, as a /review comment on it would. The review is posted on the pull request, and costs what a review costs.'))
                 ->schema([
                     TextInput::make('detect')
-                        ->label('Find it')
-                        ->placeholder('Paste a link, a number or a ticket key')
+                        ->label(__('Find it'))
+                        ->placeholder(__('Paste a link, a number or a ticket key'))
                         ->dehydrated(false)
                         ->live(onBlur: true)
                         ->afterStateUpdated(fn (Get $get, Set $set) => self::detect($get, $set))
-                        ->suffixAction(Action::make('detectNow')->label('Detect')->icon(Heroicon::OutlinedMagnifyingGlass)->action(fn (Get $get, Set $set) => self::detect($get, $set)))
-                        ->helperText(fn (Get $get): string => $get('detected') ?? 'Its link (https://bitbucket.org/acme/shop/pull-requests/39), its number in the repository below (39), or a ticket key its title or branch carries (VZ-959). It fills in the repository and the branch.'),
+                        ->suffixAction(Action::make('detectNow')->label(__('Detect'))->icon(Heroicon::OutlinedMagnifyingGlass)->action(fn (Get $get, Set $set) => self::detect($get, $set)))
+                        ->helperText(fn (Get $get): string => $get('detected') ?? __('Its link (https://bitbucket.org/acme/shop/pull-requests/39), its number in the repository below (39), or a ticket key its title or branch carries (VZ-959). It fills in the repository and the branch.')),
                     Hidden::make('detected')->dehydrated(false),
                     Hidden::make('detected_branch')->dehydrated(false),
                     Select::make('repository_id')
-                        ->label('Repository')
+                        ->label(__('Repository'))
                         ->options(fn (): array => CurrentTenant::get()->repositories()->get()->mapWithKeys(fn (Repository $repository): array => [$repository->getKey() => $repository->fullName()])->all())
                         ->searchable()
                         ->required(),
                     TextInput::make('branch')
+                        ->label(__('Branch'))
                         ->required()
                         ->maxLength(255)
                         ->rule('not_regex:~://~')
-                        ->validationMessages(['not_regex' => 'A link goes in the field above, which finds its branch.'])
-                        ->helperText('The branch the pull request comes from. For one from a fork on GitHub: pull/<number>/head.'),
+                        ->validationMessages(['not_regex' => __('A link goes in the field above, which finds its branch.')])
+                        ->helperText(__('The branch the pull request comes from. For one from a fork on GitHub: pull/<number>/head.')),
                 ])
                 ->action(function (array $data, ReviewRequest $reviews): void {
                     $repository = CurrentTenant::get()->repositories()->whereKey($data['repository_id'])->firstOrFail();
@@ -209,25 +217,25 @@ class ListReviewRuns extends ListRecords
                     try {
                         ReviewRunResource::started(
                             $reviews->start($repository, $data['branch'], strict: true),
-                            "{$repository->slug} · {$data['branch']}. It is in the list as queued until a worker begins it.",
+                            __(':repository · :branch. It is in the list as queued until a worker begins it.', ['repository' => $repository->slug, 'branch' => $data['branch']]),
                         );
                     } catch (Throwable $exception) {
-                        Notification::make()->title('The review could not be started')->body($exception->getMessage())->danger()->send();
+                        Notification::make()->title(__('The review could not be started'))->body($exception->getMessage())->danger()->send();
                     }
                 }),
             Action::make('security')
-                ->label('Security review')
+                ->label(__('Security review'))
                 ->icon(Heroicon::OutlinedShieldCheck)
                 ->color('gray')
                 ->visible(fn (Runners $runners): bool => $runners->containerFor()->available())
-                ->modalDescription('Reviews a whole branch for security problems, as it stands: no pull request, and nothing is posted. The report appears here, under Security. It reads far more than a pull request\'s review, so it takes longer and costs more.')
+                ->modalDescription(__('Reviews a whole branch for security problems, as it stands: no pull request, and nothing is posted. The report appears here, under Security. It reads far more than a pull request\'s review, so it takes longer and costs more.'))
                 ->schema([
                     Select::make('repository_id')
-                        ->label('Repository')
+                        ->label(__('Repository'))
                         ->options(fn (): array => CurrentTenant::get()->repositories()->get()->mapWithKeys(fn (Repository $repository): array => [$repository->getKey() => $repository->fullName()])->all())
                         ->searchable()
                         ->required(),
-                    TextInput::make('branch')->required()->maxLength(255)->regex('/^[\\w.\\/-]+$/')->placeholder('main')->helperText('The branch to review, such as the default branch.'),
+                    TextInput::make('branch')->label(__('Branch'))->required()->maxLength(255)->regex('/^[\\w.\\/-]+$/')->placeholder('main')->helperText(__('The branch to review, such as the default branch.')),
                 ])
                 ->action(function (array $data, Runners $runners): void {
                     $repository = CurrentTenant::get()->repositories()->whereKey($data['repository_id'])->firstOrFail();
@@ -235,16 +243,16 @@ class ListReviewRuns extends ListRecords
                     // Where the repository's reviewers run, or the platform's for one that reviews from the diff.
                     $runners->containerFor($repository->runnerName())->startSecurityReview($repository, $data['branch']);
 
-                    Notification::make()->title('The security review is started')->body("{$repository->slug} · {$data['branch']}. It shows under Security once a worker has cloned the branch.")->success()->send();
+                    Notification::make()->title(__('The security review is started'))->body(__(':repository · :branch. It shows under Security once a worker has cloned the branch.', ['repository' => $repository->slug, 'branch' => $data['branch']]))->success()->send();
                 }),
             Action::make('try')
-                ->label('Try without posting')
+                ->label(__('Try without posting'))
                 ->icon(Heroicon::OutlinedBeaker)
                 ->color('gray')
-                ->modalDescription('Reviews a pull request without posting anything on it, to compare reviewers, models or instructions on the same work. It may be merged already, and its repository need not be set up here. The result appears under Trials.')
+                ->modalDescription(__('Reviews a pull request without posting anything on it, to compare reviewers, models or instructions on the same work. It may be merged already, and its repository need not be set up here. The result appears under Trials.'))
                 ->schema([
                     TextInput::make('url')
-                        ->label('Pull request')
+                        ->label(__('Pull request'))
                         ->url()
                         ->required()
                         ->maxLength(500)
@@ -255,9 +263,9 @@ class ListReviewRuns extends ListRecords
                     try {
                         $repository = $trials->start(CurrentTenant::get(), $data['url'], ReviewRunResource::trialOptions($data));
 
-                        Notification::make()->title('The trial is started')->body("{$repository->fullName()}. It shows under Trials once the reviewer has begun.")->success()->send();
+                        Notification::make()->title(__('The trial is started'))->body(__(':repository. It shows under Trials once the reviewer has begun.', ['repository' => $repository->fullName()]))->success()->send();
                     } catch (ReviewTrialRefused $exception) {
-                        Notification::make()->title('This pull request cannot be tried')->body($exception->getMessage())->danger()->persistent()->send();
+                        Notification::make()->title(__('This pull request cannot be tried'))->body($exception->getMessage())->danger()->persistent()->send();
                     }
                 }),
         ];

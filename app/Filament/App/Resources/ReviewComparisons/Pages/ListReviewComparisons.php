@@ -13,6 +13,6 @@ class ListReviewComparisons extends ListRecords
 
     public function getSubheading(): ?string
     {
-        return 'Start one from a review of a pull request: Compare with, then a row for each setup to try.';
+        return __('Start one from a review of a pull request: Compare with, then a row for each setup to try.');
     }
 }

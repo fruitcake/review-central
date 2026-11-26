@@ -37,7 +37,7 @@ class XaiDriver extends ApiKeyDriver
     protected function keyNotes(): array
     {
         return [
-            'A key can be limited to some endpoints and models: it needs the chat endpoint and the list of models, and the model set under Settings.',
+            __('A key can be limited to some endpoints and models: it needs the chat endpoint and the list of models, and the model set under Settings.'),
         ];
     }
 

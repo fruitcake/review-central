@@ -187,9 +187,11 @@ class ReviewComparison extends Model
 
         $reserved = $column['row']['reserved_at'] ?? null;
 
-        return ! isset($column['row']['build']) && is_string($reserved) && now()->subMinutes(self::RESERVATION_MINUTES)->isAfter($reserved)
-            ? 'It was not started: what was starting it stopped first. Add it again.'
-            : null;
+        if (isset($column['row']['build']) || ! is_string($reserved) || ! now()->subMinutes(self::RESERVATION_MINUTES)->isAfter($reserved)) {
+            return null;
+        }
+
+        return __('It was not started: what was starting it stopped first. Add it again.');
     }
 
     /**

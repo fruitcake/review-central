@@ -24,7 +24,7 @@ class DiffRunner implements ReviewRunner
 
     public function label(): string
     {
-        return 'The diff alone, through the provider\'s API';
+        return __('The diff alone, through the provider\'s API');
     }
 
     public function shortLabel(): string
@@ -34,12 +34,12 @@ class DiffRunner implements ReviewRunner
 
     public function description(): string
     {
-        return 'Sends the pull request\'s diff to the AI provider in one request. No clone and no container: fast and cheap, but it cannot read the code around a change.';
+        return __('Sends the pull request\'s diff to the AI provider in one request. No clone and no container: fast and cheap, but it cannot read the code around a change.');
     }
 
     public function setupHint(): string
     {
-        return 'Set REVIEW_DIFF_ENABLED=true.';
+        return __('Set REVIEW_DIFF_ENABLED=true.');
     }
 
     public function available(): bool

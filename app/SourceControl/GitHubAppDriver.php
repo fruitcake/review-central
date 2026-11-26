@@ -46,23 +46,23 @@ class GitHubAppDriver extends GitHubDriver implements ConnectsWithOAuth, NeedsSe
 
         if (! $app->configured()) {
             return [
-                TextInput::make('workspace')->label('Owner')->required()->rule('regex:/^[\w.-]+$/')
-                    ->helperText('This installation has no GitHub App set up: see GITHUB_APP_* in the configuration.'),
+                TextInput::make('workspace')->label(__('Owner'))->required()->rule('regex:/^[\w.-]+$/')
+                    ->helperText(__('This installation has no GitHub App set up: see GITHUB_APP_* in the configuration.')),
             ];
         }
 
         $link = fn (string $url, string $text): string => '<a href="'.e($url).'" target="_blank" rel="noopener" style="text-decoration: underline; font-weight: 600; color: var(--primary-600)">'.e($text).'</a>';
 
         return [
-            TextInput::make('workspace')->label('Owner')->required()->rule('regex:/^[\w.-]+$/')
-                ->placeholder('your-organisation')
+            TextInput::make('workspace')->label(__('Owner'))->required()->rule('regex:/^[\w.-]+$/')
+                ->placeholder(__('your-organisation'))
                 ->helperText(new HtmlString(
-                    'The organisation or user the app is installed on, as in github.com/&lt;owner&gt;.'
+                    __('The organisation or user the app is installed on, as in github.com/&lt;owner&gt;.')
                     .'<ol style="list-style: decimal; margin: .5rem 0 0 1.25rem; display: grid; gap: .25rem">'
-                    .'<li>'.$link($app->installUrl(), 'Install the app on GitHub').' on that owner, for all repositories or the ones to review. An organisation owner may have to approve it.</li>'
-                    .'<li>Fill in the owner here and save.</li>'
-                    .'<li>Use <strong>Connect</strong> in the list and sign in at GitHub: that checks you can manage the app\'s installation there. Your own token is not kept.</li>'
-                    .'<li>Add the repositories under <strong>Repositories</strong>. No webhook to add: the app brings its own.</li>'
+                    .'<li>'.__(':link on that owner, for all repositories or the ones to review. An organisation owner may have to approve it.', ['link' => $link($app->installUrl(), __('Install the app on GitHub'))]).'</li>'
+                    .'<li>'.__('Fill in the owner here and save.').'</li>'
+                    .'<li>'.__('Use <strong>Connect</strong> in the list and sign in at GitHub: that checks you can manage the app\'s installation there. Your own token is not kept.').'</li>'
+                    .'<li>'.__('Add the repositories under <strong>Repositories</strong>. No webhook to add: the app brings its own.').'</li>'
                     .'</ol>'
                 )),
         ];
@@ -78,24 +78,24 @@ class GitHubAppDriver extends GitHubDriver implements ConnectsWithOAuth, NeedsSe
         $app = app(GitHubApp::class);
 
         return new SetupGuide(
-            title: 'Connect the GitHub App',
+            title: __('Connect the GitHub App'),
             url: $app->configured() ? $app->installUrl() : 'https://github.com/settings/installations',
-            linkLabel: $app->configured() ? 'Install the app on GitHub' : 'Your GitHub App installations',
+            linkLabel: $app->configured() ? __('Install the app on GitHub') : __('Your GitHub App installations'),
             steps: [
-                'Open the link and install the app on the organisation or user whose repositories are reviewed, for all repositories or the ones to review. An organisation owner may have to approve it.',
-                'Fill in that organisation or user as **Owner** here and save.',
-                'Use **Connect** in the list and sign in at GitHub: that checks you own that organisation or account. Your own token is revoked straight after.',
-                'Add the repositories under **Repositories**. No webhook to add: the app brings its own.',
+                __('Open the link and install the app on the organisation or user whose repositories are reviewed, for all repositories or the ones to review. An organisation owner may have to approve it.'),
+                __('Fill in that organisation or user as **Owner** here and save.'),
+                __('Use **Connect** in the list and sign in at GitHub: that checks you own that organisation or account. Your own token is revoked straight after.'),
+                __('Add the repositories under **Repositories**. No webhook to add: the app brings its own.'),
             ],
             permissions: [
-                'Contents, Metadata: Read' => 'clones the repository and finds it by name.',
-                'Pull requests, Issues: Read and write' => 'reads the pull request, comments on it and approves or requests changes, as `<app>[bot]`.',
-                'Commit statuses, Checks: Read and write' => 'the "AI Review" check, with the findings as annotations on their lines.',
-                'Members (organisation): Read' => 'checks that whoever connects the installation owns the organisation.',
+                'Contents, Metadata: Read' => __('clones the repository and finds it by name.'),
+                'Pull requests, Issues: Read and write' => __('reads the pull request, comments on it and approves or requests changes, as `<app>[bot]`.'),
+                'Commit statuses, Checks: Read and write' => __('the "AI Review" check, with the findings as annotations on their lines.'),
+                'Members (organisation): Read' => __('checks that whoever connects the installation owns the organisation.'),
             ],
             notes: [
-                'GitHub shows these permissions when the app is installed; accept them all. No token to paste, and none that expires.',
-                'Only an owner of the organisation, or the user account itself, can connect it: a member with access to some of its repositories cannot.',
+                __('GitHub shows these permissions when the app is installed; accept them all. No token to paste, and none that expires.'),
+                __('Only an owner of the organisation, or the user account itself, can connect it: a member with access to some of its repositories cannot.'),
             ],
         );
     }
@@ -116,7 +116,7 @@ class GitHubAppDriver extends GitHubDriver implements ConnectsWithOAuth, NeedsSe
 
     public function webhookHelp(): string
     {
-        return 'The GitHub App delivers its own webhook, for every organisation it is installed on.';
+        return __('The GitHub App delivers its own webhook, for every organisation it is installed on.');
     }
 
     public function client(Repository $repository): GitHubClient

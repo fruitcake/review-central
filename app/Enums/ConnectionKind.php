@@ -15,9 +15,9 @@ enum ConnectionKind: string
     public function text(): string
     {
         return match ($this) {
-            self::SourceControl => 'Source control',
-            self::Tickets => 'Tickets',
-            self::Llm => 'AI provider',
+            self::SourceControl => __('Source control'),
+            self::Tickets => __('Tickets'),
+            self::Llm => __('AI provider'),
         };
     }
 }

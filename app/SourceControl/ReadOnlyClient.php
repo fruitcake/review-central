@@ -29,10 +29,10 @@ final class ReadOnlyClient implements SourceControl
     public static function field(): Select
     {
         return Select::make(self::SETTING)
-            ->label('Reviews')
-            ->options(['post' => 'Post them on the pull request', self::READ => 'Keep them here, and post nothing'])
-            ->placeholder('Post them on the pull request')
-            ->helperText('Kept here, a review is on its own page only: no comment, status, task or approval on the host, whatever the token may do. A token that may only read is then enough. A question asked on the pull request is answered on the review\'s page.');
+            ->label(__('Reviews'))
+            ->options(['post' => __('Post them on the pull request'), self::READ => __('Keep them here, and post nothing')])
+            ->placeholder(__('Post them on the pull request'))
+            ->helperText(__('Kept here, a review is on its own page only: no comment, status, task or approval on the host, whatever the token may do. A token that may only read is then enough. A question asked on the pull request is answered on the review\'s page.'));
     }
 
     /** The client it reads through. */

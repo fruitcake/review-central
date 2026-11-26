@@ -40,8 +40,8 @@ class ManageRepositories extends ManageRecords
     public function getTabs(): array
     {
         $views = [
-            'all' => ['All', fn (Builder $query): Builder => $query],
-            self::MY_REPOSITORIES => ['Mine', $this->inMyRepositories('id')],
+            'all' => [__('All'), fn (Builder $query): Builder => $query],
+            self::MY_REPOSITORIES => [__('Mine'), $this->inMyRepositories('id')],
         ];
 
         return array_map(fn (array $view): Tab => Tab::make($view[0])

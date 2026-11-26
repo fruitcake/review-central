@@ -30,7 +30,7 @@ class SetupGuideAction
         };
 
         return Action::make($name)
-            ->label('How to get this')
+            ->label(__('How to get this'))
             ->icon(Heroicon::OutlinedQuestionMarkCircle)
             ->color('gray')
             ->link()
@@ -40,6 +40,6 @@ class SetupGuideAction
             ->modalWidth(Width::TwoExtraLarge)
             ->modalContent(fn (Action $action): ?View => ($found = $resolve($action)) === null ? null : view('filament.setup-guide', ['guide' => $found]))
             ->modalSubmitAction(false)
-            ->modalCancelActionLabel('Close');
+            ->modalCancelActionLabel(__('Close'));
     }
 }

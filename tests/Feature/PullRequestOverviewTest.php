@@ -103,7 +103,7 @@ it('keeps a merged or declined pull request under its tab, open again only for n
         ->mountTableAction('details', $all())->assertSuccessful();
 
     expect(view('filament.app.pull-request', PullRequestResource::details($all()))->render())
-        ->toContain('Nobody\'s turn any more.')
+        ->toContain(e('Nobody\'s turn any more.'))
         ->not->toContain('Whose turn');
     $tab('merged')->assertCanNotSeeTableRecords([$all()]);
 

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -18,12 +18,12 @@
 </head>
 <body>
 <main>
-    <h1>No tenant yet</h1>
-    <p>You are signed in as {{ $user->email }}, but this account has not been added to a tenant. Ask an administrator of this installation to add you to one.</p>
-    <p class="muted">Your name, email address and password are under <a href="{{ $profile }}">your profile</a>.</p>
+    <h1>{{ __('No tenant yet') }}</h1>
+    <p>{{ __('You are signed in as :email, but this account has not been added to a tenant. Ask an administrator of this installation to add you to one.', ['email' => $user->email]) }}</p>
+    <p class="muted">{!! __('Your name, email address and password are under <a href=":url">your profile</a>.', ['url' => e($profile)]) !!}</p>
     <form method="post" action="{{ $logout }}">
         @csrf
-        <button type="submit">Sign out</button>
+        <button type="submit">{{ __('Sign out') }}</button>
     </form>
 </main>
 </body>

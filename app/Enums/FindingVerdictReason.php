@@ -21,13 +21,13 @@ enum FindingVerdictReason: string
     public function text(): string
     {
         return match ($this) {
-            self::Nitpick => 'Nitpick',
-            self::OutOfScope => 'Out of scope',
-            self::Intended => 'Intended',
-            self::HandledElsewhere => 'Handled elsewhere',
-            self::Misread => 'Misread the code',
-            self::Duplicate => 'Duplicate',
-            self::Other => 'Other',
+            self::Nitpick => __('Nitpick'),
+            self::OutOfScope => __('Out of scope'),
+            self::Intended => __('Intended'),
+            self::HandledElsewhere => __('Handled elsewhere'),
+            self::Misread => __('Misread the code'),
+            self::Duplicate => __('Duplicate'),
+            self::Other => __('Other'),
         };
     }
 
@@ -37,13 +37,13 @@ enum FindingVerdictReason: string
     public function description(): string
     {
         return match ($this) {
-            self::Nitpick => 'true, but too small to be worth a change',
-            self::OutOfScope => 'true, but not for this change',
-            self::Intended => 'the behaviour or trade-off is deliberate',
-            self::HandledElsewhere => 'a guard, caller or test the reviewer did not see takes care of it',
-            self::Misread => 'the reviewer misread the code or what the change is for',
-            self::Duplicate => 'the same as another finding',
-            self::Other => 'none of these; say why in the note',
+            self::Nitpick => __('true, but too small to be worth a change'),
+            self::OutOfScope => __('true, but not for this change'),
+            self::Intended => __('the behaviour or trade-off is deliberate'),
+            self::HandledElsewhere => __('a guard, caller or test the reviewer did not see takes care of it'),
+            self::Misread => __('the reviewer misread the code or what the change is for'),
+            self::Duplicate => __('the same as another finding'),
+            self::Other => __('none of these; say why in the note'),
         };
     }
 }

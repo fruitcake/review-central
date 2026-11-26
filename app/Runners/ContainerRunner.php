@@ -37,7 +37,7 @@ class ContainerRunner implements ReviewRunner
 
     public function label(): string
     {
-        return 'Docker on this server';
+        return __('Docker on this server');
     }
 
     public function shortLabel(): string
@@ -47,12 +47,12 @@ class ContainerRunner implements ReviewRunner
 
     public function description(): string
     {
-        return 'The reviewer reads the repository in a sandboxed container on this installation\'s own worker. Needs nothing in the repository but the connection\'s webhook.';
+        return __('The reviewer reads the repository in a sandboxed container on this installation\'s own worker. Needs nothing in the repository but the connection\'s webhook.');
     }
 
     public function setupHint(): string
     {
-        return 'Once the worker has Docker, gVisor and the reviewer\'s image, set REVIEW_DOCKER_ENABLED=true. Admin → Setup says what is missing.';
+        return __('Once the worker has Docker, gVisor and the reviewer\'s image, set REVIEW_DOCKER_ENABLED=true. Admin → Setup says what is missing.');
     }
 
     public function available(): bool

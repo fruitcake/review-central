@@ -54,7 +54,22 @@ class ReviewClassification extends Model
      */
     public function text(): string
     {
-        return implode(' · ', array_filter([$this->complexity->text(), $this->kind, implode(', ', $this->flags) ?: null]));
+        $words = [
+            'feature' => __('feature'),
+            'fix' => __('fix'),
+            'refactor' => __('refactor'),
+            'dependencies' => __('dependencies'),
+            'configuration' => __('configuration'),
+            'tests' => __('tests'),
+            'content' => __('content'),
+            'database' => __('database'),
+            'breaking' => __('breaking'),
+            'security' => __('security'),
+            'irreversible' => __('irreversible'),
+        ];
+        $flags = array_map(fn (string $flag): string => $words[$flag] ?? $flag, $this->flags);
+
+        return implode(' · ', array_filter([$this->complexity->text(), $this->kind === null ? null : ($words[$this->kind] ?? $this->kind), implode(', ', $flags) ?: null], is_string(...)));
     }
 
     /**

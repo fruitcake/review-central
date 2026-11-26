@@ -23,6 +23,16 @@ final class TenantRole
     public const LABELS = [self::ADMIN => 'Admin', self::MEMBER => 'Member'];
 
     /**
+     * The roles by name, in the reader's language.
+     *
+     * @return array<string, string>
+     */
+    public static function labels(): array
+    {
+        return [self::ADMIN => __('Admin'), self::MEMBER => __('Member')];
+    }
+
+    /**
      * Whether the user is an admin of the tenant: the signed-in one, of the open
      * one, when left out.
      */

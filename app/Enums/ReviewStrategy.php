@@ -21,9 +21,9 @@ enum ReviewStrategy: string
     public function text(): string
     {
         return match ($this) {
-            self::Off => 'Off',
-            self::Record => 'Classify only, and show what it would pick',
-            self::Apply => 'Classify, and run at what it picks',
+            self::Off => __('Off'),
+            self::Record => __('Classify only, and show what it would pick'),
+            self::Apply => __('Classify, and run at what it picks'),
         };
     }
 

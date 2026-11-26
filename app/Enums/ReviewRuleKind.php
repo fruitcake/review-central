@@ -18,16 +18,16 @@ enum ReviewRuleKind: string
     public function text(): string
     {
         return match ($this) {
-            self::Check => 'Check',
-            self::Convention => 'Not a defect here',
+            self::Check => __('Check'),
+            self::Convention => __('Not a defect here'),
         };
     }
 
     public function description(): string
     {
         return match ($this) {
-            self::Check => 'The reviewer reports a change that breaks it.',
-            self::Convention => 'The reviewer does not report it: it was judged a false positive, or it is how this team works.',
+            self::Check => __('The reviewer reports a change that breaks it.'),
+            self::Convention => __('The reviewer does not report it: it was judged a false positive, or it is how this team works.'),
         };
     }
 

@@ -44,10 +44,6 @@ class TicketResource extends Resource
 
     protected static ?string $model = TicketSource::class;
 
-    protected static ?string $modelLabel = 'ticket source';
-
-    protected static ?string $navigationLabel = 'Tickets';
-
     protected static ?string $slug = 'tickets';
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTicket;
@@ -56,44 +52,55 @@ class TicketResource extends Resource
 
     protected static ?int $navigationSort = 25;
 
+    public static function getModelLabel(): string
+    {
+        return __('ticket source');
+    }
+
     public static function getPluralModelLabel(): string
     {
-        return 'tickets';
+        return __('tickets');
+    }
+
+    public static function getNavigationLabel(): string
+    {
+        return __('Tickets');
     }
 
     public static function form(Schema $schema): Schema
     {
         return $schema
             ->components([
-                Section::make('Service')
+                Section::make(__('Service'))
                     ->statePath('connection')
                     ->schema(ConnectionResource::serviceFields(ConnectionKind::Tickets)),
-                Section::make('Which references')
-                    ->description('Which ticket a pull request title names, and so which ticket the review reads.')
+                Section::make(__('Which references'))
+                    ->description(__('Which ticket a pull request title names, and so which ticket the review reads.'))
                     ->schema([
                         Select::make('style')
-                            ->label('References look like')
+                            ->label(__('References look like'))
                             ->options(collect(TicketStyle::cases())->mapWithKeys(fn (TicketStyle $style): array => [$style->value => $style->text()]))
                             ->default(TicketStyle::Key->value)
                             ->required()
                             ->live(),
                         TagsInput::make('prefixes')
+                            ->label(__('Prefixes'))
                             ->placeholder('PROJ')
                             ->visible(fn (Get $get): bool => $get('style') === TicketStyle::Key->value || $get('style') === TicketStyle::Key)
-                            ->helperText('The prefixes this service answers, such as PROJ for PROJ-123. Empty takes any prefix.'),
+                            ->helperText(__('The prefixes this service answers, such as PROJ for PROJ-123. Empty takes any prefix.')),
                         TextInput::make('reference_prefix')
-                            ->label('Look up as')
+                            ->label(__('Look up as'))
                             ->placeholder('PROJ-')
                             ->maxLength(32)
                             ->visible(fn (Get $get): bool => $get('style') === TicketStyle::Number->value || $get('style') === TicketStyle::Number)
-                            ->helperText('Put in front of the number before it is looked up: with PROJ-, a title\'s #1234 is read as PROJ-1234. Empty for a tracker that numbers its tickets, like GitHub, and for Asana tasks whose name starts with the number, like "#1234 - Export the orders".'),
+                            ->helperText(__('Put in front of the number before it is looked up: with PROJ-, a title\'s #1234 is read as PROJ-1234. Empty for a tracker that numbers its tickets, like GitHub, and for Asana tasks whose name starts with the number, like "#1234 - Export the orders".')),
                         Select::make('repository_id')
-                            ->label('Only for')
+                            ->label(__('Only for'))
                             ->options(fn (): array => CurrentTenant::get()->repositories()->get()->mapWithKeys(fn ($repository): array => [$repository->id => $repository->fullName()])->all())
-                            ->placeholder('Every repository')
-                            ->helperText('One for a single repository is tried before the ones for every repository.'),
-                        TextInput::make('position')->label('Order')->integer()->default(0)->required()
-                            ->helperText('Tried from low to high; the first whose kind of reference the title carries is used.'),
+                            ->placeholder(__('Every repository'))
+                            ->helperText(__('One for a single repository is tried before the ones for every repository.')),
+                        TextInput::make('position')->label(__('Order'))->integer()->default(0)->required()
+                            ->helperText(__('Tried from low to high; the first whose kind of reference the title carries is used.')),
                     ]),
             ])
             ->columns(1);
@@ -105,12 +112,12 @@ class TicketResource extends Resource
             ->defaultSort('position')
             ->reorderable('position')
             ->columns([
-                TextColumn::make('name')->searchable(),
-                TextColumn::make('integration.driver')->label('Service')
+                TextColumn::make('name')->label(__('Name'))->searchable(),
+                TextColumn::make('integration.driver')->label(__('Service'))
                     ->formatStateUsing(fn (TicketSource $record): string => rescue(fn (): string => $record->integration->driver()->label(), (string) $record->integration->driver, false)),
-                TextColumn::make('style')->label('References')->badge()->formatStateUsing(fn (TicketStyle $state): string => $state->text()),
-                TextColumn::make('prefixes')->badge()->placeholder('Any'),
-                TextColumn::make('repository.slug')->label('Only for')->placeholder('Every repository'),
+                TextColumn::make('style')->label(__('References'))->badge()->formatStateUsing(fn (TicketStyle $state): string => $state->text()),
+                TextColumn::make('prefixes')->label(__('Prefixes'))->badge()->placeholder(__('Any')),
+                TextColumn::make('repository.slug')->label(__('Only for'))->placeholder(__('Every repository')),
             ])
             ->recordActions([
                 ...ConnectionResource::serviceActions(fn (Model $record): Connection => self::connectionOf($record)),

@@ -30,25 +30,25 @@ class GitHubIssuesDriver implements ExplainsSetup, TicketDriver
 
     public function label(): string
     {
-        return 'GitHub issues';
+        return __('GitHub issues');
     }
 
     public function credentialFields(): array
     {
         return [
-            Secret::make('token')->label('Access token')
-                ->helperText('A fine-grained token with read access to issues.'),
+            Secret::make('token')->label(__('Access token'))
+                ->helperText(__('A fine-grained token with read access to issues.')),
         ];
     }
 
     public function settingFields(): array
     {
         return [
-            TextInput::make('repository')->label('Repository')->placeholder('owner/name')
+            TextInput::make('repository')->label(__('Repository'))->placeholder(__('owner/name'))
                 ->rule('regex:/^[\w.-]+\/[\w.-]+$/')
-                ->helperText('Where the issues are. Empty reads them from the repository under review.'),
-            TextInput::make('api_url')->label('API URL')->placeholder('https://api.github.com')->url()->rule(new PublicUrl)
-                ->helperText('Only for GitHub Enterprise Server.'),
+                ->helperText(__('Where the issues are. Empty reads them from the repository under review.')),
+            TextInput::make('api_url')->label(__('API URL'))->placeholder('https://api.github.com')->url()->rule(new PublicUrl)
+                ->helperText(__('Only for GitHub Enterprise Server.')),
         ];
     }
 
@@ -58,22 +58,22 @@ class GitHubIssuesDriver implements ExplainsSetup, TicketDriver
     public function setupGuide(): SetupGuide
     {
         return new SetupGuide(
-            title: 'A GitHub token for issues',
+            title: __('A GitHub token for issues'),
             url: 'https://github.com/settings/personal-access-tokens/new',
-            linkLabel: 'New fine-grained personal access token on GitHub',
+            linkLabel: __('New fine-grained personal access token on GitHub'),
             steps: [
-                'Open the link, name the token and give it an expiry date. As **Resource owner**, pick the organisation (or the user) the issues are in.',
-                'Under **Repository access**, pick the repositories with the issues, or **All repositories**.',
-                'Under **Repository permissions**, set **Issues** to **Read-only**.',
-                'Generate the token, copy it and paste it here.',
+                __('Open the link, name the token and give it an expiry date. As **Resource owner**, pick the organisation (or the user) the issues are in.'),
+                __('Under **Repository access**, pick the repositories with the issues, or **All repositories**.'),
+                __('Under **Repository permissions**, set **Issues** to **Read-only**.'),
+                __('Generate the token, copy it and paste it here.'),
             ],
             permissions: [
-                'Issues: Read' => 'reads the issue a pull request names, and its comments.',
-                'Metadata: Read' => 'GitHub adds it to every token.',
+                'Issues: Read' => __('reads the issue a pull request names, and its comments.'),
+                'Metadata: Read' => __('GitHub adds it to every token.'),
             ],
             notes: [
-                'For GitHub Enterprise Server, make the token on your own server, under your **Settings → Developer settings**, and fill in its API URL under Settings.',
-                'A token expires: replace it here before then.',
+                __('For GitHub Enterprise Server, make the token on your own server, under your **Settings → Developer settings**, and fill in its API URL under Settings.'),
+                __('A token expires: replace it here before then.'),
             ],
         );
     }

@@ -2,6 +2,10 @@
 
 use App\Filament\RunPresenter;
 use App\Models\ReviewRun;
+use Tests\TestCase;
+
+// The labels go through the translator.
+uses(TestCase::class);
 
 it('says how a run ended', function (string $status, ?string $result, array $expected) {
     expect(RunPresenter::outcome(new ReviewRun(['status' => $status, 'result' => $result])))->toBe($expected);

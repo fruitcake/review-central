@@ -40,6 +40,7 @@ class IntegrationAppForm
     {
         return [
             Select::make('type')
+                ->label(__('Type'))
                 ->options($types)
                 ->required()
                 ->live()
@@ -51,15 +52,16 @@ class IntegrationAppForm
                 })
                 ->hintAction(SetupGuideAction::make(fn (Get $get, SetupGuides $guides) => isset(self::GUIDES[$get('type')]) ? $guides->named(self::GUIDES[$get('type')]) : null, 'appGuide')),
             TextInput::make('name')
+                ->label(__('Name'))
                 ->required()
                 ->maxLength(255)
-                ->helperText('What a person picks it by when connecting, where there is more than one.'),
-            Section::make('Credentials')
-                ->description('Stored encrypted, and never shown again. Left empty on a change, a secret keeps what it was.')
+                ->helperText(__('What a person picks it by when connecting, where there is more than one.')),
+            Section::make(__('Credentials'))
+                ->description(__('Stored encrypted, and never shown again. Left empty on a change, a secret keeps what it was.'))
                 ->statePath('credentials')
                 ->columns(2)
                 ->visible(fn (Get $get): bool => filled($get('type')))
-                ->schema(fn (Get $get, ?IntegrationApp $record): array => collect(Integrations::TYPES[$get('type')]['fields'] ?? [])
+                ->schema(fn (Get $get, ?IntegrationApp $record): array => collect(Integrations::types()[$get('type')]['fields'] ?? [])
                     ->map(fn (array $field, string $key): Field => self::field($key, $field, $record))
                     ->values()
                     ->all()),
@@ -80,18 +82,22 @@ class IntegrationAppForm
                 ->required(! $saved)
                 ->rule(fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
                     if (filled($value) && ! str_contains((string) $value, '-----BEGIN')) {
-                        $fail('The contents of the .pem file GitHub made, from -----BEGIN to the end.');
+                        $fail(__('The contents of the .pem file GitHub made, from -----BEGIN to the end.'));
                     }
                 })
-                ->placeholder($saved ? 'Saved; paste to replace' : '-----BEGIN RSA PRIVATE KEY-----')
+                ->placeholder($saved ? __('Saved; paste to replace') : '-----BEGIN RSA PRIVATE KEY-----')
                 ->columnSpanFull();
         }
 
         $input = TextInput::make($key)->label($field['label'])->maxLength(1000)->required(! $field['secret'] || ! $saved);
 
-        return $field['secret']
-            ? $input->password()->revealable()->autocomplete('off')->placeholder($saved ? 'Saved; type to replace' : null)
-            : $input;
+        if (! $field['secret']) {
+            return $input;
+        }
+
+        $input->password()->revealable()->autocomplete('off');
+
+        return $saved ? $input->placeholder(__('Saved; type to replace')) : $input;
     }
 
     /**

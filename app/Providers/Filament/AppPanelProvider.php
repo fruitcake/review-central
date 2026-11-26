@@ -47,7 +47,7 @@ class AppPanelProvider extends PanelProvider
             ->userMenuItems([
                 'profile' => fn (Action $action): Action => $action->url(EditProfile::urlForCurrentUser()),
                 Action::make('admin')
-                    ->label('Platform admin')
+                    ->label(__('Platform admin'))
                     ->icon(Heroicon::OutlinedCog6Tooth)
                     ->url(fn (): string => Filament::getPanel('admin')->getUrl())
                     ->visible(fn (): bool => (bool) auth()->user()?->is_admin),

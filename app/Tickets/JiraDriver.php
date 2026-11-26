@@ -37,23 +37,23 @@ class JiraDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
     public function credentialFields(): array
     {
         return [
-            Secret::make('api_token')->label('API token')
+            Secret::make('api_token')->label(__('API token'))
                 // With this installation registered at Atlassian, signing in there does instead.
                 ->required(fn (string $operation): bool => $operation === 'create' && ! Integrations::offered($this))
                 ->helperText(fn (): string => Integrations::offered($this)
-                    ? 'Created at id.atlassian.com, under Security, API tokens. Or leave it empty, save, and use "Connect" in the list to sign in at Atlassian instead.'
-                    : 'Created at id.atlassian.com, under Security, API tokens. '.Integrations::unavailable($this, 'Atlassian')),
+                    ? __('Created at id.atlassian.com, under Security, API tokens. Or leave it empty, save, and use "Connect" in the list to sign in at Atlassian instead.')
+                    : __('Created at id.atlassian.com, under Security, API tokens.').' '.Integrations::unavailable($this, 'Atlassian')),
         ];
     }
 
     public function settingFields(): array
     {
         return [
-            TextInput::make('site')->label('Site')->placeholder('example.atlassian.net')->required()
+            TextInput::make('site')->label(__('Site'))->placeholder('example.atlassian.net')->required()
                 ->rule('regex:/^(https?:\/\/)?[a-z0-9-]+\.atlassian\.net\/?$/i'),
-            TextInput::make('email')->label('Account email')->email()
+            TextInput::make('email')->label(__('Account email'))->email()
                 ->required(fn (): bool => ! Integrations::offered($this))
-                ->helperText('The account the API token belongs to. Not needed when you sign in at Atlassian instead.'),
+                ->helperText(__('The account the API token belongs to. Not needed when you sign in at Atlassian instead.')),
         ];
     }
 
@@ -65,22 +65,22 @@ class JiraDriver implements ConnectsWithOAuth, ExplainsSetup, TicketDriver
     public function setupGuide(): SetupGuide
     {
         return new SetupGuide(
-            title: 'An Atlassian API token for Jira',
+            title: __('An Atlassian API token for Jira'),
             url: 'https://id.atlassian.com/manage-profile/security/api-tokens',
-            linkLabel: 'API tokens of your Atlassian account',
+            linkLabel: __('API tokens of your Atlassian account'),
             steps: [
-                'Sign in at Atlassian as the account the review reads Jira as: one that can browse the projects the pull requests name.',
-                'Choose **Create API token** (not the one with scopes), name it, pick an expiry date and create it.',
-                'Copy the token and paste it here.',
-                'Under Settings, fill in the site, such as `example.atlassian.net`, and the account\'s email.',
+                __('Sign in at Atlassian as the account the review reads Jira as: one that can browse the projects the pull requests name.'),
+                __('Choose **Create API token** (not the one with scopes), name it, pick an expiry date and create it.'),
+                __('Copy the token and paste it here.'),
+                __('Under Settings, fill in the site, such as `example.atlassian.net`, and the account\'s email.'),
             ],
             permissions: [
-                'Browse projects' => 'the Jira permission the account needs on each project, to read an issue, its subtasks and its comments. The token can do what its account can; nothing is written.',
+                'Browse projects' => __('the Jira permission the account needs on each project, to read an issue, its subtasks and its comments. The token can do what its account can; nothing is written.'),
             ],
             notes: [
-                'A token with scopes does not work here: Atlassian takes one only through api.atlassian.com, and this connection calls your site directly.',
-                'A token expires, after a year at most: replace it here before then. **Test** in the list says whether it still works.',
-                ...(Integrations::offered($this) ? ['Or leave the token and email empty, save, and use **Connect** in the list to sign in at Atlassian instead.'] : []),
+                __('A token with scopes does not work here: Atlassian takes one only through api.atlassian.com, and this connection calls your site directly.'),
+                __('A token expires, after a year at most: replace it here before then. **Test** in the list says whether it still works.'),
+                ...(Integrations::offered($this) ? [__('Or leave the token and email empty, save, and use **Connect** in the list to sign in at Atlassian instead.')] : []),
             ],
         );
     }

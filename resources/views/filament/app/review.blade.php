@@ -21,10 +21,11 @@
     $tokens = array_sum($usage);
     // What the instructions held, rather than their version's hash: the titles of their files.
     $instructions = ($version = $run->instructionsVersion) === null ? null : [
-        'files' => (fn (array $titles): string => count($titles) <= 3 ? implode(', ', $titles) : implode(', ', array_slice($titles, 0, 3)).' and '.(count($titles) - 3).' more')(array_values(array_filter(array_map(fn (array $file): string => (string) ($file['title'] ?: $file['file']), $version->files ?? [])))),
-        'since' => $version->created_at === null ? null : \App\Filament\LocalTime::of($version->created_at)->format('j M Y'),
+        'files' => (fn (array $titles): string => count($titles) <= 3 ? implode(', ', $titles) : __(':files and :count more', ['files' => implode(', ', array_slice($titles, 0, 3)), 'count' => count($titles) - 3]))(array_values(array_filter(array_map(fn (array $file): string => (string) ($file['title'] ?: $file['file']), $version->files ?? [])))),
+        'since' => $version->created_at === null ? null : \App\Filament\LocalTime::of($version->created_at)->translatedFormat('j M Y'),
     ];
-    $statuses = ['new' => 'New', 'open' => 'Open', 'fixed' => 'Fixed', 'acknowledged' => 'Acknowledged', 'false_positive' => 'Not a problem', 'unreported' => 'No longer reported'];
+    $statuses = ['new' => __('New'), 'open' => __('Still open'), 'fixed' => __('Fixed'), 'acknowledged' => __('Acknowledged'), 'false_positive' => __('Not a problem'), 'unreported' => __('No longer reported')];
+    $severities = ['high' => __('High'), 'medium' => __('Medium'), 'low' => __('Low')];
     // Only a web address becomes a link: a ticket's address comes from whatever its tracker answered.
     $link = fn (?string $url, string $label) => $url === null || preg_match('~^https?://~i', $url) !== 1
         ? e($label)
@@ -37,8 +38,8 @@
             <span class="rc-chip rc-chip-{{ $outcome['tone'] }}">{{ $outcome['label'] }}</span>
             @if ($siblings->count() > 1)
                 <span class="rc-muted">
-                    Run {{ $position + 1 }} of {{ $siblings->count() }}
-                    @if (! $newest->is($run)) · the newest run: {{ Str::lower(RunPresenter::outcome($newest)['label']) }} @endif
+                    {{ __('Run :position of :total', ['position' => $position + 1, 'total' => $siblings->count()]) }}
+                    @if (! $newest->is($run)) · {{ __('the newest run: :outcome', ['outcome' => Str::lower(RunPresenter::outcome($newest)['label'])]) }} @endif
                 </span>
             @endif
             <span class="rc-mono">{{ $run->workspace }}/{{ $run->slug }}</span>
@@ -47,9 +48,9 @@
             @endif
             <span>{{ $run->branch }}@if (filled($pullRequest['destination_branch'] ?? null)) → {{ $pullRequest['destination_branch'] }}@endif</span>
             <span>
-                Ticket:
+                {{ __('Ticket:') }}
                 @if ($ticket === null)
-                    <span class="rc-muted">None named in the title</span>
+                    <span class="rc-muted">{{ __('None named in the title') }}</span>
                 @else
                     {!! $link($ticket['url'] ?? null, (string) ($ticket['reference'] ?? '')) !!}
                     @if (filled($ticket['error'] ?? null)) <span class="rc-tone-danger">{{ $ticket['error'] }}</span> @endif
@@ -61,8 +62,8 @@
             {{-- Closed: what the review read of the ticket, for whoever wants to judge the change by it. --}}
             <details class="rc-card rc-pad rc-collapse">
                 <summary>
-                    <span>Ticket {{ $ticket['reference'] }}</span>
-                    <span class="rc-muted">as the review read it{{ filled($ticket['source'] ?? null) ? ', from '.$ticket['source'] : '' }}</span>
+                    <span>{{ __('Ticket :reference', ['reference' => $ticket['reference']]) }}</span>
+                    <span class="rc-muted">{{ filled($ticket['source'] ?? null) ? __('as the review read it, from :source', ['source' => $ticket['source']]) : __('as the review read it') }}</span>
                 </summary>
                 {{-- Someone wrote it in the tracker: its markdown, without HTML of its own or links that are not web addresses. --}}
                 <div class="rc-prose rc-ticket-text">{!! Str::markdown(Str::limit($ticket['markdown'], 6000), ['html_input' => 'strip', 'allow_unsafe_links' => false]) !!}</div>
@@ -71,19 +72,20 @@
 
         @if ($siblings->count() > 1)
             <section class="rc-card rc-pad" aria-labelledby="rc-runs">
-                <h2 id="rc-runs">Runs on this pull request</h2>
+                <h2 id="rc-runs">{{ __('Runs on this pull request') }}</h2>
                 <div class="rc-timeline">
                     @foreach ($siblings as $index => $sibling)
                         @php($result = RunPresenter::outcome($sibling))
                         <a href="{{ ReviewRunResource::getUrl('view', ['record' => $sibling]) }}" @class(['rc-timeline-run', 'rc-current' => $sibling->is($run)]) @if ($sibling->is($run)) aria-current="true" @endif>
-                            <span class="rc-timeline-top"><strong>Run {{ $index + 1 }} · {{ \App\Filament\LocalTime::of($sibling->started_at)->format('j M H:i') }}</strong><span class="rc-mono">{{ substr($sibling->commit, 0, 7) }}</span></span>
+                            <span class="rc-timeline-top"><strong>{{ __('Run :number', ['number' => $index + 1]) }} · {{ \App\Filament\LocalTime::of($sibling->started_at)->translatedFormat('j M H:i') }}</strong><span class="rc-mono">{{ substr($sibling->commit, 0, 7) }}</span></span>
                             <span class="rc-chip rc-chip-{{ $result['tone'] }}">{{ $result['label'] }}</span>
                             <span class="rc-muted">
                                 @if (RunPresenter::live($sibling))
-                                    @include('filament.app.partials.elapsed', ['since' => $sibling->started_at]) so far
+                                    {{-- The counter is our own markup, with only numbers in it. --}}
+                                    {!! __(':time so far', ['time' => view('filament.app.partials.elapsed', ['since' => $sibling->started_at])->render()]) !!}
                                 @else
                                 {{ collect([
-                                    $sibling->findings === null ? null : ($sibling->openFindings() === 0 ? 'No open findings' : $sibling->openFindings().' open'),
+                                    $sibling->findings === null ? null : ($sibling->openFindings() === 0 ? __('No open findings') : __(':count open', ['count' => $sibling->openFindings()])),
                                     RunPresenter::duration($sibling->duration_seconds),
                                     $sibling->cost === null ? null : Currency::show($sibling->cost),
                                 ])->filter()->implode(' · ') ?: '—' }}
@@ -99,8 +101,8 @@
             <div class="rc-grow-2 rc-column">
                 @if (filled($run->manual_review))
                     <section class="rc-card rc-pad" aria-labelledby="rc-manual">
-                        <h2 id="rc-manual">For a person to check</h2>
-                        <span class="rc-muted">{{ $run->needsManualReview() ? 'The review found nothing that holds the merge, and has not approved the pull request.' : 'Besides the findings below.' }}</span>
+                        <h2 id="rc-manual">{{ __('For a person to check') }}</h2>
+                        <span class="rc-muted">{{ $run->needsManualReview() ? __('The review found nothing that holds the merge, and has not approved the pull request.') : __('Besides the findings below.') }}</span>
                         <div class="rc-prose">
                             <ul>
                                 @foreach ($run->manual_review as $point)
@@ -112,13 +114,13 @@
                 @endif
 
                 <section class="rc-card rc-pad" aria-labelledby="rc-summary">
-                    <h2 id="rc-summary">Summary</h2>
+                    <h2 id="rc-summary">{{ __('Summary') }}</h2>
                     @if ($classification !== null)
                         {{-- How the change was judged before the review, which decided how it was reviewed. --}}
                         <p class="rc-classified">
                             <span class="rc-chip rc-chip-neutral">{{ $classification->text() }}</span>
                             @if ($classification->reason !== null) {{ $classification->reason }} @endif
-                            <span class="rc-muted">{{ $classification->files_count }} {{ $classification->files_count === 1 ? 'file' : 'files' }}, +{{ $classification->lines_added }} −{{ $classification->lines_removed }}{{ $classification->cost === null ? '' : ' · classified for about '.Currency::show($classification->cost, null, 4) }}</span>
+                            <span class="rc-muted">{{ $classification->files_count === 1 ? __(':count file', ['count' => $classification->files_count]) : __(':count files', ['count' => $classification->files_count]) }}, +{{ $classification->lines_added }} −{{ $classification->lines_removed }}{{ $classification->cost === null ? '' : ' · '.__('classified for about :cost', ['cost' => Currency::show($classification->cost, null, 4)]) }}</span>
                         </p>
                     @endif
                     @if (filled($run->summary))
@@ -141,8 +143,8 @@
 
                 <section class="rc-card rc-pad" aria-labelledby="rc-findings">
                     <div class="rc-card-head">
-                        <h2 id="rc-findings">Findings</h2>
-                        <span class="rc-muted">Your answers show how often the reviewer is right, per category</span>
+                        <h2 id="rc-findings">{{ __('Findings') }}</h2>
+                        <span class="rc-muted">{{ __('Your answers show how often the reviewer is right, per category') }}</span>
                     </div>
                     @forelse ($findings as $finding)
                         @php($severity = strtolower((string) ($finding['severity'] ?? 'low')))
@@ -150,16 +152,16 @@
                         <article class="rc-finding">
                             <div class="rc-finding-tags">
                                 <span class="rc-mono rc-finding-id">{{ $finding['id'] ?? '' }}</span>
-                                <span class="rc-chip rc-chip-{{ in_array($severity, ['high', 'medium', 'low'], true) ? $severity : 'low' }}">{{ ucfirst($severity) }}</span>
+                                <span class="rc-chip rc-chip-{{ in_array($severity, ['high', 'medium', 'low'], true) ? $severity : 'low' }}">{{ $severities[$severity] ?? ucfirst($severity) }}</span>
                                 @if (filled($finding['category'] ?? null)) <span class="rc-tag">{{ ucfirst((string) $finding['category']) }}</span> @endif
                                 <span class="rc-chip rc-chip-{{ $status === 'fixed' ? 'approved' : 'neutral' }}">{{ $statuses[$status] ?? ucfirst($status) }}</span>
-                                @if ($finding['blocks']) <span class="rc-chip rc-chip-changes">Holds the merge</span> @endif
+                                @if ($finding['blocks']) <span class="rc-chip rc-chip-changes">{{ __('Holds the merge') }}</span> @endif
                             </div>
                             <h3>{{ $finding['title'] ?? '' }}</h3>
                             @if (filled($finding['path'] ?? null))
                                 @php($at = $fileUrl((string) $finding['path'], $finding['line'] ?? null))
                                 @if ($at !== null)
-                                    <a class="rc-mono rc-muted rc-file-link" href="{{ $at }}" target="_blank" rel="noopener" title="As it was at {{ Str::limit((string) $run->commit, 8, '') }}">{{ $finding['path'] }}@if (filled($finding['line'] ?? null)):{{ $finding['line'] }}@endif</a>
+                                    <a class="rc-mono rc-muted rc-file-link" href="{{ $at }}" target="_blank" rel="noopener" title="{{ __('As it was at :commit', ['commit' => Str::limit((string) $run->commit, 8, '')]) }}">{{ $finding['path'] }}@if (filled($finding['line'] ?? null)):{{ $finding['line'] }}@endif</a>
                                 @else
                                     <span class="rc-mono rc-muted">{{ $finding['path'] }}@if (filled($finding['line'] ?? null)):{{ $finding['line'] }}@endif</span>
                                 @endif
@@ -174,15 +176,15 @@
                                 <span class="rc-muted">{{ $explanation }}</span>
                             @endforeach
                             <div class="rc-verdicts">
-                                <span class="rc-muted">Was this right?</span>
+                                <span class="rc-muted">{{ __('Was this right?') }}</span>
                                 @foreach (\App\Enums\FindingVerdictKind::cases() as $kind)
                                     @php($given = ($verdicts[(string) ($finding['id'] ?? '')] ?? null) === $kind)
-                                    <button type="button" wire:click="judge(@js((string) ($finding['id'] ?? '')), '{{ $kind->value }}')" aria-pressed="{{ $given ? 'true' : 'false' }}" @class(['rc-verdict', "rc-verdict-{$kind->value}", 'rc-on' => $given])>{{ $kind === \App\Enums\FindingVerdictKind::Valid && $status === 'fixed' ? 'Was valid' : $kind->text() }}</button>
+                                    <button type="button" wire:click="judge(@js((string) ($finding['id'] ?? '')), '{{ $kind->value }}')" aria-pressed="{{ $given ? 'true' : 'false' }}" @class(['rc-verdict', "rc-verdict-{$kind->value}", 'rc-on' => $given])>{{ $kind === \App\Enums\FindingVerdictKind::Valid && $status === 'fixed' ? __('Was valid') : $kind->text() }}</button>
                                 @endforeach
                                 @php($mine = $verdicts[(string) ($finding['id'] ?? '')] ?? null)
                                 @if ($mine !== null && ! $mine->accepts())
-                                    <select aria-label="Why" class="rc-reason" wire:change="explain(@js((string) ($finding['id'] ?? '')), $event.target.value)">
-                                        <option value="">Why?</option>
+                                    <select aria-label="{{ __('Why') }}" class="rc-reason" wire:change="explain(@js((string) ($finding['id'] ?? '')), $event.target.value)">
+                                        <option value="">{{ __('Why?') }}</option>
                                         @foreach (\App\Enums\FindingVerdictReason::cases() as $reason)
                                             <option value="{{ $reason->value }}" title="{{ $reason->description() }}" @selected(($reasons[(string) ($finding['id'] ?? '')] ?? null) === $reason)>{{ $reason->text() }}</option>
                                         @endforeach
@@ -194,7 +196,7 @@
                             </div>
                         </article>
                     @empty
-                        <span class="rc-muted">{{ $run->findings === null ? 'No findings reported yet.' : 'No findings.' }}</span>
+                        <span class="rc-muted">{{ $run->findings === null ? __('No findings reported yet.') : __('No findings.') }}</span>
                     @endforelse
                 </section>
 
@@ -205,15 +207,15 @@
                 @if ($run->pull_request_id !== null)
                     <section class="rc-card rc-pad" aria-labelledby="rc-questions">
                         <div class="rc-card-head">
-                            <h2 id="rc-questions">Questions</h2>
-                            <span class="rc-muted">asked here, or on the pull request with @review</span>
+                            <h2 id="rc-questions">{{ __('Questions') }}</h2>
+                            <span class="rc-muted">{{ __('asked here, or on the pull request with @review') }}</span>
                         </div>
                         {{-- Answered here alone: nothing is said on the pull request. --}}
                         <form wire:submit="ask" class="rc-ask">
-                            <label for="rc-ask-question" class="rc-muted">Ask the reviewer about this pull request. It answers here, from the session of its last review; nothing is posted on the pull request.</label>
-                            <textarea id="rc-ask-question" wire:model="question" rows="3" maxlength="4000" placeholder="Why is this a problem, and where else does it happen?"></textarea>
+                            <label for="rc-ask-question" class="rc-muted">{{ __('Ask the reviewer about this pull request. It answers here, from the session of its last review; nothing is posted on the pull request.') }}</label>
+                            <textarea id="rc-ask-question" wire:model="question" rows="3" maxlength="4000" placeholder="{{ __('Why is this a problem, and where else does it happen?') }}"></textarea>
                             @error('question') <span class="rc-tone-danger">{{ $message }}</span> @enderror
-                            <div><button type="submit" class="rc-button" wire:loading.attr="disabled" wire:target="ask">Ask</button></div>
+                            <div><button type="submit" class="rc-button" wire:loading.attr="disabled" wire:target="ask">{{ __('Ask') }}</button></div>
                         </form>
                         {{-- Looks again while an answer is on its way. --}}
                         @if ($questions->contains(fn ($question) => in_array($question->status, [\App\Models\ReviewQuestion::STATUS_ASKED, \App\Models\ReviewQuestion::STATUS_UNSURE], true)))
@@ -221,13 +223,13 @@
                         @endif
                         @foreach ($questions as $question)
                             <div class="rc-question">
-                                <p><strong>{{ $question->author ?? 'Someone' }}</strong> <span class="rc-muted">{{ \App\Filament\LocalTime::of($question->created_at)->format('j M, H:i') }} · {{ $question->comment_id === null ? 'here' : 'on the pull request' }}</span></p>
+                                <p><strong>{{ $question->author ?? __('Someone') }}</strong> <span class="rc-muted">{{ \App\Filament\LocalTime::of($question->created_at)->translatedFormat('j M, H:i') }} · {{ $question->comment_id === null ? __('here') : __('on the pull request') }}</span></p>
                                 <p>{{ $question->question }}</p>
                                 @if ($question->status === \App\Models\ReviewQuestion::STATUS_ANSWERED)
                                     <div class="rc-prose">{!! Str::markdown((string) $question->answer, ['html_input' => 'strip', 'allow_unsafe_links' => false]) !!}</div>
-                                    <span class="rc-muted">{{ $question->resumed ? 'Answered from the last review\'s session' : 'Answered from the code alone' }}{{ $question->cost === null ? '' : ' · '.Currency::show($question->cost) }}</span>
+                                    <span class="rc-muted">{{ $question->resumed ? __('Answered from the last review\'s session') : __('Answered from the code alone') }}{{ $question->cost === null ? '' : ' · '.Currency::show($question->cost) }}</span>
                                 @else
-                                    <span class="rc-muted">{{ $question->status === \App\Models\ReviewQuestion::STATUS_FAILED ? 'The reviewer gave no answer.' : 'The reviewer is answering.' }}</span>
+                                    <span class="rc-muted">{{ $question->status === \App\Models\ReviewQuestion::STATUS_FAILED ? __('The reviewer gave no answer.') : __('The reviewer is answering.') }}</span>
                                 @endif
                                 {{-- What it did while it answered: open while it does, as a review's log. --}}
                                 @php($answering = in_array($question->status, [\App\Models\ReviewQuestion::STATUS_ASKED, \App\Models\ReviewQuestion::STATUS_UNSURE], true))
@@ -237,11 +239,11 @@
                                         x-data="{ follow: true }"
                                         x-on:toggle="if ($el.open) { follow = true; requestAnimationFrame(() => { $refs.log.scrollTop = $refs.log.scrollHeight }) }"
                                     >
-                                        <summary class="rc-muted">Log{{ $answering ? ' · follows the answer as it is written' : '' }}{{ $questionLog['truncated'] ? ' · the end of it' : '' }}</summary>
-                                        <pre class="rc-log" tabindex="0" aria-label="Log of this answer" x-ref="log"
+                                        <summary class="rc-muted">{{ __('Log') }}{{ $answering ? ' · '.__('follows the answer as it is written') : '' }}{{ $questionLog['truncated'] ? ' · '.__('the end of it') : '' }}</summary>
+                                        <pre class="rc-log" tabindex="0" aria-label="{{ __('Log of this answer') }}" x-ref="log"
                                             x-init="$el.scrollTop = $el.scrollHeight; new MutationObserver(() => { if (follow) $el.scrollTop = $el.scrollHeight }).observe($el, { childList: true, characterData: true, subtree: true })"
                                             x-on:scroll="follow = $el.scrollTop + $el.clientHeight >= $el.scrollHeight - 24"
-                                        >{{ $questionLog['text'] === '' ? 'Nothing printed yet.' : $questionLog['text'] }}</pre>
+                                        >{{ $questionLog['text'] === '' ? __('Nothing printed yet.') : $questionLog['text'] }}</pre>
                                     </details>
                                 @endif
                             </div>
@@ -252,21 +254,21 @@
 
             <aside class="rc-grow-1 rc-column">
                 <section class="rc-card rc-pad" aria-labelledby="rc-cost">
-                    <h2 id="rc-cost">Cost of this run</h2>
+                    <h2 id="rc-cost">{{ __('Cost of this run') }}</h2>
                     <div class="rc-pairs">
-                        <div><span class="rc-muted">Cost</span><strong>{{ $run->cost === null ? 'Unknown' : Currency::show($run->cost) }}</strong></div>
-                        <div><span class="rc-muted">Duration</span><strong>
+                        <div><span class="rc-muted">{{ __('Cost') }}</span><strong>{{ $run->cost === null ? __('Unknown') : Currency::show($run->cost) }}</strong></div>
+                        <div><span class="rc-muted">{{ __('Duration') }}</span><strong>
                             @if ($live)
                                 @include('filament.app.partials.elapsed', ['since' => $run->started_at])
                             @else
                                 {{ RunPresenter::duration($run->duration_seconds) ?? '—' }}
                             @endif
                         </strong></div>
-                        <div><span class="rc-muted">Tokens</span><strong>{{ number_format($tokens) }}</strong></div>
-                        <div><span class="rc-muted">Read from cache</span><strong>{{ ($rate = $run->cacheHitRate()) === null ? '—' : round($rate * 100).'%' }}</strong></div>
+                        <div><span class="rc-muted">{{ __('Tokens') }}</span><strong>{{ number_format($tokens) }}</strong></div>
+                        <div><span class="rc-muted">{{ __('Read from cache') }}</span><strong>{{ ($rate = $run->cacheHitRate()) === null ? '—' : round($rate * 100).'%' }}</strong></div>
                     </div>
                     @if ($run->cost_estimated)
-                        <span class="rc-muted">Estimated from the tokens and the price list.</span>
+                        <span class="rc-muted">{{ __('Estimated from the tokens and the price list.') }}</span>
                     @endif
                     @if ($tokens > 0)
                         @php($newlyRead = $usage['cache_creation'] + $usage['input'])
@@ -276,45 +278,45 @@
                             <div class="rc-fill-accent" style="width: {{ $usage['output'] / $tokens * 100 }}%"></div>
                         </div>
                         <div class="rc-legend rc-legend-stacked">
-                            <span><i class="rc-fill-primary"></i>Read again from cache {{ number_format($usage['cache_read']) }}</span>
-                            <span><i class="rc-fill-sky"></i>Newly read {{ number_format($newlyRead) }}</span>
-                            <span><i class="rc-fill-accent"></i>Thought and written {{ number_format($usage['output']) }}</span>
+                            <span><i class="rc-fill-primary"></i>{{ __('Read again from cache :count', ['count' => number_format($usage['cache_read'])]) }}</span>
+                            <span><i class="rc-fill-sky"></i>{{ __('Newly read :count', ['count' => number_format($newlyRead)]) }}</span>
+                            <span><i class="rc-fill-accent"></i>{{ __('Thought and written :count', ['count' => number_format($usage['output'])]) }}</span>
                         </div>
-                        <span class="rc-muted">Every turn sends the whole conversation again, so most tokens are the same instructions and files read once more. What the reviewer newly read (instructions, diff, files, tool output) and what it thought and wrote are the parts that show how much work it did.</span>
+                        <span class="rc-muted">{{ __('Every turn sends the whole conversation again, so most tokens are the same instructions and files read once more. What the reviewer newly read (instructions, diff, files, tool output) and what it thought and wrote are the parts that show how much work it did.') }}</span>
                     @endif
                     @if ($siblings->count() > 1)
-                        <div class="rc-note">This pull request so far: <strong>{{ $siblings->count() }} runs · {{ Currency::show($siblings->sum(fn ($sibling) => (float) $sibling->cost)) }}</strong></div>
+                        <div class="rc-note">{{ __('This pull request so far:') }} <strong>{{ __(':count runs', ['count' => $siblings->count()]) }} · {{ Currency::show($siblings->sum(fn ($sibling) => (float) $sibling->cost)) }}</strong></div>
                     @endif
                 </section>
 
                 <section class="rc-card rc-pad" aria-labelledby="rc-details">
-                    <h2 id="rc-details">Run details</h2>
+                    <h2 id="rc-details">{{ __('Run details') }}</h2>
                     <dl class="rc-details">
-                        <dt>Started</dt><dd>{{ \App\Filament\LocalTime::of($run->started_at)->format('j M Y, H:i:s') }}</dd>
+                        <dt>{{ __('Started') }}</dt><dd>{{ \App\Filament\LocalTime::of($run->started_at)->translatedFormat('j M Y, H:i:s') }}</dd>
                         @if ($run->peak_memory_mb !== null)
-                            <dt>Memory</dt><dd>{{ number_format($run->peak_memory_mb) }} MB at most{{ $run->memory_limit === null ? '' : ", of {$run->memory_limit} allowed" }}</dd>
+                            <dt>{{ __('Memory') }}</dt><dd>{{ $run->memory_limit === null ? __(':memory MB at most', ['memory' => number_format($run->peak_memory_mb)]) : __(':memory MB at most, of :limit allowed', ['memory' => number_format($run->peak_memory_mb), 'limit' => $run->memory_limit]) }}</dd>
                         @endif
                         @if ($run->sandbox !== null)
-                            <dt>Sandbox</dt><dd>{{ ucfirst($run->sandbox) }}{{ $run->sandbox_size === null ? '' : " · {$run->sandbox_size}" }}{{ $run->sandbox_seconds === null ? '' : ' · '.RunPresenter::duration($run->sandbox_seconds) }}{{ $run->sandbox_cost === null ? '' : ' · about '.Currency::show($run->sandbox_cost, null, 4) }}{{ \App\Filament\App\Resources\ReviewRuns\ReviewRunResource::warm($run, ' · warm until :time for the next review of this branch') }}</dd>
+                            <dt>{{ __('Sandbox') }}</dt><dd>{{ ucfirst($run->sandbox) }}{{ $run->sandbox_size === null ? '' : " · {$run->sandbox_size}" }}{{ $run->sandbox_seconds === null ? '' : ' · '.RunPresenter::duration($run->sandbox_seconds) }}{{ $run->sandbox_cost === null ? '' : ' · '.__('about :cost', ['cost' => Currency::show($run->sandbox_cost, null, 4)]) }}{{ \App\Filament\App\Resources\ReviewRuns\ReviewRunResource::warm($run, ' · '.__('warm until :time for the next review of this branch')) }}</dd>
                         @endif
                         @if ($run->queue_seconds !== null)
-                            <dt>Waited</dt><dd>{{ RunPresenter::duration($run->queue_seconds) }} for a worker</dd>
+                            <dt>{{ __('Waited') }}</dt><dd>{{ __(':duration for a worker', ['duration' => RunPresenter::duration($run->queue_seconds)]) }}</dd>
                         @endif
-                        <dt>Runner</dt><dd>{{ rescue(fn () => app(Runners::class)->get((string) $run->runner)->shortLabel(), '—', false) }}</dd>
-                        <dt>Build</dt><dd>{{ $run->build_number === null ? '—' : "#{$run->build_number}" }}</dd>
-                        <dt>Reviewer</dt><dd>{{ RunPresenter::reviewer($run) ?? '—' }}</dd>
-                        <dt>Model</dt><dd>{{ $run->model ?? '—' }}</dd>
-                        <dt>Effort</dt><dd>{{ $run->effort ?? 'Default' }}</dd>
+                        <dt>{{ __('Runner') }}</dt><dd>{{ rescue(fn () => app(Runners::class)->get((string) $run->runner)->shortLabel(), '—', false) }}</dd>
+                        <dt>{{ __('Build') }}</dt><dd>{{ $run->build_number === null ? '—' : "#{$run->build_number}" }}</dd>
+                        <dt>{{ __('Reviewer') }}</dt><dd>{{ RunPresenter::reviewer($run) ?? '—' }}</dd>
+                        <dt>{{ __('Model') }}</dt><dd>{{ $run->model ?? '—' }}</dd>
+                        <dt>{{ __('Effort') }}</dt><dd>{{ $run->effort ?? __('Default') }}</dd>
                         @if ($run->modules !== null)
-                            <dt>Parts</dt><dd>{{ ucfirst(ReviewSettings::describeModules($run->modules)) }}</dd>
+                            <dt>{{ __('Parts') }}</dt><dd>{{ ucfirst(ReviewSettings::describeModules($run->modules)) }}</dd>
                         @endif
                         @if ($instructions !== null)
                             {{-- Which instructions, by what they hold and since when they were read so; the version itself on hover. --}}
-                            <dt>Instructions</dt><dd title="Version {{ $run->instructions_version }}">{{ $instructions['files'] }}{{ $instructions['since'] === null ? '' : " · used since {$instructions['since']}" }}</dd>
+                            <dt>{{ __('Instructions') }}</dt><dd title="{{ __('Version :version', ['version' => $run->instructions_version]) }}">{{ $instructions['files'] }}{{ $instructions['since'] === null ? '' : ' · '.__('used since :date', ['date' => $instructions['since']]) }}</dd>
                         @endif
-                        <dt>Commit</dt><dd class="rc-mono">{{ substr($run->commit, 0, 12) }}</dd>
+                        <dt>{{ __('Commit') }}</dt><dd class="rc-mono">{{ substr($run->commit, 0, 12) }}</dd>
                         @if (($run->metrics['cpu_average'] ?? null) !== null)
-                            <dt>Processor</dt><dd>{{ $run->metrics['cpu_average'] }} on average, {{ $run->metrics['cpu_peak'] }} at most{{ ($run->metrics['processors'] ?? null) === null ? '' : ', of '.$run->metrics['processors'] }}{{ ($run->metrics['starved_percent'] ?? 0) > 0 ? " · short of it {$run->metrics['starved_percent']}% of the time" : '' }}</dd>
+                            <dt>{{ __('Processor') }}</dt><dd>{{ ($run->metrics['processors'] ?? null) === null ? __(':average on average, :peak at most', ['average' => $run->metrics['cpu_average'], 'peak' => $run->metrics['cpu_peak']]) : __(':average on average, :peak at most, of :processors', ['average' => $run->metrics['cpu_average'], 'peak' => $run->metrics['cpu_peak'], 'processors' => $run->metrics['processors']]) }}{{ ($run->metrics['starved_percent'] ?? 0) > 0 ? ' · '.__('short of it :percent% of the time', ['percent' => $run->metrics['starved_percent']]) : '' }}</dd>
                         @endif
                     </dl>
                     @if (! empty($run->metrics['steps']))
@@ -322,18 +324,18 @@
                         {{-- Closed: what each step took is for whoever looks into a slow or heavy review. --}}
                         <details class="rc-collapse">
                             <summary>
-                                <span>Steps</span>
-                                <span class="rc-muted">{{ count($run->metrics['steps']) }} · longest {{ $slowest['name'] }}, {{ RunPresenter::duration((int) $slowest['seconds']) }}</span>
+                                <span>{{ __('Steps') }}</span>
+                                <span class="rc-muted">{{ count($run->metrics['steps']) }} · {{ __('longest :step, :duration', ['step' => $slowest['name'], 'duration' => RunPresenter::duration((int) $slowest['seconds'])]) }}</span>
                             </summary>
                         <table class="rc-steps">
-                            <thead><tr><th scope="col">Step</th><th scope="col">Took</th><th scope="col">Memory</th><th scope="col">Processor</th></tr></thead>
+                            <thead><tr><th scope="col">{{ __('Step') }}</th><th scope="col">{{ __('Took') }}</th><th scope="col">{{ __('Memory') }}</th><th scope="col">{{ __('Processor') }}</th></tr></thead>
                             <tbody>
                                 @foreach ($run->metrics['steps'] as $step)
                                     <tr>
                                         <td>{{ $step['name'] }}</td>
                                         <td>{{ RunPresenter::duration((int) $step['seconds']) }}</td>
                                         <td>{{ ($step['peak_memory_mb'] ?? null) === null ? '—' : number_format($step['peak_memory_mb']).' MB' }}</td>
-                                        <td>{{ ($step['cpu_average'] ?? null) === null ? '—' : $step['cpu_average'].' · '.$step['cpu_peak'].' max' }}{{ ($step['starved_percent'] ?? 0) >= 25 ? ' · short' : '' }}</td>
+                                        <td>{{ ($step['cpu_average'] ?? null) === null ? '—' : $step['cpu_average'].' · '.__(':peak max', ['peak' => $step['cpu_peak']]) }}{{ ($step['starved_percent'] ?? 0) >= 25 ? ' · '.__('short') : '' }}</td>
                                     </tr>
                                 @endforeach
                             </tbody>
@@ -343,25 +345,25 @@
                 </section>
 
                 <section class="rc-card rc-pad rc-rate" aria-labelledby="rc-rate">
-                    <h2 id="rc-rate">Rate this review</h2>
+                    <h2 id="rc-rate">{{ __('Rate this review') }}</h2>
                     @if ($ratings->isEmpty())
-                        <span>Nobody rated this review yet. Ratings show how useful the reviews are, per repository and per category.</span>
+                        <span>{{ __('Nobody rated this review yet. Ratings show how useful the reviews are, per repository and per category.') }}</span>
                     @else
                         @foreach ($ratings as $rating)
                             <div>
-                                <strong>{{ $rating->score }} of 5</strong> · {{ $rating->name ?? 'Anonymous' }} · {{ $rating->created_at->diffForHumans() }}
+                                <strong>{{ __(':score of 5', ['score' => $rating->score]) }}</strong> · {{ $rating->name ?? __('Anonymous') }} · {{ $rating->created_at->diffForHumans() }}
                                 @if (filled($rating->comment)) <div>{{ $rating->comment }}</div> @endif
                             </div>
                         @endforeach
                     @endif
-                    <div class="rc-stars" role="group" aria-label="Your rating">
+                    <div class="rc-stars" role="group" aria-label="{{ __('Your rating') }}">
                         @foreach (range(1, 5) as $score)
-                            <button type="button" wire:click="rate({{ $score }})" aria-label="{{ $score }} of 5" aria-pressed="{{ $ownScore === $score ? 'true' : 'false' }}" @class(['rc-on' => $ownScore !== null && $score <= $ownScore])>
+                            <button type="button" wire:click="rate({{ $score }})" aria-label="{{ __(':score of 5', ['score' => $score]) }}" aria-pressed="{{ $ownScore === $score ? 'true' : 'false' }}" @class(['rc-on' => $ownScore !== null && $score <= $ownScore])>
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m12 2 3 6.5 7 .9-5.2 4.8 1.4 7L12 17.8 5.8 21.2l1.4-7L2 9.4l7-.9z"/></svg>
                             </button>
                         @endforeach
                     </div>
-                    <a href="{{ route('reviews.rate', ['token' => $run->ratingToken()]) }}" target="_blank" rel="noopener">The rating page, to share ↗</a>
+                    <a href="{{ route('reviews.rate', ['token' => $run->ratingToken()]) }}" target="_blank" rel="noopener">{{ __('The rating page, to share') }} ↗</a>
                 </section>
             </aside>
         </div>

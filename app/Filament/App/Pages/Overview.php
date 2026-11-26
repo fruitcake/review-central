@@ -26,8 +26,6 @@ class Overview extends Dashboard
 
     public const PERIODS = [7, 30, 90];
 
-    protected static ?string $title = 'Overview';
-
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedSquares2x2;
 
     protected static ?int $navigationSort = 0;
@@ -37,9 +35,19 @@ class Overview extends Dashboard
     #[Url]
     public int $days = 30;
 
+    public function getTitle(): string|Htmlable
+    {
+        return __('Overview');
+    }
+
+    public static function getNavigationLabel(): string
+    {
+        return __('Overview');
+    }
+
     public function getSubheading(): string|Htmlable|null
     {
-        return CurrentTenant::get()->name." · last {$this->period()} days";
+        return CurrentTenant::get()->name.' · '.__('last :days days', ['days' => $this->period()]);
     }
 
     protected function getHeaderActions(): array
@@ -53,7 +61,7 @@ class Overview extends Dashboard
         return [
             ...$periods,
             Action::make('addRepository')
-                ->label('Add repository')
+                ->label(__('Add repository'))
                 ->icon(Heroicon::OutlinedPlus)
                 ->visible(fn (): bool => TenantRole::isAdmin())
                 ->url(RepositoryResource::getUrl()),

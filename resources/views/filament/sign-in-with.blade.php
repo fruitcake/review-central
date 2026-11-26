@@ -4,5 +4,5 @@
 @endif
 
 @foreach ($providers as $provider => $name)
-    <a class="rc-sign-in-with" href="{{ route('sign-in.redirect', ['provider' => $provider]) }}">Sign in with {{ $name }}</a>
+    <a class="rc-sign-in-with" href="{{ route('sign-in.redirect', ['provider' => $provider]) }}">{{ __('Sign in with :provider', ['provider' => $name]) }}</a>
 @endforeach
