@@ -324,19 +324,14 @@ it('gives the code index only the vendor packages the code uses, with what they 
         $package('acme/payments', 'Acme\\Payments\\', ['php' => '^8.2', 'acme/money' => '^1']),
         $package('acme/money', 'Acme\\Money\\'),
         $package('acme/unused', 'Acme\\Unused\\'),
-        // Sharing the namespace of the one imported, as yajra's datatables packages do.
-        $package('acme/payments-ui', 'Acme\\Payments\\'),
-        // Global classes, no namespace to import them by; and one only a developer installs.
-        ['name' => 'acme/xlsx', 'install-path' => '../acme/xlsx', 'autoload' => ['classmap' => ['xlsx.php']]],
-        ['name' => 'acme/testing', 'install-path' => '../acme/testing', 'autoload' => ['classmap' => ['src/']]],
-    ], 'dev-package-names' => ['acme/testing']]));
-    foreach (['acme/payments', 'acme/money', 'acme/unused', 'acme/payments-ui', 'acme/xlsx', 'acme/testing'] as $name) {
+    ]]));
+    foreach (['acme/payments', 'acme/money', 'acme/unused'] as $name) {
         File::ensureDirectoryExists("{$this->dir}/vendor/{$name}");
     }
     ($this->put)('app/Services/Checkout.php', "<?php\n\nuse Acme\\Payments\\Gateway;\n\nclass Checkout {}\n");
     $includes = fn (): string => Process::path($this->dir)->run(['php', realpath(__DIR__.'/../../resources/review/skill/code-index-includes.php'), 'app', 'routes'])->throw()->output();
 
-    expect(explode("\n", trim($includes())))->toEqualCanonicalizing(['vendor/acme/payments', 'vendor/acme/payments-ui', 'vendor/acme/money', 'vendor/acme/xlsx']);
+    expect(explode("\n", trim($includes())))->toEqualCanonicalizing(['vendor/acme/payments', 'vendor/acme/money']);
 
     // Without Composer's list, nothing: the caller takes all of vendor/.
     File::delete("{$this->dir}/vendor/composer/installed.json");

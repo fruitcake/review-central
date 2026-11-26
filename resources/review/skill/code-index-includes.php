@@ -19,10 +19,7 @@ if (! is_array($packages) || $packages === []) {
     exit(0);
 }
 
-// What only a developer installs (PHPUnit, PHPStan): the code under review calls none of it.
-$development = array_fill_keys((array) ($installed['dev-package-names'] ?? []), true);
 $prefixes = [];
-$global = [];
 $requires = [];
 $directories = [];
 
@@ -39,27 +36,16 @@ foreach ($packages as $package) {
         ? 'vendor/'.ltrim(preg_replace('#^\.\./#', '', (string) $package['install-path']), '/')
         : "vendor/{$name}";
 
-    $namespaced = false;
-
     foreach (['psr-4', 'psr-0'] as $kind) {
         foreach (array_keys((array) ($package['autoload'][$kind] ?? [])) as $namespace) {
             if ($namespace !== '') {
-                // Several packages can share one, as yajra's datatables packages do.
-                $prefixes[$namespace][$name] = true;
-                $namespaced = true;
+                $prefixes[$namespace] = $name;
             }
         }
     }
-
-    // A package of classes without a namespace, such as XLSXWriter or Google_Client, declares
-    // global names no import gives away: it is taken whole, unless only a developer uses it.
-    if (! $namespaced && ((array) ($package['autoload']['classmap'] ?? [])) !== [] && ! isset($development[$name])) {
-        $global[$name] = true;
-    }
 }
 
-// The names the project's own code uses: imported, or written out in full, in code or in a
-// docblock, such as \Spatie\DbDumper\Databases\MySql::create().
+// The namespaces the project's own code imports.
 $used = [];
 
 foreach ($paths as $path) {
@@ -68,17 +54,7 @@ foreach ($paths as $path) {
     }
 
     foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS)) as $file) {
-        if ($file->getExtension() !== 'php') {
-            continue;
-        }
-
-        $text = (string) @file_get_contents($file->getPathname());
-
-        if (preg_match_all('/^\s*use\s+\\\\?([\w\\\\]+)/m', $text, $matches) > 0) {
-            $used += array_fill_keys($matches[1], true);
-        }
-
-        if (preg_match_all('/\\\\([A-Z]\w*(?:\\\\\w+)+)/', $text, $matches) > 0) {
+        if ($file->getExtension() === 'php' && preg_match_all('/^\s*use\s+\\\\?([\w\\\\]+)/m', (string) @file_get_contents($file->getPathname()), $matches) > 0) {
             $used += array_fill_keys($matches[1], true);
         }
     }
@@ -89,16 +65,14 @@ krsort($prefixes);
 $wanted = [];
 
 foreach (array_keys($used) as $import) {
-    foreach ($prefixes as $namespace => $names) {
+    foreach ($prefixes as $namespace => $name) {
         if (str_starts_with($import, $namespace)) {
-            $wanted += $names;
+            $wanted[$name] = true;
 
             break;
         }
     }
 }
-
-$wanted += $global;
 
 // And what those require, as far as Composer installed it.
 $queue = array_keys($wanted);
