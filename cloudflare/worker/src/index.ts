@@ -40,7 +40,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
  * after one is told apart. tests/Feature/CloudflareWorkerVersionTest.php fails
  * on a change that leaves it as it was.
  */
-const WORKER_VERSION = "2026-11-26.3";
+const WORKER_VERSION = "2026-11-26.4";
 
 interface Env {
   REVIEW_SANDBOX: DurableObjectNamespace<ReviewSandbox>;
