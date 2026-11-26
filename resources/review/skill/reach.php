@@ -5,8 +5,11 @@
  * check the change adds or changes (a method named as one, such as canBook,
  * allows or moduleAccessError), the entry points that reach it, and the entry
  * points that reach a method of the same class that writes, without passing the
- * check. A rule about who may do something has to hold on every path to what it
- * guards, and a path the change never touches is the one a review misses.
+ * check. With the code index, also the models the check reads by name and the
+ * entry points that add to them without passing it: through a relation, or with
+ * the model's own create. A rule about who may do something has to hold on every
+ * path to what it guards, and a path the change never touches is the one a
+ * review misses.
  *
  *   php reach.php <destination ref> <commit>     (in the checkout)
  *
@@ -33,6 +36,18 @@ const LISTED = 25;
 
 /** All of the section's text at most. */
 const BUDGET = 8000;
+
+/** How many entry points that add to a check's data it names; past that, only how many. */
+const DATA_LISTED = 15;
+
+/** How many methods may add to one model before it counts as central: added to everywhere, and said so in a count. */
+const ADDERS = 10;
+
+/** A call that adds to a relation: what a path into the data a check reads goes through. */
+const ADDS = 'attach|create|createMany|createQuietly|save|saveMany|saveQuietly|insert|firstOrCreate|updateOrCreate|sync|syncWithoutDetaching';
+
+/** A model's own static call that adds a row of it. */
+const CREATES = 'create|forceCreate|insert|firstOrCreate|updateOrCreate';
 
 /** Where a request, a command or a job starts. */
 const ENTRY = '#^(app/Http/Controllers/|app/Livewire/|app/Console/Commands/|app/Jobs/|app/Listeners/|app/Mcp/|app/Filament/|routes/|resources/views/)#';
@@ -172,6 +187,17 @@ $isPublic = function (string $file, string $name) use ($functions, $linesOf): bo
     return false;
 };
 
+/** Whether a method is declared private or protected: one that cannot be found is not. */
+$isHidden = function (string $file, string $name) use ($functions, $linesOf): bool {
+    foreach ($functions($file) as $function) {
+        if (strcasecmp($function['name'], $name) === 0) {
+            return preg_match('/\b(private|protected)\b/', $linesOf($file)[$function['start'] - 1] ?? '') === 1;
+        }
+    }
+
+    return false;
+};
+
 // The checks the change adds or changes: methods named as one, policies' methods, and
 // methods with a changed line that guards who may go on.
 $checks = [];
@@ -283,6 +309,7 @@ $indexed = null;
 $directory = (string) getenv('REACH_INDEX');
 
 if ($directory !== '' && @filesize("{$directory}/edges.tsv") > 0) {
+    require_once __DIR__.'/code-index-models.php';
     $indexed = ['callers' => [], 'files' => [], 'ancestors' => []];
 
     foreach (['edges' => 'callers', 'classes' => 'files', 'ancestors' => 'ancestors'] as $file => $field) {
@@ -312,7 +339,7 @@ $fullClassOf = function (string $file): ?string {
 };
 
 /** The entry points that reach a method in the index, each with how many calls it is away. */
-$reachIndexed = function (string $symbol) use (&$indexed, $functions, $enclosing): array {
+$reachIndexed = function (string $symbol) use (&$indexed, $functions, $enclosing, $isHidden): array {
     $entries = [];
     $queue = [[$symbol, 0]];
     $seen = [$symbol => true];
@@ -353,16 +380,30 @@ $reachIndexed = function (string $symbol) use (&$indexed, $functions, $enclosing
                     $keys = $keys === [] ? [$file] : array_unique($keys);
                 } else {
                     [$sourceClass, $sourceMethod] = explode('::', $source, 2);
+                    $writtenIn = $indexed['files'][$sourceClass] ?? null;
+
+                    // A parent's method that calls this one runs, for this class, as this
+                    // class's own: the way in is this class's, not every class the parent has.
+                    if ($sourceClass !== $class && in_array($sourceClass, $indexed['ancestors'][$class] ?? [], true)) {
+                        $sourceClass = $class;
+                        $source = "{$class}::{$sourceMethod}";
+                    }
+
+                    // This method again, through a parent's of the same name and parent::.
+                    if ($source === $current) {
+                        continue;
+                    }
+
                     $file = $indexed['files'][$sourceClass] ?? null;
 
-                    if ($file === null) {
+                    if ($file === null || $writtenIn === null) {
                         continue;
                     }
 
                     // The method as it is written, for the reader.
                     $name = $sourceMethod;
 
-                    foreach ($functions($file) as $function) {
+                    foreach ($functions($writtenIn) as $function) {
                         if (strtolower($function['name']) === $sourceMethod) {
                             $name = $function['name'];
 
@@ -373,7 +414,8 @@ $reachIndexed = function (string $symbol) use (&$indexed, $functions, $enclosing
                     $keys = ["{$file}::{$name}"];
                 }
 
-                if (preg_match(ENTRY, $file) === 1) {
+                // A controller's protected or private method is no way in: what calls it is.
+                if (preg_match(ENTRY, $file) === 1 && (str_starts_with($source, 'file:') || ! $isHidden($writtenIn, $name))) {
                     foreach ($keys as $key) {
                         $entries[$key] ??= $depth + 1;
                     }
@@ -388,6 +430,125 @@ $reachIndexed = function (string $symbol) use (&$indexed, $functions, $enclosing
     }
 
     return $entries;
+};
+
+/** A function's text, by its name in any case. */
+$bodyOf = function (string $file, string $name) use ($functions, $linesOf): ?array {
+    foreach ($functions($file) as $function) {
+        if (strcasecmp($function['name'], $name) === 0) {
+            return $function + ['text' => implode('', array_slice($linesOf($file), $function['start'] - 1, $function['end'] - $function['start'] + 1))];
+        }
+    }
+
+    return null;
+};
+
+/** A class's name as its file writes it, from the index's lower-case one. */
+$writtenClass = function (string $class) use (&$indexed): string {
+    $short = substr((string) strrchr('\\'.$class, '\\'), 1);
+
+    return preg_match('/^\s*(?:(?:final|abstract|readonly)\s+)*(?:class|trait|interface|enum)\s+('.preg_quote($short, '/').')\b/mi', (string) @file_get_contents($indexed['files'][$class] ?? ''), $declared) === 1 ? $declared[1] : $short;
+};
+
+/**
+ * The models a check reads by name: the ones its method, and the methods of its
+ * class that it calls, name as X:: or new X. A model it is only handed, such as
+ * the member who books, is everywhere, and says nothing about what it guards.
+ *
+ * @return list<string> lower case, as the index has them
+ */
+$modelsReadBy = function (array $check) use (&$indexed, $bodyOf, $fullClassOf): array {
+    $source = (string) @file_get_contents($check['file']);
+    [$namespace, $uses] = code_index_imports($source);
+    $own = $fullClassOf($check['file']);
+    $models = [];
+    $queue = [$check['name']];
+    $read = [];
+
+    while ($queue !== [] && count($read) < 20) {
+        $name = array_shift($queue);
+
+        if (isset($read[strtolower($name)]) || ($function = $bodyOf($check['file'], $name)) === null) {
+            continue;
+        }
+
+        $read[strtolower($name)] = true;
+        preg_match_all('/(?:\$this\s*->|(?:self|static)::)\s*(\w+)\s*\(/', $function['text'], $calls);
+        array_push($queue, ...$calls[1]);
+        preg_match_all('/(?:\bnew\s+|(?<![\w\\\\$>:]))(\\\\?[A-Z][\w\\\\]*)(?:::(?!class\b)\w|\s*\()/', $function['text'], $names);
+
+        foreach ($names[1] as $written) {
+            $class = strtolower(code_index_resolve($written, $namespace, $uses, (string) $own));
+
+            if ($class !== $own && isset($indexed['files'][$class]) && in_array('illuminate\\database\\eloquent\\model', $indexed['ancestors'][$class] ?? [], true)) {
+                $models[$class] = true;
+            }
+        }
+    }
+
+    return array_keys($models);
+};
+
+/**
+ * The methods outside a model that add to it: through one of its relations, such
+ * as ->participants()->attach(, or with its own Model::create(.
+ *
+ * @return array<string, array{file: string, name: string, line: int, what: string}> by the index's name of the method
+ */
+$addersTo = function (string $model) use (&$indexed, $linesOf, $enclosing, $fullClassOf, $sh, $writtenClass): array {
+    $file = $indexed['files'][$model];
+    $written = $writtenClass($model);
+
+    $adders = [];
+    $add = function (string $file, int $line, string $what) use (&$adders, $enclosing, $fullClassOf): void {
+        $name = $enclosing($file, $line);
+        $class = $fullClassOf($file);
+
+        if ($name === null || str_starts_with($name, '(closure') || $class === null) {
+            return;
+        }
+
+        $adders["{$class}::".strtolower($name)] ??= ['file' => $file, 'name' => $name, 'line' => $line, 'what' => $what];
+    };
+
+    // Through a relation: its callers in the index, and in each the line that adds.
+    foreach (array_keys(code_index_relations_in((string) @file_get_contents($file))[$model] ?? []) as $relation) {
+        foreach (array_keys($indexed['callers']["{$model}::{$relation}"] ?? []) as $source) {
+            [$sourceClass] = explode('::', $source, 2);
+            $sourceFile = $indexed['files'][$sourceClass] ?? null;
+
+            if (str_starts_with($source, 'file:') || $sourceClass === $model || $sourceFile === null) {
+                continue;
+            }
+
+            $text = implode('', $linesOf($sourceFile));
+
+            if (preg_match_all('/->\s*'.preg_quote($relation, '/').'\s*\(\s*\)\s*->\s*('.ADDS.')\s*\(/i', $text, $found, PREG_OFFSET_CAPTURE) > 0) {
+                foreach ($found[0] as $index => [$match, $offset]) {
+                    $line = substr_count(substr($text, 0, $offset), "\n") + 1;
+
+                    if ("{$fullClassOf($sourceFile)}::".strtolower((string) $enclosing($sourceFile, $line)) === $source) {
+                        $add($sourceFile, $line, "{$written}->".ltrim((string) preg_replace('/\s+/', '', $match), '->').')');
+                    }
+                }
+            }
+        }
+    }
+
+    // With the model's own static call, in a file that names it.
+    foreach (array_filter(explode("\n", $sh(['grep', '-n', '-E', '\b'.$written.'::('.CREATES.')\(', '--', 'app']))) as $hit) {
+        if (preg_match('/^([^:]+):(\d+):(.*)$/', $hit, $match) !== 1 || $match[1] === $file || preg_match('#^\s*(\*|//|/\*|\#)#', $match[3]) === 1) {
+            continue;
+        }
+
+        [$namespace, $uses] = code_index_imports((string) @file_get_contents($match[1]));
+
+        if (strtolower(code_index_resolve($written, $namespace, $uses, '')) === $model && preg_match('/\b'.$written.'::('.CREATES.')\(/', $match[3], $call) === 1) {
+            $add($match[1], (int) $match[2], "{$written}::{$call[1]}()");
+        }
+    }
+
+    return $adders;
 };
 
 $out = [];
@@ -444,6 +605,64 @@ foreach ($checks as $key => $check) {
             $out[] = '  - and '.(count($without) - LISTED).' more, further from the write.';
         }
     }
+
+    // With the index: the data the check reads, and the ways in that add to it without the check.
+    if ($indexed === null) {
+        continue;
+    }
+
+    $models = $modelsReadBy($check);
+    $adding = [];
+    $central = [];
+
+    foreach ($models as $model) {
+        $adders = $addersTo($model);
+
+        // A model the whole application adds to says nothing about this check in particular.
+        if (count($adders) > ADDERS) {
+            $central[] = "`{$writtenClass($model)}` (".count($adders).' methods)';
+
+            continue;
+        }
+
+        foreach ($adders as $symbol => $adder) {
+            $own = $bodyOf($adder['file'], $adder['name'])['text'] ?? '';
+
+            // An entry point itself, unless it guards or checks in its own body.
+            if (preg_match(ENTRY, $adder['file']) === 1 && $isPublic($adder['file'], $adder['name']) && ! isset($entries["{$adder['file']}::{$adder['name']}"])
+                && preg_match(GUARD, $own) !== 1 && preg_match('/(->|::)'.preg_quote($check['name'], '/').'\s*\(/', $own) !== 1) {
+                $adding["{$adder['file']}::{$adder['name']}"] ??= ['adder' => $adder, 'distance' => 0];
+            }
+
+            foreach (array_diff_key($reachIndexed($symbol), $entries) as $entry => $distance) {
+                if (! isset($adding[$entry]) || $adding[$entry]['distance'] > $distance) {
+                    $adding[$entry] = ['adder' => $adder, 'distance' => $distance];
+                }
+            }
+        }
+    }
+
+    if ($adding === []) {
+        continue;
+    }
+
+    uasort($adding, fn (array $a, array $b): int => $a['distance'] <=> $b['distance']);
+    $read = implode(', ', array_map(fn (string $model): string => "`{$writtenClass($model)}`", $models));
+    $read .= $central === [] ? '' : ' (of which '.implode(', ', $central).' are added to in too many places to list)';
+
+    if (count($adding) > DATA_LISTED) {
+        $out[] = "  `{$check['name']}` reads {$read}, and ".count($adding)." entry points add to it without passing `{$check['name']}`: too many to list, so this says nothing about any one of them.";
+
+        continue;
+    }
+
+    $out[] = "  `{$check['name']}` reads {$read}. These add to it without passing `{$check['name']}`:";
+
+    foreach ($adding as $entry => ['adder' => $adder, 'distance' => $distance]) {
+        $out[] = $distance === 0
+            ? "  - `{$entry}`, with `{$adder['what']}` at line {$adder['line']}"
+            : "  - `{$entry}`, through `{$adder['name']}`, with `{$adder['what']}` at `{$adder['file']}:{$adder['line']}`";
+    }
 }
 
 $text = implode("\n", $out);
@@ -456,5 +675,5 @@ echo "\nREACH:\n\n";
 echo $indexed !== null
     ? 'Worked out from the code before you started, from a code index that resolves each call by the type of what it is called on: a path listed is one the code takes. A call on a value whose type is not known (mixed) is not in the index, so a path can be missing; search for one you expect.'
     : 'Worked out from the code before you started, by method name: a call to ->name( is taken to reach every method of that name, so this is a floor that can also name a path that does not apply. Verify each before you rely on it.';
-echo " For each check this change adds or changes, it lists the entry points (controllers, Livewire components, jobs, commands, routes, views) that reach it, and the entry points that reach a method of the same class that writes without passing the check. Where the change brings in a rule about who may do something, decide for each of those whether the rule has to hold there too: one that skips it is this change's finding, though the path is old.\n\n";
+echo ' For each check this change adds or changes, it lists the entry points (controllers, Livewire components, jobs, commands, routes, views) that reach it, and the entry points that reach a method of the same class that writes without passing the check.'.($indexed !== null ? ' With the index it also lists the models the check reads, and the entry points that add to them, through a relation or with create, without passing the check: another way into what the check guards.' : '')." Where the change brings in a rule about who may do something, decide for each of those whether the rule has to hold there too: one that skips it is this change's finding, though the path is old.\n\n";
 echo $text."\n";

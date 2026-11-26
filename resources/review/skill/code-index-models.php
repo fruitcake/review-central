@@ -79,18 +79,8 @@ function code_index_relations_in(string $source): array
         return [];
     }
 
-    $namespace = preg_match('/^\s*namespace\s+([\w\\\\]+)\s*;/m', $source, $found) === 1 ? $found[1] : '';
+    [$namespace, $uses] = code_index_imports($source);
     $class = ltrim("{$namespace}\\{$declared[1]}", '\\');
-    $uses = [];
-
-    // Top-level imports only: the ones inside a class are traits.
-    preg_match_all('/^use\s+([\w\\\\]+)(?:\s+as\s+(\w+))?\s*;/mi', $source, $imports, PREG_SET_ORDER);
-
-    foreach ($imports as $import) {
-        $alias = $import[2] ?? '';
-        $uses[strtolower($alias !== '' ? $alias : substr((string) strrchr('\\'.$import[1], '\\'), 1))] = ltrim($import[1], '\\');
-    }
-
     $relations = [];
     preg_match_all('/function\s+(\w+)\s*\(\s*\)[^{;]*\{/i', $source, $methods, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
 
@@ -110,6 +100,28 @@ function code_index_relations_in(string $source): array
     }
 
     return $relations === [] ? [] : [strtolower($class) => $relations];
+}
+
+/**
+ * A file's namespace, and the classes it imports by the lower-case name it uses
+ * for each.
+ *
+ * @return array{0: string, 1: array<string, string>}
+ */
+function code_index_imports(string $source): array
+{
+    $namespace = preg_match('/^\s*namespace\s+([\w\\\\]+)\s*;/m', $source, $found) === 1 ? $found[1] : '';
+    $uses = [];
+
+    // Top-level imports only: the ones inside a class are traits.
+    preg_match_all('/^use\s+([\w\\\\]+)(?:\s+as\s+(\w+))?\s*;/mi', $source, $imports, PREG_SET_ORDER);
+
+    foreach ($imports as $import) {
+        $alias = $import[2] ?? '';
+        $uses[strtolower($alias !== '' ? $alias : substr((string) strrchr('\\'.$import[1], '\\'), 1))] = ltrim($import[1], '\\');
+    }
+
+    return [$namespace, $uses];
 }
 
 /**

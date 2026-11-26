@@ -355,3 +355,125 @@ it('does not list an action that reaches the check through a helper as one witho
         ->toContain('- `app/Http/Controllers/BookingFlowController.php::update`, which writes itself, with no guard of its own')
         ->not->toContain('BookingFlowController.php::store`, which');
 });
+
+it('names, with the code index, the ways in that add to the models a changed check reads without passing it', function () {
+    // A group of courses whose members are on a list; the check reads the list and the group.
+    ($this->put)('app/Models/Group.php', <<<'PHP'
+        <?php
+
+        namespace App\Models;
+
+        class Group extends Model
+        {
+            public function participants()
+            {
+                return $this->belongsToMany(Member::class);
+            }
+        }
+        PHP);
+    ($this->put)('app/Models/AllowedMember.php', "<?php\n\nnamespace App\\Models;\n\nclass AllowedMember extends Model\n{\n}\n");
+    ($this->put)('app/Services/GroupAccess.php', <<<'PHP'
+        <?php
+
+        namespace App\Services;
+
+        use App\Models\AllowedMember;
+        use App\Models\Group;
+
+        class GroupAccess
+        {
+            public function allows($group, $member)
+            {
+                return $this->isOpen($group) || AllowedMember::query()->where('member_id', $member->id)->exists();
+            }
+
+            private function isOpen($group)
+            {
+                return Group::query()->whereKey($group->id)->where('open', true)->exists();
+            }
+        }
+        PHP);
+    // Joins with the check; joins without it; and a form that adds through its parent's update.
+    ($this->put)('app/Http/Controllers/JoinController.php', <<<'PHP'
+        <?php
+
+        namespace App\Http\Controllers;
+
+        class JoinController
+        {
+            public function store(Group $group, GroupAccess $access)
+            {
+                abort_unless($access->allows($group, auth()->user()), 403);
+                $group->participants()->attach(auth()->id());
+            }
+        }
+        PHP);
+    ($this->put)('app/Http/Controllers/SignupController.php', <<<'PHP'
+        <?php
+
+        namespace App\Http\Controllers;
+
+        class SignupController
+        {
+            public function store(Group $group)
+            {
+                $member = Member::create(request()->all());
+                $group->participants()
+                    ->attach($member->id);
+            }
+        }
+        PHP);
+    ($this->put)('app/Http/Controllers/CrudController.php', "<?php\n\nnamespace App\\Http\\Controllers;\n\nclass CrudController\n{\n    public function update(\$item)\n    {\n        \$this->handleForm(\$item);\n    }\n\n    protected function handleForm(\$item)\n    {\n    }\n}\n");
+    ($this->put)('app/Http/Controllers/GroupController.php', <<<'PHP'
+        <?php
+
+        namespace App\Http\Controllers;
+
+        use App\Models\AllowedMember;
+
+        class GroupController extends CrudController
+        {
+            protected function handleForm($group)
+            {
+                AllowedMember::create(['group_id' => $group->id]);
+            }
+        }
+        PHP);
+    ($this->put)('app/Http/Controllers/InvoiceController.php', "<?php\n\nnamespace App\\Http\\Controllers;\n\nclass InvoiceController extends CrudController\n{\n}\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Groups');
+    ($this->put)('app/Services/GroupAccess.php', str_replace("where('open', true)", "where('open', true)->whereNull('closed_at')", File::get("{$this->dir}/app/Services/GroupAccess.php")));
+    ($this->git)('commit', '-qam', 'A closed group is not open');
+
+    $index = "{$this->dir}/.index";
+    File::ensureDirectoryExists($index);
+    File::put("{$index}/edges.tsv", implode("\n", [
+        "app\\http\\controllers\\joincontroller::store\tapp\\services\\groupaccess::allows",
+        "app\\http\\controllers\\joincontroller::store\tapp\\models\\group::participants",
+        "app\\http\\controllers\\signupcontroller::store\tapp\\models\\group::participants",
+        "app\\http\\controllers\\crudcontroller::update\tapp\\http\\controllers\\crudcontroller::handleform",
+    ])."\n");
+    File::put("{$index}/classes.tsv", implode("\n", [
+        "app\\models\\group\tapp/Models/Group.php", "app\\models\\allowedmember\tapp/Models/AllowedMember.php",
+        "app\\services\\groupaccess\tapp/Services/GroupAccess.php", "app\\http\\controllers\\joincontroller\tapp/Http/Controllers/JoinController.php",
+        "app\\http\\controllers\\signupcontroller\tapp/Http/Controllers/SignupController.php", "app\\http\\controllers\\crudcontroller\tapp/Http/Controllers/CrudController.php",
+        "app\\http\\controllers\\groupcontroller\tapp/Http/Controllers/GroupController.php", "app\\http\\controllers\\invoicecontroller\tapp/Http/Controllers/InvoiceController.php",
+    ])."\n");
+    File::put("{$index}/ancestors.tsv", implode("\n", [
+        "app\\models\\group\tilluminate\\database\\eloquent\\model", "app\\models\\allowedmember\tilluminate\\database\\eloquent\\model",
+        "app\\http\\controllers\\groupcontroller\tapp\\http\\controllers\\crudcontroller", "app\\http\\controllers\\invoicecontroller\tapp\\http\\controllers\\crudcontroller",
+    ])."\n");
+
+    $reach = Process::path($this->dir)->env(['REACH_INDEX' => $index])
+        ->run(['php', realpath(__DIR__.'/../../resources/review/skill/reach.php'), 'main', 'HEAD'])->throw()->output();
+
+    expect($reach)
+        ->toContain('`allows` reads `AllowedMember`, `Group`. These add to it without passing `allows`:')
+        ->toContain('- `app/Http/Controllers/SignupController.php::store`, with `Group->participants()->attach()` at line 10')
+        // The parent's update runs the form for this class only, and the form is no way in itself.
+        ->toContain('- `app/Http/Controllers/GroupController.php::update`, through `handleForm`, with `AllowedMember::create()` at `app/Http/Controllers/GroupController.php:11`')
+        ->not->toContain('InvoiceController')
+        ->not->toContain('CrudController.php::update')
+        ->not->toContain('GroupController.php::handleForm`,')
+        ->not->toContain('JoinController.php::store`, with');
+});
