@@ -13,9 +13,11 @@
  *   classes.tsv    class, the file it is declared in
  *   ancestors.tsv  class, a parent class or interface of it
  *
- * Eloquent's static calls are typed the way Larastan reads them: Model::find()
- * gives the model, Model::where() a builder of it. Without that, every call on a
- * model fetched with one of them would be missing.
+ * Eloquent is typed the way Larastan reads it: Model::find() gives the model,
+ * Model::where() and a local scope a builder of it, $lesson->participants() a
+ * relation to the related model and $lesson->participants a collection of it.
+ * Without that, every call on a model reached through one of them would be
+ * missing. code-index-models.php reads the scopes and relations from app/.
  */
 
 declare(strict_types=1);
@@ -30,6 +32,10 @@ use Mago\Sdk\Analyzer\MethodTarget;
 use Mago\Sdk\Analyzer\Plugin;
 use Mago\Sdk\Analyzer\PluginDefinition;
 use Mago\Sdk\Analyzer\PluginRegistry;
+use Mago\Sdk\Analyzer\PropertyTarget;
+use Mago\Sdk\Analyzer\PropertyType;
+use Mago\Sdk\Analyzer\PropertyTypeProvider;
+use Mago\Sdk\Analyzer\PropertyTypeProviderContext;
 use Mago\Sdk\Analyzer\ReferenceKind;
 use Mago\Sdk\Analyzer\ReferenceOrigin;
 use Mago\Sdk\Analyzer\ReturnTypeProviderContext;
@@ -40,6 +46,7 @@ use Mago\Sdk\Extension;
 use Mago\Sdk\Worker;
 
 require (string) getenv('MAGO_SDK');
+require __DIR__.'/code-index-models.php';
 
 const ELOQUENT_MODEL = 'illuminate\database\eloquent\model';
 
@@ -75,7 +82,14 @@ final class CodeIndex implements AfterAnalysisHook, Plugin
     public function register(PluginRegistry $registry): void
     {
         $registry->registerAfterAnalysisHook($this);
-        $registry->registerMethodReturnTypeProvider(new EloquentStatics);
+        $models = code_index_models(rtrim((string) getenv('REACH_ROOT'), '/').'/app');
+        $registry->registerMethodReturnTypeProvider(new EloquentStatics($models['scopes']));
+
+        if ($models['relations'] !== []) {
+            $relations = new EloquentRelations($models['relations']);
+            $registry->registerMethodReturnTypeProvider($relations);
+            $registry->registerPropertyTypeProvider($relations);
+        }
     }
 
     public function afterAnalysis(AfterAnalysisContext $context): void
@@ -232,25 +246,34 @@ final class CodeIndex implements AfterAnalysisHook, Plugin
     }
 }
 
-/** Eloquent's static forwarding, as Larastan reads it: Model::find() is a model, Model::where() a builder of it. */
+/**
+ * Eloquent's forwarding, as Larastan reads it: Model::find() is a model, and
+ * Model::where() and Model::active() a builder of it, as is active() on one.
+ */
 final class EloquentStatics implements MethodReturnTypeProvider
 {
     private const MODEL = ['find', 'findorfail', 'findornew', 'first', 'firstorfail', 'firstornew', 'firstorcreate', 'firstwhere', 'sole', 'create', 'forcecreate', 'make', 'updateorcreate'];
 
     private const BUILDER = ['query', 'where', 'wherein', 'wherenotin', 'wherenull', 'wherenotnull', 'wherehas', 'wherebelongsto', 'with', 'withcount', 'withtrashed', 'onlytrashed', 'orderby', 'orderbydesc', 'latest', 'oldest', 'select', 'wherekey', 'has', 'doesnthave', 'withoutglobalscope', 'withoutglobalscopes', 'lockforupdate', 'newquery'];
 
+    /**
+     * @param  list<string>  $scopes  the project's local scopes, by the name they are called with
+     */
+    public function __construct(private readonly array $scopes) {}
+
     public function getTargets(): array
     {
         // By name, on any class: a model's own base class may route them through a docblock mixin.
-        return array_map(MethodTarget::anyClass(...), array_merge(self::MODEL, self::BUILDER));
+        return array_map(MethodTarget::anyClass(...), array_values(array_unique(array_merge(self::MODEL, self::BUILDER, $this->scopes))));
     }
 
     public function getReturnType(ReturnTypeProviderContext $context): ?Type
     {
         $invocation = $context->invocation;
+        $name = strtolower($invocation->name);
 
         if ($invocation->kind !== InvocationKind::StaticMethod) {
-            return null;
+            return in_array($name, $this->scopes, true) ? self::sameBuilder($invocation->receiverType) : null;
         }
 
         $class = null;
@@ -267,8 +290,6 @@ final class EloquentStatics implements MethodReturnTypeProvider
             return null;
         }
 
-        $name = strtolower($invocation->name);
-
         // find([1, 2]) and the like give a collection of the model, find(1) the model.
         if (in_array($name, ['find', 'findorfail', 'findornew'], true) && self::isMany($invocation->arguments[0]->type ?? null)) {
             return Type::namedObject('Illuminate\Database\Eloquent\Collection', Type::int(), Type::namedObject($class));
@@ -276,9 +297,21 @@ final class EloquentStatics implements MethodReturnTypeProvider
 
         return match (true) {
             in_array($name, self::MODEL, true) => Type::namedObject($class),
-            in_array($name, self::BUILDER, true) => Type::namedObject('Illuminate\Database\Eloquent\Builder', Type::namedObject($class)),
+            in_array($name, self::BUILDER, true), in_array($name, $this->scopes, true) => Type::namedObject('Illuminate\Database\Eloquent\Builder', Type::namedObject($class)),
             default => null,
         };
+    }
+
+    /** A builder of a model again, for a scope called on one; nothing for a call on anything else. */
+    private static function sameBuilder(?Type $receiver): ?Type
+    {
+        foreach ($receiver?->atomicTypes ?? [] as $atomic) {
+            if ($atomic instanceof NamedObjectType && strtolower($atomic->name) === 'illuminate\\database\\eloquent\\builder' && ($atomic->parameters ?? []) !== []) {
+                return Type::namedObject('Illuminate\Database\Eloquent\Builder', ...$atomic->parameters);
+            }
+        }
+
+        return null;
     }
 
     /** Whether an id argument is several ids: an array, or a collection or other Arrayable. */
@@ -299,6 +332,88 @@ final class EloquentStatics implements MethodReturnTypeProvider
         }
 
         return false;
+    }
+}
+
+/**
+ * A model's relations, as Larastan reads them from the method's body:
+ * $lesson->participants() is a relation to the related model, whatever the
+ * declared return type leaves out, and $lesson->participants is the related
+ * model, or a collection of it for a relation to many.
+ */
+final class EloquentRelations implements MethodReturnTypeProvider, PropertyTypeProvider
+{
+    /**
+     * @param  array<string, array<string, array{relation: string, related: string, many: bool}>>  $relations  by the class or trait that declares them
+     */
+    public function __construct(private readonly array $relations) {}
+
+    public function getTargets(): array
+    {
+        $names = array_values(array_unique(array_merge(...array_map(array_keys(...), array_values($this->relations)))));
+
+        return array_merge(array_map(MethodTarget::anyClass(...), $names), array_map(PropertyTarget::anyClass(...), $names));
+    }
+
+    public function getReturnType(ReturnTypeProviderContext $context): ?Type
+    {
+        $invocation = $context->invocation;
+
+        if ($invocation->kind === InvocationKind::StaticMethod) {
+            return null;
+        }
+
+        [$model, $relation] = $this->relation($context->codebase, $invocation->receiverType, $invocation->name) ?? [null, null];
+
+        if ($relation === null) {
+            return null;
+        }
+
+        // Through relations name the intermediate model between the two.
+        $parameters = str_ends_with($relation['relation'], 'Through')
+            ? [Type::namedObject($relation['related']), Type::namedObject(ELOQUENT_MODEL), Type::namedObject($model)]
+            : [Type::namedObject($relation['related']), Type::namedObject($model)];
+
+        return Type::namedObject($relation['relation'], ...$parameters);
+    }
+
+    public function getPropertyType(PropertyTypeProviderContext $context): ?PropertyType
+    {
+        [$model, $relation] = $this->relation($context->codebase, $context->access->receiverType, $context->access->property) ?? [null, null];
+
+        // A model's own @property says it already, and is what the read is recorded against.
+        if ($relation === null || $context->codebase->magicPropertyExists($model, '$'.$context->access->property)) {
+            return null;
+        }
+
+        $related = Type::namedObject($relation['related']);
+
+        return new PropertyType($relation['many'] ? Type::namedObject('Illuminate\Database\Eloquent\Collection', Type::int(), $related) : $related);
+    }
+
+    /**
+     * The model a call or property is on, and the relation of that name it has,
+     * declared by itself, a parent or a trait.
+     *
+     * @return array{0: string, 1: array{relation: string, related: string, many: bool}}|null
+     */
+    private function relation(Codebase $codebase, ?Type $receiver, string $name): ?array
+    {
+        $name = strtolower(ltrim($name, '$'));
+
+        foreach ($receiver?->atomicTypes ?? [] as $atomic) {
+            if (! $atomic instanceof NamedObjectType) {
+                continue;
+            }
+
+            $declaring = strtolower((string) $codebase->getDeclaringMethod($atomic->name, $name)?->identifier->class);
+
+            if (isset($this->relations[$declaring][$name])) {
+                return [$atomic->name, $this->relations[$declaring][$name]];
+            }
+        }
+
+        return null;
     }
 }
 
