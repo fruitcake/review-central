@@ -567,7 +567,8 @@ it('finds the data a check reads through a trait\'s relation and a renamed impor
 
     expect($reach)
         ->toContain('`allows` reads `Log`, `Group`, `AllowedMember` (of which `Log` (11 methods) are added to in too many places to list)')
-        ->toContain('- `app/Http/Controllers/SignupController.php::store`, with `Group->participants()->attach()` at line 13')
+        // A trait's relation, called on a value the index may not type: said so.
+        ->toContain('- `app/Http/Controllers/SignupController.php::store`, with `Group->participants()->attach()` at line 13, if it is called on `Group`: `HasParticipants` gives other classes this relation too')
         ->toContain('- `app/Http/Controllers/SignupController.php::both`, with `Group->participants()->attach()` at line 19, or on `Event`, which it calls it on as well')
         ->toContain('- `app/Http/Controllers/SignupController.php::mixed`, with `Group->participants()->attach()` at line 25, or on `Event`, which it calls it on as well')
         ->toContain('- `app/Http/Controllers/SignupController.php::grant`, with `AllowedMember::create()` at line 30')

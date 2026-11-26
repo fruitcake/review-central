@@ -631,7 +631,12 @@ $addersTo = function (string $model) use (&$indexed, $linesOf, $enclosing, $full
 
                 if ("{$fullClassOf($sourceFile)}::".strtolower((string) $enclosing($sourceFile, $line)) === $source) {
                     $add($sourceFile, $line, "{$written}->".ltrim((string) preg_replace('/\s+/', '', $match), '->').')',
-                        $others === [] ? '' : ', or on `'.implode('`, `', array_unique($others)).'`, which it calls it on as well');
+                        match (true) {
+                            $others !== [] => ', or on `'.implode('`, `', array_unique($others)).'`, which it calls it on as well',
+                            // Known by the trait or parent: whether this call is on this model, only the code says.
+                            $declarer !== $model => ', if it is called on `'.$written.'`: `'.$writtenClass($declarer).'` gives other classes this relation too',
+                            default => '',
+                        });
                 }
             }
         }
