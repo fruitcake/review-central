@@ -447,7 +447,7 @@ $bodyOf = function (string $file, string $name) use ($functions, $linesOf): ?arr
 $writtenClass = function (string $class) use (&$indexed): string {
     $short = substr((string) strrchr('\\'.$class, '\\'), 1);
 
-    return preg_match('/^\s*(?:(?:final|abstract|readonly)\s+)*(?:class|trait|interface|enum)\s+('.preg_quote($short, '/').')\b/mi', (string) @file_get_contents($indexed['files'][$class] ?? ''), $declared) === 1 ? $declared[1] : $short;
+    return preg_match('/^\s*(?:(?:final|abstract|readonly)\s+)*(?:class|trait|interface|enum)\s+('.preg_quote($short, '/').')\b/mi', isset($indexed['files'][$class]) ? (string) @file_get_contents($indexed['files'][$class]) : '', $declared) === 1 ? $declared[1] : $short;
 };
 
 /**
@@ -490,17 +490,80 @@ $modelsReadBy = function (array $check) use (&$indexed, $bodyOf, $fullClassOf): 
 };
 
 /**
- * The methods outside a model that add to it: through one of its relations, such
- * as ->participants()->attach(, or with its own Model::create(.
+ * The relations a model has: its own, its parents' and its traits', each with
+ * the class or trait that declares it, by the relation's lower-case name.
  *
- * @return array<string, array{file: string, name: string, line: int, what: string}> by the index's name of the method
+ * @return array<string, string>
  */
-$addersTo = function (string $model) use (&$indexed, $linesOf, $enclosing, $fullClassOf, $sh, $writtenClass): array {
+$relationsOf = function (string $model) use (&$indexed): array {
+    $relations = [];
+    $declarers = [$model, ...($indexed['ancestors'][$model] ?? [])];
+
+    // The traits the model and its parents use, as their class bodies name them.
+    foreach ($declarers as $declarer) {
+        $source = isset($indexed['files'][$declarer]) ? (string) @file_get_contents($indexed['files'][$declarer]) : '';
+        $body = substr($source, (int) strpos($source, '{'));
+        [$namespace, $uses] = code_index_imports($source);
+        preg_match_all('/^\s*use\s+([\w\\\\,\s]+);/m', $body, $traits);
+
+        foreach (preg_split('/\s*,\s*/', implode(',', $traits[1])) ?: [] as $trait) {
+            if (trim($trait) !== '') {
+                $declarers[] = strtolower(code_index_resolve(trim($trait), $namespace, $uses, ''));
+            }
+        }
+    }
+
+    foreach (array_unique($declarers) as $declarer) {
+        $source = isset($indexed['files'][$declarer]) ? (string) @file_get_contents($indexed['files'][$declarer]) : '';
+
+        foreach (array_keys(code_index_relations_in($source)[$declarer] ?? []) as $relation) {
+            $relations[$relation] ??= $declarer;
+        }
+    }
+
+    return $relations;
+};
+
+/** Every static call that adds a row, in app/: the file, the line, the class as written and the method. */
+$creations = function () use ($sh): array {
+    static $found = null;
+
+    if ($found !== null) {
+        return $found;
+    }
+
+    $found = [];
+
+    foreach (array_filter(explode("\n", $sh(['grep', '-n', '-E', '::('.CREATES.')\(', '--', 'app']))) as $hit) {
+        if (preg_match('/^([^:]+):(\d+):(.*)$/', $hit, $match) !== 1 || preg_match('#^\s*(\*|//|/\*|\#)#', $match[3]) === 1) {
+            continue;
+        }
+
+        preg_match_all('/(?<![\w\\\\$])(\\\\?[A-Za-z_][\w\\\\]*)::('.CREATES.')\s*\(/', $match[3], $calls, PREG_SET_ORDER);
+
+        foreach ($calls as $call) {
+            if (! in_array(strtolower($call[1]), ['self', 'static', 'parent'], true)) {
+                $found[] = ['file' => $match[1], 'line' => (int) $match[2], 'class' => $call[1], 'method' => $call[2]];
+            }
+        }
+    }
+
+    return $found;
+};
+
+/**
+ * The methods outside a model that add to it: through one of its relations, such
+ * as ->participants()->attach(, or with its own Model::create(, however the file
+ * names the class.
+ *
+ * @return array<string, array{file: string, name: string, line: int, what: string, note: string}> by the index's name of the method
+ */
+$addersTo = function (string $model) use (&$indexed, $linesOf, $enclosing, $fullClassOf, $writtenClass, $relationsOf, $creations): array {
     $file = $indexed['files'][$model];
     $written = $writtenClass($model);
 
     $adders = [];
-    $add = function (string $file, int $line, string $what) use (&$adders, $enclosing, $fullClassOf): void {
+    $add = function (string $file, int $line, string $what, string $note = '') use (&$adders, $enclosing, $fullClassOf): void {
         $name = $enclosing($file, $line);
         $class = $fullClassOf($file);
 
@@ -508,43 +571,67 @@ $addersTo = function (string $model) use (&$indexed, $linesOf, $enclosing, $full
             return;
         }
 
-        $adders["{$class}::".strtolower($name)] ??= ['file' => $file, 'name' => $name, 'line' => $line, 'what' => $what];
+        $adders["{$class}::".strtolower($name)] ??= ['file' => $file, 'name' => $name, 'line' => $line, 'what' => $what, 'note' => $note];
     };
 
+    // The methods that use the model itself: a parent's or a trait's relation is called on
+    // every class that has it, and only a method that works with this model calls it on this one.
+    $users = [];
+
+    foreach ($indexed['callers'] as $callee => $callers) {
+        if (str_starts_with($callee, "{$model}::")) {
+            $users += $callers;
+        }
+    }
+
     // Through a relation: its callers in the index, and in each the line that adds.
-    foreach (array_keys(code_index_relations_in((string) @file_get_contents($file))[$model] ?? []) as $relation) {
-        foreach (array_keys($indexed['callers']["{$model}::{$relation}"] ?? []) as $source) {
+    foreach ($relationsOf($model) as $relation => $declarer) {
+        foreach (array_keys(($indexed['callers']["{$model}::{$relation}"] ?? []) + ($indexed['callers']["{$declarer}::{$relation}"] ?? [])) as $source) {
             [$sourceClass] = explode('::', $source, 2);
             $sourceFile = $indexed['files'][$sourceClass] ?? null;
 
-            if (str_starts_with($source, 'file:') || $sourceClass === $model || $sourceFile === null) {
+            if (str_starts_with($source, 'file:') || $sourceClass === $model || $sourceFile === null
+                || ($declarer !== $model && ! isset($indexed['callers']["{$model}::{$relation}"][$source]) && ! isset($users[$source]))) {
                 continue;
             }
 
             $text = implode('', $linesOf($sourceFile));
 
-            if (preg_match_all('/->\s*'.preg_quote($relation, '/').'\s*\(\s*\)\s*->\s*('.ADDS.')\s*\(/i', $text, $found, PREG_OFFSET_CAPTURE) > 0) {
-                foreach ($found[0] as $index => [$match, $offset]) {
-                    $line = substr_count(substr($text, 0, $offset), "\n") + 1;
+            if (preg_match_all('/->\s*'.preg_quote($relation, '/').'\s*\(\s*\)\s*->\s*('.ADDS.')\s*\(/i', $text, $found, PREG_OFFSET_CAPTURE) === 0) {
+                continue;
+            }
 
-                    if ("{$fullClassOf($sourceFile)}::".strtolower((string) $enclosing($sourceFile, $line)) === $source) {
-                        $add($sourceFile, $line, "{$written}->".ltrim((string) preg_replace('/\s+/', '', $match), '->').')');
-                    }
+            // The index says the method calls this relation on the model, not on which line:
+            // where it also calls one of the same name on another class, either may be the one.
+            $others = [];
+
+            foreach ($indexed['callers'] as $callee => $callers) {
+                if (isset($callers[$source]) && str_ends_with($callee, "::{$relation}") && ! in_array(explode('::', $callee, 2)[0], [$model, $declarer], true)) {
+                    $others[] = $writtenClass(explode('::', $callee, 2)[0]);
+                }
+            }
+
+            foreach ($found[0] as [$match, $offset]) {
+                $line = substr_count(substr($text, 0, $offset), "\n") + 1;
+
+                if ("{$fullClassOf($sourceFile)}::".strtolower((string) $enclosing($sourceFile, $line)) === $source) {
+                    $add($sourceFile, $line, "{$written}->".ltrim((string) preg_replace('/\s+/', '', $match), '->').')',
+                        $others === [] ? '' : ', or on `'.implode('`, `', array_unique($others)).'`, which it calls it on as well');
                 }
             }
         }
     }
 
-    // With the model's own static call, in a file that names it.
-    foreach (array_filter(explode("\n", $sh(['grep', '-n', '-E', '\b'.$written.'::('.CREATES.')\(', '--', 'app']))) as $hit) {
-        if (preg_match('/^([^:]+):(\d+):(.*)$/', $hit, $match) !== 1 || $match[1] === $file || preg_match('#^\s*(\*|//|/\*|\#)#', $match[3]) === 1) {
+    // With the model's own static call, however the file names the class.
+    foreach ($creations() as $creation) {
+        if ($creation['file'] === $file) {
             continue;
         }
 
-        [$namespace, $uses] = code_index_imports((string) @file_get_contents($match[1]));
+        [$namespace, $uses] = code_index_imports(implode('', $linesOf($creation['file'])));
 
-        if (strtolower(code_index_resolve($written, $namespace, $uses, '')) === $model && preg_match('/\b'.$written.'::('.CREATES.')\(/', $match[3], $call) === 1) {
-            $add($match[1], (int) $match[2], "{$written}::{$call[1]}()");
+        if (strtolower(code_index_resolve($creation['class'], $namespace, $uses, '')) === $model) {
+            $add($creation['file'], $creation['line'], "{$written}::{$creation['method']}()");
         }
     }
 
@@ -643,6 +730,10 @@ foreach ($checks as $key => $check) {
     }
 
     if ($adding === []) {
+        if ($central !== []) {
+            $out[] = "  `{$check['name']}` reads ".implode(', ', $central).', added to in too many places to list.';
+        }
+
         continue;
     }
 
@@ -660,8 +751,8 @@ foreach ($checks as $key => $check) {
 
     foreach ($adding as $entry => ['adder' => $adder, 'distance' => $distance]) {
         $out[] = $distance === 0
-            ? "  - `{$entry}`, with `{$adder['what']}` at line {$adder['line']}"
-            : "  - `{$entry}`, through `{$adder['name']}`, with `{$adder['what']}` at `{$adder['file']}:{$adder['line']}`";
+            ? "  - `{$entry}`, with `{$adder['what']}` at line {$adder['line']}{$adder['note']}"
+            : "  - `{$entry}`, through `{$adder['name']}`, with `{$adder['what']}` at `{$adder['file']}:{$adder['line']}`{$adder['note']}";
     }
 }
 

@@ -477,3 +477,91 @@ it('names, with the code index, the ways in that add to the models a changed che
         ->not->toContain('GroupController.php::handleForm`,')
         ->not->toContain('JoinController.php::store`, with');
 });
+
+it('finds the data a check reads through a trait\'s relation and a renamed import, and names a model added to everywhere with a count', function () {
+    ($this->put)('app/Models/Concerns/HasParticipants.php', "<?php\n\nnamespace App\\Models\\Concerns;\n\ntrait HasParticipants\n{\n    public function participants()\n    {\n        return \$this->belongsToMany(\\App\\Models\\Member::class);\n    }\n}\n");
+    ($this->put)('app/Models/Group.php', "<?php\n\nnamespace App\\Models;\n\nclass Group extends Model\n{\n    use Concerns\\HasParticipants;\n}\n");
+    ($this->put)('app/Models/Event.php', "<?php\n\nnamespace App\\Models;\n\nclass Event extends Model\n{\n    use Concerns\\HasParticipants;\n}\n");
+    ($this->put)('app/Models/AllowedMember.php', "<?php\n\nnamespace App\\Models;\n\nclass AllowedMember extends Model\n{\n}\n");
+    ($this->put)('app/Models/Log.php', "<?php\n\nnamespace App\\Models;\n\nclass Log extends Model\n{\n}\n");
+    ($this->put)('app/Services/GroupAccess.php', "<?php\n\nnamespace App\\Services;\n\nuse App\\Models\\AllowedMember;\nuse App\\Models\\Group;\nuse App\\Models\\Log;\n\nclass GroupAccess\n{\n    public function allows(\$group, \$member)\n    {\n        Log::query()->count();\n\n        return Group::query()->whereKey(\$group->id)->exists() && AllowedMember::query()->exists();\n    }\n}\n");
+    ($this->put)('app/Http/Controllers/SignupController.php', <<<'PHP'
+        <?php
+
+        namespace App\Http\Controllers;
+
+        use App\Models\AllowedMember as Allowed;
+        use App\Models\Event;
+        use App\Models\Group;
+
+        class SignupController
+        {
+            public function store($id)
+            {
+                Group::find($id)->participants()->attach(auth()->id());
+            }
+
+            public function both($id)
+            {
+                Group::find($id)->participants()->count();
+                Event::find($id)->participants()->attach(auth()->id());
+            }
+
+            public function grant()
+            {
+                Allowed::create(['member_id' => auth()->id()]);
+            }
+
+            public function invite()
+            {
+                \App\Models\AllowedMember::create(['member_id' => request('member')]);
+            }
+        }
+        PHP);
+    ($this->put)('app/Http/Controllers/EventController.php', "<?php\n\nnamespace App\\Http\\Controllers;\n\nuse App\\Models\\Event;\n\nclass EventController\n{\n    public function join(\$id)\n    {\n        Event::find(\$id)->participants()->attach(auth()->id());\n    }\n}\n");
+
+    // Every request writes a log line: a model added to everywhere.
+    $logs = '';
+
+    foreach (range(1, 11) as $number) {
+        $logs .= "    public function write{$number}()\n    {\n        \\App\\Models\\Log::create([]);\n    }\n\n";
+    }
+
+    ($this->put)('app/Http/Controllers/LogController.php', "<?php\n\nnamespace App\\Http\\Controllers;\n\nclass LogController\n{\n{$logs}}\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Groups');
+    ($this->put)('app/Services/GroupAccess.php', str_replace('->exists() &&', "->where('open', true)->exists() &&", File::get("{$this->dir}/app/Services/GroupAccess.php")));
+    ($this->git)('commit', '-qam', 'Only open groups');
+
+    $index = "{$this->dir}/.index";
+    File::ensureDirectoryExists($index);
+    // A trait's relation is known by the trait; the model the call is on, by the other calls the method makes.
+    File::put("{$index}/edges.tsv", implode("\n", [
+        "app\\http\\controllers\\signupcontroller::store\tapp\\models\\group::find",
+        "app\\http\\controllers\\signupcontroller::store\tapp\\models\\concerns\\hasparticipants::participants",
+        "app\\http\\controllers\\signupcontroller::both\tapp\\models\\group::participants",
+        "app\\http\\controllers\\signupcontroller::both\tapp\\models\\event::participants",
+        "app\\http\\controllers\\eventcontroller::join\tapp\\models\\event::find",
+        "app\\http\\controllers\\eventcontroller::join\tapp\\models\\concerns\\hasparticipants::participants",
+    ])."\n");
+    File::put("{$index}/classes.tsv", implode("\n", [
+        "app\\models\\group\tapp/Models/Group.php", "app\\models\\event\tapp/Models/Event.php", "app\\models\\log\tapp/Models/Log.php",
+        "app\\models\\allowedmember\tapp/Models/AllowedMember.php", "app\\models\\concerns\\hasparticipants\tapp/Models/Concerns/HasParticipants.php",
+        "app\\services\\groupaccess\tapp/Services/GroupAccess.php", "app\\http\\controllers\\signupcontroller\tapp/Http/Controllers/SignupController.php",
+        "app\\http\\controllers\\eventcontroller\tapp/Http/Controllers/EventController.php", "app\\http\\controllers\\logcontroller\tapp/Http/Controllers/LogController.php",
+    ])."\n");
+    File::put("{$index}/ancestors.tsv", implode("\n", array_map(fn (string $model): string => "app\\models\\{$model}\tilluminate\\database\\eloquent\\model", ['group', 'event', 'log', 'allowedmember']))."\n");
+
+    $reach = Process::path($this->dir)->env(['REACH_INDEX' => $index])
+        ->run(['php', realpath(__DIR__.'/../../resources/review/skill/reach.php'), 'main', 'HEAD'])->throw()->output();
+
+    expect($reach)
+        ->toContain('`allows` reads `Log`, `Group`, `AllowedMember` (of which `Log` (11 methods) are added to in too many places to list)')
+        ->toContain('- `app/Http/Controllers/SignupController.php::store`, with `Group->participants()->attach()` at line 13')
+        ->toContain('- `app/Http/Controllers/SignupController.php::both`, with `Group->participants()->attach()` at line 19, or on `Event`, which it calls it on as well')
+        ->toContain('- `app/Http/Controllers/SignupController.php::grant`, with `AllowedMember::create()` at line 24')
+        ->toContain('- `app/Http/Controllers/SignupController.php::invite`, with `AllowedMember::create()` at line 29')
+        // Event has the same trait; joining one is not joining a group.
+        ->not->toContain('EventController')
+        ->not->toContain('LogController');
+});
