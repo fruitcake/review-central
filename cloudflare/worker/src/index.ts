@@ -40,7 +40,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
  * after one is told apart. tests/Feature/CloudflareWorkerVersionTest.php fails
  * on a change that leaves it as it was.
  */
-const WORKER_VERSION = "2026-11-25.2";
+const WORKER_VERSION = "2026-11-26.1";
 
 interface Env {
   REVIEW_SANDBOX: DurableObjectNamespace<ReviewSandbox>;
@@ -190,6 +190,26 @@ const REVIEWER_STARTED = "/var/lib/review/reviewer-started";
  * the reviewer and it cannot change what root owns. Used only where PROBE showed
  * it works; a sandbox where it does not is never kept for another review.
  */
+/**
+ * How often the step's output is followed again after the connection to it was lost,
+ * and how long it waits before each time: the step goes on in the sandbox meanwhile.
+ */
+const MOST_REATTACHES = 8;
+const REATTACH_WAIT_MS = 3000;
+
+/**
+ * Starts the step as a process of its own: in a session of its own, so the exec that
+ * started it can end and it goes on, with what it prints in a file and its exit code
+ * in another once it ends. Root owns the directory, so the reviewer cannot write the
+ * exit code. Waits until it has written its process id.
+ */
+const DETACH = `dir=$1; shift
+mkdir -p "$dir" && chmod 700 "$dir"
+setsid sh -c 'd=$1; shift; echo $$ > "$d/pid"; "$@" > "$d/log" 2>&1; echo $? > "$d/code.tmp"; mv "$d/code.tmp" "$d/code"' step "$dir" "$@" < /dev/null > /dev/null 2>&1 &
+i=0
+while [ ! -s "$dir/pid" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+cat "$dir/pid"`;
+
 const UNPRIVILEGED = ["setpriv", "--reuid=1000", "--regid=1000", "--clear-groups", "--inh-caps=-all", "--ambient-caps=-all", "--bounding-set=-all", "--no-new-privs"];
 
 /** Run through UNPRIVILEGED: succeeds only with no capabilities left, none to get back, and a root-owned file it cannot write. */
@@ -790,6 +810,8 @@ export class ReviewSandbox extends DurableObject<Env> {
 
   /** What the script runs now, stopped when the run is let go. */
   private current: ExecProcess | null = null;
+  /** The process group of a step started with DETACH, which killing its follower does not stop. */
+  private group: string | null = null;
 
   private readonly encoder = new TextEncoder();
 
@@ -842,6 +864,10 @@ export class ReviewSandbox extends DurableObject<Env> {
   private abandon(): void {
     this.abandoned = true;
     this.current?.kill();
+
+    if (this.group !== null) {
+      void this.ctx.container?.exec(["kill", "-TERM", "--", `-${this.group}`], { stdout: "ignore", stderr: "ignore" }).catch(() => undefined);
+    }
   }
 
   /**
@@ -1129,6 +1155,84 @@ export class ReviewSandbox extends DurableObject<Env> {
       }
     };
 
+    /** The text a short command prints, or null when it fails. */
+    const read = async (command: string[], options: ContainerExecOptions = {}): Promise<string | null> => {
+      const process = await container.exec(command, { ...options, stdout: "pipe", stderr: "ignore" });
+      const text = process.stdout === null ? "" : await new Response(process.stdout as ReadableStream<Uint8Array>).text();
+
+      return (await process.exitCode) === 0 ? text : null;
+    };
+
+    /**
+     * Runs a long command as a process of its own (DETACH) and streams what it prints
+     * by following its output file. The connection to an exec can be lost while the
+     * sandbox goes on ("Network connection lost"): then the file is followed again from
+     * the byte it got to, and the step is not lost with the connection.
+     */
+    const followed = async (command: string[], options: ContainerExecOptions): Promise<number> => {
+      // Root's own, where the step runs through setpriv; where it runs as the reviewer's
+      // user it has to be able to write it, as it can its exit code there too.
+      const dir = `${options.user === undefined ? "/var/lib/review-steps" : "/tmp/review-steps"}/${crypto.randomUUID()}`;
+      // Started with the step's directory and environment, which its process keeps.
+      const pid = (await read(["sh", "-c", DETACH, "detach", dir, ...command], options))?.trim() ?? "";
+
+      if (!/^\d+$/.test(pid)) {
+        throw new Error("The step did not start.");
+      }
+
+      this.group = pid;
+      let offset = 0;
+      let lost = 0;
+
+      try {
+        for (;;) {
+          if (!wanted()) {
+            await container.exec(["kill", "-TERM", "--", `-${pid}`], { stdout: "ignore", stderr: "ignore" }).catch(() => undefined);
+
+            return 143;
+          }
+
+          try {
+            // From the next byte; ends a second after the step does.
+            const tail = await container.exec(["tail", "-c", `+${offset + 1}`, `--pid=${pid}`, "-F", `${dir}/log`], { stdout: "pipe", stderr: "ignore" });
+            this.current = tail;
+
+            if (tail.stdout !== null) {
+              for await (const chunk of tail.stdout as ReadableStream<Uint8Array>) {
+                offset += chunk.byteLength;
+                await send("output", decoder.decode(chunk, { stream: true }));
+
+                if (!wanted()) {
+                  break;
+                }
+              }
+            }
+
+            if (!wanted()) {
+              continue;
+            }
+
+            await tail.exitCode;
+            const code = (await read(["cat", `${dir}/code`]))?.trim() ?? "";
+
+            // No exit code: the step was killed before it could write one.
+            return /^\d+$/.test(code) ? Number(code) : 143;
+          } catch (error) {
+            if (++lost > MOST_REATTACHES) {
+              throw error;
+            }
+
+            await send("note", `The connection to the step was lost (${error instanceof Error ? error.message : String(error)}); it goes on in the sandbox, and its output is followed again from byte ${offset}.`);
+            await new Promise((resolve) => setTimeout(resolve, REATTACH_WAIT_MS * lost));
+          } finally {
+            this.current = null;
+          }
+        }
+      } finally {
+        this.group = null;
+      }
+    };
+
     // No snapshot to be had, and a setup to run: installed here, for this review
     // alone, as a last resort.
     if (!warm && !prepared && spec.setup !== null) {
@@ -1258,7 +1362,8 @@ export class ReviewSandbox extends DurableObject<Env> {
       await this.must(["sh", "-c", `mkdir -p "$(dirname ${REVIEWER_STARTED})" && touch ${REVIEWER_STARTED}`], "mark the reviewer's start");
     }
 
-    const exitCode = await streamed(
+    // Followed, not streamed: the review runs for minutes, and outlives a lost connection.
+    const exitCode = await followed(
       asReviewer(["timeout", "--signal=TERM", "--kill-after=30", String(spec.timeout), "sh", "-c", spec.script]),
       {
         cwd: "/work",
