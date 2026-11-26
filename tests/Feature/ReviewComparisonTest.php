@@ -590,12 +590,12 @@ it('tries a plain review with every part off, a setup with only the parts it nam
 
     $comparison = ReviewComparison::query()->sole();
 
-    expect($comparison->rows[0])->toMatchArray(['verify' => false, 'modules' => ['ocr' => false, 'scan' => false, 'floor_guard' => false, 'extra_passes' => false, 'verify' => false]])
+    expect($comparison->rows[0])->toMatchArray(['verify' => false, 'modules' => ['ocr' => false, 'scan' => false, 'floor_guard' => false, 'reach' => false, 'code_index' => false, 'extra_passes' => false, 'verify' => false]])
         // Left alone, a part runs as the repository has it, the second check too.
         ->and($comparison->rows[1]['modules'])->toBe(['ocr' => false])
         ->and($comparison->rows[1]['verify'])->toBeNull();
 
-    ($this->run)(51, [], attributes: ['modules' => ['ocr' => false, 'scan' => false, 'floor_guard' => false, 'extra_passes' => false, 'verify' => false]]);
+    ($this->run)(51, [], attributes: ['modules' => ['ocr' => false, 'scan' => false, 'floor_guard' => false, 'reach' => false, 'code_index' => false, 'extra_passes' => false, 'verify' => false]]);
 
     livewire(ViewReviewComparison::class, ['record' => $comparison->uuid])
         ->assertSee('plain: the reviewer alone')

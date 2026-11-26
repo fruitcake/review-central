@@ -1,0 +1,9 @@
+{
+    "description": "Mago's PHP SDK for code-index-worker.php, installed from composer.lock as it is: never resolved or updated in a review.",
+    "require": {
+        "carthage-software/mago": "1.61.0"
+    },
+    "config": {
+        "allow-plugins": false
+    }
+}

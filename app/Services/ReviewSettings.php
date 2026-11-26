@@ -83,6 +83,8 @@ class ReviewSettings
         'ocr' => 'REVIEW_OCR',
         'scan' => 'REVIEW_SCAN',
         'floor_guard' => 'REVIEW_FLOOR_GUARD',
+        'reach' => 'REVIEW_REACH',
+        'code_index' => 'REVIEW_CODE_INDEX',
     ];
 
     /**
@@ -99,6 +101,8 @@ class ReviewSettings
         'ocr' => true,
         'scan' => true,
         'floor_guard' => true,
+        'reach' => true,
+        'code_index' => false,
         'extra_passes' => null,
         'verify' => false,
     ];
@@ -108,6 +112,8 @@ class ReviewSettings
         'ocr' => 'OCR',
         'scan' => 'scan',
         'floor_guard' => 'floor guard',
+        'reach' => 'reach',
+        'code_index' => 'code index',
         'extra_passes' => 'extra passes',
         'verify' => 'second check',
     ];

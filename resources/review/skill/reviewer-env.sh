@@ -200,6 +200,88 @@ reviewer_php() {
   php -r 'exit(PHP_MAJOR_VERSION >= 8 ? 0 : 1);' 2> /dev/null && command -v php
 }
 
+# How far a Laravel change reaches (reach.php): the entry points that reach a
+# check it adds or changes, and those that reach the same class's writes without
+# it. Only for the laravel stack, whose entry points it knows. Nothing otherwise.
+reviewer_reach() {
+  [ "${REVIEW_REACH:-true}" = "false" ] && return 0
+  jq -e '(.settings.stack // []) | index("laravel")' review-context.json > /dev/null 2>&1 || return 0
+  _destination="${BITBUCKET_PR_DESTINATION_BRANCH:-}"
+  [ -n "$_destination" ] || _destination=$(jq -r '.pull_request.destination_branch // empty' review-context.json 2>/dev/null)
+  [ -n "$_destination" ] || return 0
+  _php=$(reviewer_php) || return 0
+  _index=""
+  [ "${REVIEW_CODE_INDEX:-false}" = "true" ] && _index=$(reviewer_code_index "$_php")
+  REACH_INDEX="$_index" "$_php" "$HERE/reach.php" "origin/$_destination" "${BITBUCKET_COMMIT:-HEAD}" 2>/dev/null || true
+}
+
+# The code index REACH follows when the team turned it on: Mago's analysis of the
+# checkout, with each call resolved by type, written by code-index-worker.php. It
+# prints the directory that holds it, or nothing; REACH then goes by name, as
+# without it. What it did goes to stderr, for the run's log.
+# Mago's own release binary, checked against its checksum, and its PHP SDK from the
+# lock in code-index/: nothing is resolved or updated during a review. Composer runs
+# on the PHP the worker runs on ($1), not on the checkout's, which can be older.
+REVIEW_MAGO_VERSION=1.61.0
+reviewer_mago() {
+  _php="$1"
+  _tools="$HOME/.tools/code-index-$REVIEW_MAGO_VERSION"
+  if [ ! -x "$_tools/mago" ] || [ ! -f "$_tools/vendor/autoload.php" ]; then
+    case "$(uname -m)" in
+      x86_64 | amd64) _arch=x86_64 _sum=d515d29fcca5ec7fefef51019de788336ce610c2b38b28a18b9033042106bf74 ;;
+      aarch64 | arm64) _arch=aarch64 _sum=8bff94ca1931394df743c7b68e7ec78f711c34ac2ec118b7df2cbfa2dcda2a91 ;;
+      *) echo "Code index: no Mago build for $(uname -m)." >&2; return 1 ;;
+    esac
+    _name="mago-$REVIEW_MAGO_VERSION-$_arch-unknown-linux-musl"
+    mkdir -p "$_tools" \
+      && curl -fsSL -o "$_tools/mago.tar.gz" "https://github.com/carthage-software/mago/releases/download/$REVIEW_MAGO_VERSION/$_name.tar.gz" \
+      && echo "$_sum  $_tools/mago.tar.gz" | sha256sum -c --quiet - >&2 \
+      && tar -xzf "$_tools/mago.tar.gz" -C "$_tools" --strip-components=1 "$_name/mago" \
+      && rm -f "$_tools/mago.tar.gz" \
+      && cp "$HERE/code-index/composer.json" "$HERE/code-index/composer.lock" "$_tools/" \
+      && (cd "$_tools" && timeout 300 "$_php" "$(command -v composer)" install --no-interaction --quiet --no-progress --no-dev --no-scripts --no-plugins) >&2 \
+      || { rm -rf "$_tools"; return 1; }
+  fi
+  echo "$_tools"
+}
+
+reviewer_code_index() {
+  _php="$1"
+  _started=$(date +%s)
+  _tools=$(reviewer_mago "$_php") || { echo "Code index: Mago could not be installed; REACH goes by name." >&2; return 0; }
+  # Without vendor/ a model is known by its base class's name only; with it, by its types.
+  if [ -f composer.lock ] && [ ! -d vendor ]; then
+    timeout 600 composer install --no-interaction --quiet --no-progress --no-scripts --no-plugins --no-autoloader --ignore-platform-reqs >&2 \
+      || echo "Code index: composer install failed; indexing without vendor/." >&2
+  fi
+  _dir=$(mktemp -d)
+  _paths=""
+  for _p in app routes; do [ -d "$_p" ] && _paths="$_paths\"$_p\", "; done
+  [ -n "$_paths" ] || { echo "Code index: no app/ or routes/ to index." >&2; return 0; }
+  {
+    echo "php-version = \"$("$_php" -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')\""
+    echo '[source]'
+    echo "paths = [${_paths%, }]"
+    [ -d vendor ] && echo 'includes = ["vendor"]'
+    echo '[extension-hosts.code-index]'
+    echo "command = [\"$_php\", \"-d\", \"memory_limit=1G\", \"$HERE/code-index-worker.php\"]"
+    echo 'workers = 1'
+    echo 'request-timeout-ms = 600000'
+    echo 'maximum-payload-size = 1073741824'
+    echo '[analyzer]'
+    echo 'plugins = ["code-index"]'
+  } > "$_dir/mago.toml"
+  REACH_INDEX="$_dir" REACH_ROOT="$PWD" MAGO_SDK="$_tools/vendor/autoload.php" \
+    timeout 300 "$_tools/mago" --threads 2 --config "$_dir/mago.toml" --workspace "$PWD" analyze --reporting-format count > /dev/null 2> "$_dir/mago.log"
+  _status=$?
+  if [ ! -s "$_dir/edges.tsv" ]; then
+    echo "Code index: Mago wrote no index (exit $_status, $(( $(date +%s) - _started ))s); REACH goes by name. $(tail -c 300 "$_dir/mago.log" | tr '\n' ' ')" >&2
+    return 0
+  fi
+  echo "Code index: $(wc -l < "$_dir/edges.tsv") calls in $(( $(date +%s) - _started ))s." >&2
+  echo "$_dir"
+}
+
 # The same steps for a reviewer that reads SKILL.md as a file rather than being
 # handed it: said to belong to it, and left out where the file it reads still
 # holds them.
