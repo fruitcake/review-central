@@ -99,7 +99,8 @@ class EditProfile extends BaseEditProfile
                     ->label('Language')
                     ->options(Language::options())
                     ->enum(Language::class)
-                    ->placeholder(fn (): string => Language::tryFrom(config('app.locale'))?->label() ?? 'English')
+                    // Not the installation's language by name: the user's own has replaced it in config by now.
+                    ->placeholder('Installation default')
                     ->helperText('The language you read Review Central in. Not all of it is translated yet: what is not stays in English.'),
                 self::landingSection(),
                 $this->getPasswordFormComponent(),
