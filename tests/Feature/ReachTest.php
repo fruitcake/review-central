@@ -315,3 +315,25 @@ it('takes a policy\'s methods, and a method a changed line guards, as checks', f
         ->toContain('- `app/Http/Controllers/LessonController.php::update`, which writes itself, with no guard of its own')
         ->not->toContain('LessonController.php::destroy`, which');
 });
+
+it('gives the code index only the vendor packages the code uses, with what they require', function () {
+    // Three installed packages: one the code imports, one that one requires, one nothing reaches.
+    $package = fn (string $name, string $namespace, array $require = []) => ['name' => $name, 'install-path' => "../{$name}", 'autoload' => ['psr-4' => [$namespace => 'src/']], 'require' => $require];
+    File::ensureDirectoryExists("{$this->dir}/vendor/composer");
+    File::put("{$this->dir}/vendor/composer/installed.json", json_encode(['packages' => [
+        $package('acme/payments', 'Acme\\Payments\\', ['php' => '^8.2', 'acme/money' => '^1']),
+        $package('acme/money', 'Acme\\Money\\'),
+        $package('acme/unused', 'Acme\\Unused\\'),
+    ]]));
+    foreach (['acme/payments', 'acme/money', 'acme/unused'] as $name) {
+        File::ensureDirectoryExists("{$this->dir}/vendor/{$name}");
+    }
+    ($this->put)('app/Services/Checkout.php', "<?php\n\nuse Acme\\Payments\\Gateway;\n\nclass Checkout {}\n");
+    $includes = fn (): string => Process::path($this->dir)->run(['php', realpath(__DIR__.'/../../resources/review/skill/code-index-includes.php'), 'app', 'routes'])->throw()->output();
+
+    expect(explode("\n", trim($includes())))->toEqualCanonicalizing(['vendor/acme/payments', 'vendor/acme/money']);
+
+    // Without Composer's list, nothing: the caller takes all of vendor/.
+    File::delete("{$this->dir}/vendor/composer/installed.json");
+    expect($includes())->toBe('');
+});
