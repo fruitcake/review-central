@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\Language;
 use App\Filament\Admin\Pages\Settings;
 use App\Filament\Auth\EditProfile;
 use App\Models\Tenant;
@@ -42,6 +43,22 @@ it('keeps the profile for a user in no tenant, and the admin of an installation 
     $this->actingAs(User::factory()->create(['is_admin' => true]))
         ->get('/admin')
         ->assertSee(url('app/profile'));
+});
+
+it('shows the panels in the language chosen on the profile', function () {
+    $tenant = Tenant::factory()->create(['slug' => 'acme']);
+    $user = User::factory()->create(['password' => 'secret-password']);
+    $user->tenants()->attach($tenant);
+    $this->actingAs($user)->get('/app/acme')->assertSee('Sign out')->assertDontSee('Uitloggen');
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+
+    livewire(EditProfile::class)
+        ->fillForm(['language' => 'nl'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($user->fresh()->language)->toBe(Language::Dutch);
+    $this->actingAs($user->fresh())->get('/app/acme')->assertSee('Uitloggen');
 });
 
 it('changes the email only once the new address has opened the link mailed to it', function () {

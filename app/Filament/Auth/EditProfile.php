@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Auth;
 
 use App\Enums\LandingPage;
+use App\Enums\Language;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\Landing;
@@ -94,6 +95,12 @@ class EditProfile extends BaseEditProfile
                     ->placeholder('A nickname, login or account ID')
                     ->nestedRecursiveRules(['string', 'max:120'])
                     ->helperText('Your nickname or login on a host whose account you did not connect, as its pull requests name you: "With me" under Pull requests lists the ones whose turn is yours. They only tell which pull requests are yours, and give no access. Without any account, your name here is matched to the name the host shows.'),
+                Select::make('language')
+                    ->label('Language')
+                    ->options(Language::options())
+                    ->enum(Language::class)
+                    ->placeholder(fn (): string => Language::tryFrom(config('app.locale'))?->label() ?? 'English')
+                    ->helperText('The language you read Review Central in. Not all of it is translated yet: what is not stays in English.'),
                 self::landingSection(),
                 $this->getPasswordFormComponent(),
                 $this->getPasswordConfirmationFormComponent(),

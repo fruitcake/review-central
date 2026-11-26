@@ -4,6 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Enums\LandingPage;
+use App\Enums\Language;
 use App\Services\Landing;
 use Carbon\CarbonInterface;
 use Database\Factories\UserFactory;
@@ -35,11 +36,12 @@ use Laravel\Passport\HasApiTokens;
  * @property array<int, string>|null $source_accounts Who they are on hosts they connected no account of: a nickname, login or account ID each
  * @property LandingPage|null $landing_page Where they chose to land after signing in; null for where their role sends them
  * @property int|null $landing_tenant_id The tenant they chose to land in, and open the tenant panel on
+ * @property Language|null $language The language they read the panels in; null for the installation's own
  * @property string|null $remember_token
  * @property CarbonInterface|null $created_at
  * @property CarbonInterface|null $updated_at
  */
-#[Fillable(['name', 'email', 'password', 'is_admin', 'source_accounts', 'landing_page', 'landing_tenant_id'])]
+#[Fillable(['name', 'email', 'password', 'is_admin', 'source_accounts', 'landing_page', 'landing_tenant_id', 'language'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable implements FilamentUser, HasDefaultTenant, HasTenants, OAuthenticatable
 {
@@ -64,6 +66,7 @@ class User extends Authenticatable implements FilamentUser, HasDefaultTenant, Ha
             'is_admin' => 'boolean',
             'source_accounts' => 'array',
             'landing_page' => LandingPage::class,
+            'language' => Language::class,
         ];
     }
 
