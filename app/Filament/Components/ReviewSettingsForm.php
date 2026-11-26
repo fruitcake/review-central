@@ -148,7 +148,7 @@ class ReviewSettingsForm
                     'false' => 'Default: off',
                     default => 'Off',
                 })
-                ->helperText('For Laravel: before the review, Mago analyses the checkout and the reach of a changed check follows the calls it resolves by type, rather than every method of the same name. More precise, at about 15 seconds and 1.5 GB of memory, only for a change that touches a check; it runs composer install when the checkout has no vendor/. Without the memory, or when it fails, the reach goes by name as before. To try in a trial first.'),
+                ->helperText('For Laravel: before the review, Mago analyses the checkout and the reach of a changed check follows the calls it resolves by type, rather than every method of the same name. More precise, at about 20 seconds and 3 GB of memory per review; it runs composer install when the checkout has no vendor/. Without the memory, or when it fails, the reach goes by name as before. To try in a trial first.'),
             Select::make('verify')
                 ->label('Second check')
                 ->options(['true' => 'On', 'false' => 'Off'])

@@ -266,18 +266,11 @@ reviewer_code_index() {
   _paths=""
   for _p in app routes; do [ -d "$_p" ] && _paths="$_paths\"$_p\", "; done
   [ -n "$_paths" ] || { echo "Code index: no app/ or routes/ to index." >&2; return 0; }
-  # Only the packages the code uses, and what they require: most of an index is reading
-  # vendor/, and the rest of it resolves nothing the project calls. All of it, else.
-  _includes=""
-  if [ -d vendor ]; then
-    _includes=$("$_php" "$HERE/code-index-includes.php" app routes 2>/dev/null | sed 's/.*/"&"/' | paste -sd, -)
-    [ -n "$_includes" ] || _includes='"vendor"'
-  fi
   {
     echo "php-version = \"$("$_php" -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')\""
     echo '[source]'
     echo "paths = [${_paths%, }]"
-    [ -n "$_includes" ] && echo "includes = [$_includes]"
+    [ -d vendor ] && echo 'includes = ["vendor"]'
     echo '[extension-hosts.code-index]'
     echo "command = [\"$_php\", \"-d\", \"memory_limit=1G\", \"$HERE/code-index-worker.php\"]"
     echo 'workers = 1'
