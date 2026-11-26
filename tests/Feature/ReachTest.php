@@ -245,3 +245,33 @@ it('gives no reach when the team turned it off', function () {
     expect($reach([]))->toContain('REACH:')
         ->and($reach(['REVIEW_REACH' => 'false']))->toBe('');
 });
+
+it('builds the code index only for a change that touches a check, and goes by name when it cannot', function () {
+    ($this->git)('update-ref', 'refs/remotes/origin/main', 'main');
+    File::put("{$this->dir}/review-context.json", json_encode(['settings' => ['stack' => ['laravel']], 'pull_request' => ['destination_branch' => 'main']]));
+    // A curl that leaves a mark, and fails the download.
+    File::ensureDirectoryExists("{$this->dir}/bin");
+    File::put("{$this->dir}/bin/curl", "#!/bin/sh\ntouch \"{$this->dir}/curl-called\"\nexit 22\n");
+    chmod("{$this->dir}/bin/curl", 0755);
+    $skill = realpath(__DIR__.'/../../resources/review/skill');
+    $reach = fn () => Process::path($this->dir)
+        ->env(['REVIEW_CODE_INDEX' => 'true', 'HOME' => "{$this->dir}/home", 'PATH' => "{$this->dir}/bin:".getenv('PATH')])
+        ->run(['sh', '-c', ". {$skill}/reviewer-env.sh; HERE={$skill}; reviewer_reach"])->throw();
+
+    // No check changed: nothing is installed or built.
+    ($this->put)('app/Services/PaymentService.php', str_replace('$lesson->createParticipant($member);', "\$lesson->createParticipant(\$member);\n        logger('paid');", File::get("{$this->dir}/app/Services/PaymentService.php")));
+    ($this->git)('commit', '-qam', 'Log payments');
+    $quiet = $reach();
+
+    expect($quiet->output())->toBe('')
+        ->and($quiet->errorOutput())->toContain('Code index: not built, as the change touches no check.')
+        ->and(File::exists("{$this->dir}/curl-called"))->toBeFalse();
+
+    // A check changed, and Mago cannot be had: the reach by name.
+    ($this->put)('app/Models/Lesson.php', str_replace('return null;', "return \$this->invited(\$member) ? null : 'Not invited';", File::get("{$this->dir}/app/Models/Lesson.php")));
+    ($this->git)('commit', '-qam', 'Only invited members');
+    $byName = $reach();
+
+    expect($byName->output())->toContain('by method name')
+        ->and(File::exists("{$this->dir}/curl-called"))->toBeTrue();
+});

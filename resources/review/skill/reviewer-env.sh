@@ -210,9 +210,17 @@ reviewer_reach() {
   [ -n "$_destination" ] || _destination=$(jq -r '.pull_request.destination_branch // empty' review-context.json 2>/dev/null)
   [ -n "$_destination" ] || return 0
   _php=$(reviewer_php) || return 0
-  _index=""
-  [ "${REVIEW_CODE_INDEX:-false}" = "true" ] && _index=$(reviewer_code_index "$_php")
-  REACH_INDEX="$_index" "$_php" "$HERE/reach.php" "origin/$_destination" "${BITBUCKET_COMMIT:-HEAD}" 2>/dev/null || true
+  # By name first: in a second or two it says whether the change touches a check at all,
+  # and most do not; only then is the code index worth its time.
+  _reach=$("$_php" "$HERE/reach.php" "origin/$_destination" "${BITBUCKET_COMMIT:-HEAD}" 2>/dev/null) || _reach=""
+  if [ -n "$_reach" ] && [ "${REVIEW_CODE_INDEX:-false}" = "true" ]; then
+    _index=$(reviewer_code_index "$_php")
+    [ -n "$_index" ] && _reach=$(REACH_INDEX="$_index" "$_php" "$HERE/reach.php" "origin/$_destination" "${BITBUCKET_COMMIT:-HEAD}" 2>/dev/null || printf '%s' "$_reach")
+  elif [ "${REVIEW_CODE_INDEX:-false}" = "true" ]; then
+    echo "Code index: not built, as the change touches no check." >&2
+  fi
+  [ -n "$_reach" ] && printf '%s\n' "$_reach"
+  return 0
 }
 
 # The code index REACH follows when the team turned it on: Mago's analysis of the
