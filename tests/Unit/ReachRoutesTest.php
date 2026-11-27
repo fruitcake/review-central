@@ -154,7 +154,12 @@ it('reads resources() with their options, nested resources, and the actions a bo
 
         class ExportResource extends ResourceRegistrar
         {
-            protected $resourceDefaults = ['index', 'export', 'store'];
+            protected $resourceDefaults = ['index', 'export', 'restore', 'store'];
+
+            protected function addResourceRestore($name, $base, $controller, $options)
+            {
+                return $this->router->post($this->getResourceUri($name).'/{'.$base.'}/restore', $this->getResourceAction($name, $controller, 'restore', $options))->middleware('auth');
+            }
 
             protected function addResourceExport($name, $base, $controller, $options)
             {
@@ -185,6 +190,10 @@ it('reads resources() with their options, nested resources, and the actions a bo
     ($this->put)('app/Providers/RouteBindingServiceProvider.php', "<?php\n\nnamespace App\\Providers;\n\nclass RouteBindingServiceProvider\n{\n    public function boot()\n    {\n        \$registrar = new \\App\\Routes\\ExportResource(\$this->app['router']);\n        \$this->app->bind('Illuminate\\Routing\\ResourceRegistrar', fn () => \$registrar);\n    }\n}\n");
 
     expect(array_keys(routesOf($this->dir)))->toContain('ANY /photos/export/{type} app\http\controllers\photocontroller::export');
+
+    // Middleware the registrar's method adds itself is not read, so the stack is unknown.
+    ($this->put)('routes/web.php', "<?php\n\nuse App\\Http\\Controllers\\PhotoController;\n\nRoute::resource('photos', PhotoController::class)->only(['restore']);\n");
+    expect(routesOf($this->dir))->toBe(['POST /photos/{id}/restore app\http\controllers\photocontroller::restore' => ['web', '?']]);
 });
 
 it('takes the whole middleware stack as Laravel gathers it, and keeps what it cannot read as unknown', function () {

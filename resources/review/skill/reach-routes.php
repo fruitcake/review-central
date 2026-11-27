@@ -65,7 +65,7 @@ final class ReachRouteReader
     /** @var array<string, mixed> what a route file assigns to a variable, such as a list of middleware */
     private array $variables = [];
 
-    /** @var array<string, array{0: string, 1: string, 2: bool}> actions the application's bound ResourceRegistrar adds, such as export: methods, URI after the resource's, and false for apiResource */
+    /** @var array<string, array{0: string, 1: string, 2: bool, 3: bool}> actions the application's bound ResourceRegistrar adds, such as export: methods, URI after the resource's, false for apiResource, and whether its method adds middleware */
     private array $extraResourceActions = [];
 
     /** @var array<string, list<string>> middleware groups, by name: the kernel's and bootstrap/app.php's */
@@ -431,12 +431,13 @@ final class ReachRouteReader
                 }
 
                 // The URI as getResourceUri() and the strings after it build it; a member route's {base} as {id}.
-                $suffix = preg_match('/getResourceUri\s*\([^)]*\)((?:\s*\.\s*(?:[\'"][^\'"]*[\'"]|\$base))*)\s*;/', $method[1], $uri) === 1
-                    ? (string) preg_replace(['/\$base/', '/[\'"\s.]/'], ['{id}', ''], $uri[1])
+                $suffix = preg_match('/getResourceUri\s*\([^)]*\)((?:\s*\.\s*(?:[\'"][^\'"]*[\'"]|\$base))*)\s*[;,)]/', $method[1], $uri) === 1
+                    ? (string) preg_replace(['/\$base/', '/[\'"\s.]/'], ['id', ''], $uri[1])
                     : null;
 
                 if ($suffix !== null) {
-                    $this->extraResourceActions[$action] = [self::VERBS[strtolower($verb[1])], $suffix, false];
+                    // Middleware the method adds itself is not read: the route's stack is then unknown.
+                    $this->extraResourceActions[$action] = [self::VERBS[strtolower($verb[1])], $suffix, false, stripos($method[1], 'middleware') !== false];
                 }
             }
         }
@@ -613,7 +614,9 @@ final class ReachRouteReader
                         // The application's own registrar's actions, as its addResource methods say.
                         $actions = self::RESOURCE + ($api ? [] : $this->extraResourceActions);
 
-                        foreach ($actions as $action => [$methods, $suffix, $inApi]) {
+                        foreach ($actions as $action => $spec) {
+                            [$methods, $suffix, $inApi] = $spec;
+                            $ownMiddleware = $spec[3] ?? false;
                             $only = isset($options['only']) ? array_map(strtolower(...), array_filter((array) $options['only'], is_string(...))) : null;
                             $except = array_map(strtolower(...), array_filter((array) ($options['except'] ?? []), is_string(...)));
 
@@ -626,7 +629,7 @@ final class ReachRouteReader
                                 'uri' => $this->resourceUri($name).$suffix,
                                 'action' => strtolower($this->className($class, $context, $attributes)).'::'.$action,
                                 'resource' => $action,
-                                'middleware' => $this->names($options['middleware'] ?? []),
+                                'middleware' => [...$this->names($options['middleware'] ?? []), ...($ownMiddleware ? ['?'] : [])],
                                 'without' => $this->names($options['excluded_middleware'] ?? $options['withoutMiddleware'] ?? []),
                             ];
                         }
