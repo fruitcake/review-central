@@ -58,11 +58,14 @@ final class ReachRouteReader
     /** @var array<string, true> files read, so a file loaded twice is read once per context */
     private array $reading = [];
 
-    /** @var array<string, string> the provider's, for $this->namespace */
+    /** @var array<string, string> the RouteServiceProvider's namespace property, which a route group can name */
     private array $properties = [];
 
-    /** @var array<string, mixed> what a route file assigns to a variable, such as = [...] */
+    /** @var array<string, mixed> what a route file assigns to a variable, such as a list of middleware */
     private array $variables = [];
+
+    /** @var list<string> actions an application's own ResourceRegistrar adds to every resource, such as export */
+    private array $extraResourceActions = [];
 
     public function __construct(private readonly string $root) {}
 
@@ -72,6 +75,7 @@ final class ReachRouteReader
     public function read(): array
     {
         $this->readAliases();
+        $this->readResourceRegistrar();
         $loaded = $this->routes;
         $bootstrap = "{$this->root}/bootstrap/app.php";
 
@@ -260,6 +264,26 @@ final class ReachRouteReader
         }
     }
 
+    /** An application's own ResourceRegistrar, whose resource defaults can name more actions. */
+    private function readResourceRegistrar(): void
+    {
+        if (! is_dir("{$this->root}/app")) {
+            return;
+        }
+
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator("{$this->root}/app", FilesystemIterator::SKIP_DOTS)) as $file) {
+            if (! $file instanceof SplFileInfo || $file->getExtension() !== 'php') {
+                continue;
+            }
+
+            $source = (string) file_get_contents($file->getPathname());
+
+            if (str_contains($source, 'ResourceRegistrar') && preg_match('/\$resourceDefaults\s*=\s*\[([^\]]*)\]/', $source, $defaults) === 1) {
+                $this->extraResourceActions = array_values(array_diff(array_map(strtolower(...), reach_routes_literals($defaults[1])), array_keys(self::RESOURCE)));
+            }
+        }
+    }
+
     /** bootstrap/app.php: ->withRouting(web: ..., api: ..., then: function () { ... }). */
     private function readWithRouting(string $file): void
     {
@@ -402,13 +426,26 @@ final class ReachRouteReader
 
                     break;
 
-                case in_array($method, ['resource', 'apiresource'], true):
-                    $class = $value(1);
+                case in_array($method, ['resource', 'apiresource', 'resources', 'apiresources'], true):
+                    // resources(['photos' => PhotoController::class, ...]) is resource() for each.
+                    $resources = str_ends_with($method, 'resources') ? (is_array($value(0)) ? $value(0) : []) : [$value(0) => $value(1)];
+                    $api = str_starts_with($method, 'api');
 
-                    if (is_string($value(0)) && is_string($class)) {
-                        foreach (self::RESOURCE as $action => [$methods, $suffix, $api]) {
-                            if ($method === 'resource' || $api) {
-                                $pending[] = ['methods' => $methods, 'uri' => str_replace('.', '/', $value(0)).$suffix, 'action' => strtolower($this->className($class, $context, $attributes)).'::'.$action, 'resource' => $action];
+                    foreach ($resources as $name => $class) {
+                        if (! is_string($name) || ! is_string($class)) {
+                            continue;
+                        }
+
+                        $actions = self::RESOURCE;
+
+                        // An application's own registrar's extra actions, such as export, by their name.
+                        foreach ($api ? [] : $this->extraResourceActions as $extra) {
+                            $actions[$extra] = ['GET|HEAD', "/{$extra}", false];
+                        }
+
+                        foreach ($actions as $action => [$methods, $suffix, $inApi]) {
+                            if (! $api || $inApi) {
+                                $pending[] = ['methods' => $methods, 'uri' => str_replace('.', '/', $name).$suffix, 'action' => strtolower($this->className($class, $context, $attributes)).'::'.$action, 'resource' => $action];
                             }
                         }
                     }

@@ -137,3 +137,17 @@ it('adds the middleware a controller sets itself, for the methods it names', fun
         'GET|HEAD /posts app\http\controllers\postcontroller::index' => ['web'],
     ]);
 });
+
+it('reads resources() and the actions an application\'s own resource registrar adds', function () {
+    ($this->put)('app/Routes/ExportResource.php', "<?php\n\nnamespace App\\Routes;\n\nuse Illuminate\\Routing\\ResourceRegistrar;\n\nclass ExportResource extends ResourceRegistrar\n{\n    protected \$resourceDefaults = ['index', 'export', 'store'];\n}\n");
+    ($this->put)('routes/web.php', "<?php\n\nuse App\\Http\\Controllers\\TagController;\nuse App\\Http\\Controllers\\PhotoController;\n\nRoute::resource('photos', PhotoController::class)->only(['export']);\nRoute::apiResources(['tags' => TagController::class]);\n");
+
+    expect(array_keys(routesOf($this->dir)))->toBe([
+        'GET|HEAD /photos/export app\http\controllers\photocontroller::export',
+        'GET|HEAD /tags app\http\controllers\tagcontroller::index',
+        'POST /tags app\http\controllers\tagcontroller::store',
+        'GET|HEAD /tags/{id} app\http\controllers\tagcontroller::show',
+        'PUT|PATCH /tags/{id} app\http\controllers\tagcontroller::update',
+        'DELETE /tags/{id} app\http\controllers\tagcontroller::destroy',
+    ]);
+});
