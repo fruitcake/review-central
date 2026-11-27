@@ -271,8 +271,8 @@ it('tells a Worker that was not deployed again after a change, and a prepare tha
     ]);
 
     // Deployed before it said its version.
-    expect(($this->find)('the Worker is up to date'))->toMatchArray(['state' => SetupCheck::WRONG])
-        ->and(($this->find)('the Worker is up to date')['fix'])->toContain('npx wrangler deploy');
+    expect(($this->find)('the Worker runs another version'))->toMatchArray(['state' => SetupCheck::WRONG])
+        ->and(($this->find)('the Worker runs another version')['fix'])->toContain('npx wrangler deploy');
 
     PrepareCloudflareSandbox::ask();
 

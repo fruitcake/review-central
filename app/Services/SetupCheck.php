@@ -579,7 +579,8 @@ class SetupCheck
         if ($expected !== null) {
             $checks[] = $this->check(
                 $deployed === $expected,
-                'Cloudflare sandboxes: the Worker is up to date',
+                // Named for what is wrong when it is: a title that says it is up to date reads as if it were.
+                $deployed === $expected ? 'Cloudflare sandboxes: the Worker is up to date' : 'Cloudflare sandboxes: the Worker runs another version',
                 "Version {$expected}, as this installation has it.",
                 WorkerDeployment::ready()
                     ? 'Deploy the Worker, above, deploys this version.'
