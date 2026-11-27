@@ -33,7 +33,7 @@ class ReviewSettings
     public const TIERS = ['smartest', 'default', 'cheapest'];
 
     /** The model settings a tier is read for, with the SDK's driver it is read from. */
-    protected const TIERED = ['claude_model' => 'anthropic', 'claude_advisor' => 'anthropic', 'codex_model' => 'openai'];
+    protected const TIERED = ['claude_model' => 'anthropic', 'claude_advisor' => 'anthropic', 'claude_subagent_model' => 'anthropic', 'codex_model' => 'openai'];
 
     /**
      * The SDK's smartest, default and cheapest model of a provider, by tier; none
@@ -71,6 +71,7 @@ class ReviewSettings
         'claude_model' => 'CLAUDE_REVIEW_MODEL',
         'claude_effort' => 'CLAUDE_REVIEW_EFFORT',
         'claude_advisor' => 'CLAUDE_REVIEW_ADVISOR',
+        'claude_subagent_model' => 'CLAUDE_REVIEW_SUBAGENT_MODEL',
         'claude_max_budget' => 'CLAUDE_REVIEW_MAX_BUDGET',
         'codex_model' => 'CODEX_REVIEW_MODEL',
         'codex_effort' => 'CODEX_REVIEW_EFFORT',

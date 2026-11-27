@@ -327,8 +327,25 @@ fi
 # step 4 allows. A developer's own run, outside the review server, does not
 # come through here and keeps them. A team that wants them anyway, at that cost,
 # turns on "Extra passes" (REVIEW_EXTRA_PASSES=true).
+# With a subagent model (CLAUDE_REVIEW_SUBAGENT_MODEL), the review may check each
+# candidate in a subagent on that model, as SKILL.md step 4 describes: the reading
+# happens there, and the review's own context, on the stronger model, stays short.
+# The toolkit agents and /code-review stay with the extra passes.
+SUBAGENT_MODEL="${CLAUDE_REVIEW_SUBAGENT_MODEL:-}"
+[ "$SUBAGENT_MODEL" = none ] && SUBAGENT_MODEL=""
 if [ "$IS_CLAUDE" = "true" ] && [ "${REVIEW_EXTRA_PASSES:-false}" = "true" ]; then
   echo "Extra passes are on: Claude may run the pr-review-toolkit agents and /code-review, where the image has them."
+elif [ "$IS_CLAUDE" = "true" ] && [ -n "$SUBAGENT_MODEL" ] && [ -f "${REVIEW_AGENT_CONFIG:-}" ]; then
+  if jq '
+       del(.enabledPlugins)
+       | .permissions.deny = (["Workflow", "Skill(code-review)"] + .permissions.deny | unique)
+     ' "$REVIEW_AGENT_CONFIG" > "$REVIEW_AGENT_CONFIG.tmp"; then
+    mv "$REVIEW_AGENT_CONFIG.tmp" "$REVIEW_AGENT_CONFIG"
+    echo "Claude may check candidates in subagents on $SUBAGENT_MODEL; no pr-review-toolkit, no /code-review, no Workflow."
+  else
+    rm -f "$REVIEW_AGENT_CONFIG.tmp"
+    echo "Could not set the subagents up; the config file's own permissions apply."
+  fi
 elif [ "$IS_CLAUDE" = "true" ] && [ -f "${REVIEW_AGENT_CONFIG:-}" ]; then
   if jq '
        del(.enabledPlugins)

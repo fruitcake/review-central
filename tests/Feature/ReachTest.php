@@ -523,6 +523,10 @@ it('names, with the code index, what the change\'s guards rely on: the writers o
     ($this->put)('app/Services/Till.php', "<?php\n\nnamespace App\\Services;\n\nuse App\\Models\\Payment;\n\nclass Till\n{\n    public function book(\$reference)\n    {\n        \$payment = new Payment;\n        \$payment->reference = \$reference;\n        \$payment->save();\n    }\n}\n");
     ($this->put)('app/Http/Controllers/TerminalController.php', "<?php\n\nnamespace App\\Http\\Controllers;\n\nuse App\\Services\\Till;\n\nclass TerminalController\n{\n    public function paid(Till \$till)\n    {\n        \$till->book(request('transaction'));\n    }\n}\n");
     ($this->put)('app/Http/Controllers/OnlineController.php', "<?php\n\nnamespace App\\Http\\Controllers;\n\nclass OnlineController\n{\n    public function pay(\$order)\n    {\n    }\n\n    public function login(\$key)\n    {\n    }\n}\n");
+    // Reads the column into an array it returns: no writer.
+    ($this->put)('app/Http/Resources/PaymentResource.php', "<?php\n\nnamespace App\\Http\\Resources;\n\nclass PaymentResource\n{\n    public function toArray(\$payment)\n    {\n        return ['reference' => \$payment->reference];\n    }\n}\n");
+    // A lock whose lifetime the change edits on a line of its own.
+    ($this->put)('app/Services/Refunds.php', "<?php\n\nnamespace App\\Services;\n\nuse Acme\\Sdk\\Client;\nuse Illuminate\\Support\\Facades\\Cache;\n\nclass Refunds\n{\n    public function refund(\$order)\n    {\n        Cache::lock(\n            'refund:'.\$order,\n            300\n        )->block(5, fn () => (new Client)->refund(\$order));\n    }\n}\n");
     ($this->git)('add', '-A');
     ($this->git)('commit', '-qm', 'Payments');
     ($this->git)('checkout', '-q', 'feature');
@@ -542,6 +546,7 @@ it('names, with the code index, what the change\'s guards rely on: the writers o
             public function pay($order)
             {
                 $lock = Cache::lock('pay:'.$order, 30);
+                $lock->block(5);
                 $booked = Payment::where('type', Payment::ONLINE)
                     ->where('reference', $order)
                     ->exists();
@@ -551,10 +556,13 @@ it('names, with the code index, what the change\'s guards rely on: the writers o
             public function login($key)
             {
                 RateLimiter::hit('login:'.request()->ip());
-                RateLimiter::clear('login:'.request()->ip());
+                RateLimiter::clear(
+                    'login:'.request()->ip()
+                );
             }
         }
         PHP);
+    ($this->put)('app/Services/Refunds.php', str_replace('            300', '            30', File::get("{$this->dir}/app/Services/Refunds.php")));
     ($this->git)('commit', '-qam', 'Pay once, verified');
 
     $index = "{$this->dir}/.index";
@@ -563,11 +571,14 @@ it('names, with the code index, what the change\'s guards rely on: the writers o
         "app\\http\\controllers\\onlinecontroller::pay\tapp\\models\\payment::\$reference",
         "app\\http\\controllers\\onlinecontroller::pay\tacme\\sdk\\client::verify",
         "app\\services\\till::book\tapp\\models\\payment::\$reference",
+        "app\\http\\resources\\paymentresource::toarray\tapp\\models\\payment::\$reference",
+        "app\\services\\refunds::refund\tacme\\sdk\\client::refund",
         "app\\http\\controllers\\terminalcontroller::paid\tapp\\services\\till::book",
     ])."\n");
     File::put("{$index}/classes.tsv", implode("\n", [
         "app\\models\\payment\tapp/Models/Payment.php", "app\\services\\till\tapp/Services/Till.php",
         "app\\http\\controllers\\terminalcontroller\tapp/Http/Controllers/TerminalController.php", "app\\http\\controllers\\onlinecontroller\tapp/Http/Controllers/OnlineController.php",
+        "app\\http\\resources\\paymentresource\tapp/Http/Resources/PaymentResource.php", "app\\services\\refunds\tapp/Services/Refunds.php",
     ])."\n");
     File::put("{$index}/ancestors.tsv", '');
 
@@ -577,9 +588,12 @@ it('names, with the code index, what the change\'s guards rely on: the writers o
     expect($reach)
         ->toContain("What the change's guards rely on outside them:")
         // The check counts one type of row; another writer of the column writes others.
-        ->toContain('- `app/Http/Controllers/OnlineController.php::pay` checks `Payment` rows by `reference` (line 15), counting only those with `type` = `Payment::ONLINE`. These write `reference` on `Payment`: `app/Services/Till.php::book` (line 12), called from `app/Http/Controllers/TerminalController.php::paid`.')
-        ->toContain('holds lock \'pay:\' for 30 s (line 14) around calls that leave the application: `OnlineController::pay` calls `acme\sdk`.')
-        ->toContain('- `app/Http/Controllers/OnlineController.php::login` clears `\'login:\'.request()->ip()` (line 24), and failures are counted in `\'login:\'.request()->ip()` (line 23).')
+        ->toContain('- `app/Http/Controllers/OnlineController.php::pay` checks `Payment` rows by `reference` (line 16), counting only those with `type` = `Payment::ONLINE`. These write `reference` on `Payment`: `app/Services/Till.php::book` (line 12), called from `app/Http/Controllers/TerminalController.php::paid`.')
+        ->not->toContain('PaymentResource')
+        ->toContain('takes lock \'pay:\' for 30 s (line 14), and the method also makes calls that leave the application: `OnlineController::pay` calls `acme\sdk`.')
+        // A lifetime changed on a line of its own.
+        ->toContain('- `app/Services/Refunds.php::refund` takes lock \'refund:\' for 30 s (line 12)')
+        ->toContain('- `app/Http/Controllers/OnlineController.php::login` clears `\'login:\'.request()->ip()` (line 25), and failures are counted in `\'login:\'.request()->ip()` (line 24).')
         ->not->toContain('`type` on `Payment`');
 });
 

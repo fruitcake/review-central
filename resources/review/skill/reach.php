@@ -1157,8 +1157,15 @@ if ($indexed !== null) {
                     $writerFile = $indexed['files'][$writerClass] ?? null;
                     $writerBody = $writerFile === null ? null : $bodyOf($writerFile, $writerMethod);
 
-                    // Read or written: the index says it is touched, the source says it is written.
-                    if ($writerBody === null || preg_match('/->\s*'.preg_quote($column, '/').'\s*=(?![=>])|[\'"]'.preg_quote($column, '/').'[\'"]\s*=>/', $writerBody['text'], $write, PREG_OFFSET_CAPTURE) !== 1) {
+                    // Read or written: the index says it is touched, the source says it is written,
+                    // by assignment or as a key of what a persisting call or a new model is given;
+                    // an array returned or passed anywhere else is only read.
+                    $quoted = preg_quote($column, '/');
+                    $writes = '/->\s*'.$quoted.'\s*=(?![=>])'
+                        .'|(?:->|::)(?:create|forceCreate|createQuietly|update|updateQuietly|insert|insertOrIgnore|upsert|fill|forceFill|make|firstOrCreate|firstOrNew|updateOrCreate|updateOrInsert)\s*\((?:[^;]*?,\s*)?\[[^;]*?[\'"]'.$quoted.'[\'"]\s*=>'
+                        .'|new\s+[A-Z]\w*\s*\(\s*\[[^;]*?[\'"]'.$quoted.'[\'"]\s*=>/s';
+
+                    if ($writerBody === null || preg_match($writes, $writerBody['text'], $write, PREG_OFFSET_CAPTURE) !== 1) {
                         continue;
                     }
 
@@ -1189,11 +1196,20 @@ if ($indexed !== null) {
             }
         }
 
-        // 2. A lock with a lifetime, around calls that leave the application.
-        preg_match_all('/Cache::lock\s*\(\s*([\'"][^\'"]*[\'"])[^;]*?,\s*(\d+)\s*\)/', $bodyText, $locks, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
+        // 2. A lock with a lifetime that is taken, and calls of the same method that leave
+        // the application. Which of them run while it is held the index cannot say.
+        preg_match_all('/(?:(\$\w+)\s*=\s*)?Cache::lock\s*\(\s*([\'"][^\'"]*[\'"])[^;]*?,\s*(\d+)\s*\)(\s*->\s*(?:get|block)\s*\()?/s', $bodyText, $locks, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
 
         foreach ($locks as $lock) {
-            if (! $touched($lineAt($lock[0][1]), $lineAt($lock[0][1]))) {
+            if (! $touched($lineAt($lock[0][1]), $lineAt($lock[0][1] + strlen($lock[0][0])))) {
+                continue;
+            }
+
+            // Taken: ->get( or ->block( on it, at once or on the variable that holds it.
+            $taken = ($lock[4][0] ?? '') !== ''
+                || (($lock[1][0] ?? '') !== '' && preg_match('/'.preg_quote($lock[1][0], '/').'\s*->\s*(?:get|block)\s*\(/', $bodyText) === 1);
+
+            if (! $taken) {
                 continue;
             }
 
@@ -1234,22 +1250,22 @@ if ($indexed !== null) {
             }
 
             if ($outside !== []) {
-                $guards[] = "- `{$key}` holds lock {$lock[1][0]} for {$lock[2][0]} s (line {$lineAt($lock[0][1])}) around calls that leave the application: ".implode('; ', array_slice($outside, 0, 4)).'. A lock that expires before they return lets a second request in: does each have a timeout well under the lock, and does what the lock protects hold without it?';
+                $guards[] = "- `{$key}` takes lock {$lock[2][0]} for {$lock[3][0]} s (line {$lineAt($lock[0][1])}), and the method also makes calls that leave the application: ".implode('; ', array_slice($outside, 0, 4)).'. For each that runs while the lock is held: does it return well within the lock, with a timeout of its own? A lock that expires first lets a second request in.';
             }
         }
 
         // 3. A counter a success clears, beside the ones failures are counted in.
-        if (preg_match_all('/(RateLimiter::clear|Cache::forget)\s*\((.*?)\)\s*;/', $bodyText, $clears, PREG_OFFSET_CAPTURE | PREG_SET_ORDER) > 0) {
+        if (preg_match_all('/(RateLimiter::clear|Cache::forget)\s*\(((?:[^();]|\((?:[^()]|\([^()]*\))*\))*)\)\s*;/s', $bodyText, $clears, PREG_OFFSET_CAPTURE | PREG_SET_ORDER) > 0) {
             // The key: the first argument, nested calls in it included.
             preg_match_all('/RateLimiter::(?:hit|attempt|tooManyAttempts)\s*\(((?:[^(),]|\((?:[^()]|\([^()]*\))*\))*)/', $source, $hits, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
 
             foreach ($clears as $clear) {
-                if (! $touched($lineAt($clear[0][1]), $lineAt($clear[0][1])) || $hits === []) {
+                if (! $touched($lineAt($clear[0][1]), $lineAt($clear[0][1] + strlen($clear[0][0]))) || $hits === []) {
                     continue;
                 }
 
                 $counted = array_unique(array_map(fn (array $hit): string => '`'.trim($hit[1][0]).'` (line '.(1 + substr_count(substr($source, 0, $hit[0][1]), "\n")).')', $hits));
-                $guards[] = "- `{$key}` clears `".trim($clear[2][0])."` (line {$lineAt($clear[0][1])}), and failures are counted in ".implode(', ', array_slice($counted, 0, 4)).'. Which counter does a success clear, and can a client that holds one valid credential make it the one its failures were counted in?';
+                $guards[] = "- `{$key}` clears `".preg_replace('/\s+/', ' ', trim($clear[2][0]))."` (line {$lineAt($clear[0][1])}), and failures are counted in ".implode(', ', array_slice($counted, 0, 4)).'. Which counter does a success clear, and can a client that holds one valid credential make it the one its failures were counted in?';
             }
         }
     }

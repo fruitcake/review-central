@@ -117,7 +117,13 @@ PROMPT=$(mktemp)
   cat "$HERE/structured-output.md"
   # The pipeline config refuses subagents (prepare-review.sh). Said up front, so the
   # reviewer does not spend turns on calls that are refused.
-  if [ "${REVIEW_LOCAL:-false}" != "true" ] && [ "${REVIEW_EXTRA_PASSES:-false}" != "true" ]; then
+  _subagents="${CLAUDE_REVIEW_SUBAGENT_MODEL:-}"
+  [ "$_subagents" = none ] && _subagents=""
+  if [ -n "$_subagents" ] && [ "${REVIEW_EXTRA_PASSES:-false}" != "true" ]; then
+    # The Agent tool tells a session to check what it can inline and spawn only when in
+    # doubt; a choice is left to it, so it checks inline. Here the subagents are a step.
+    printf '\n%s\n' "SUBAGENTS: this review checks its candidates in subagents, which run on $_subagents. In START ANALYSIS, end step 2 by writing the list of candidates, one line each: CLAIM and the files to start from. Then step 4 is this, and only this: in one message, start one subagent per candidate (general-purpose), each given the CLAIM, the base and head commits, the files to start from and the answer form of step 4, and told to read and search only and to quote every line it relies on. Do not check a candidate yourself first, not even with a quick search, and do not run a subagent's check again: wait for the answers, then weigh each one against the code it quotes. A subagent's VERIFIED is evidence, not a verdict; read a quoted line yourself where the answer turns on it. This is an independent read per candidate, which is what subagents are for here. The code-review skill, the pr-review-toolkit agents and Workflow are not available here, and that is expected."
+  elif [ "${REVIEW_LOCAL:-false}" != "true" ] && [ "${REVIEW_EXTRA_PASSES:-false}" != "true" ]; then
     printf '\n%s\n' "This run starts no subagents: the Task and Workflow tools, the pr-review-toolkit agents and the code-review skill are not available here, and that is expected. Do the review in this one context, and verify each candidate yourself as START ANALYSIS step 4 says. Do not list them as unavailable in the summary."
   fi
 } > "$PROMPT"
@@ -126,6 +132,10 @@ PROMPT=$(mktemp)
 # but a background task would end the session in several result events, one each
 # time it resumes; this keeps it to one.
 FOREGROUND=CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
+# The model the review's subagents run on, where the team set one.
+if [ -n "${CLAUDE_REVIEW_SUBAGENT_MODEL:-}" ] && [ "${CLAUDE_REVIEW_SUBAGENT_MODEL}" != none ]; then
+  export CLAUDE_CODE_SUBAGENT_MODEL="$CLAUDE_REVIEW_SUBAGENT_MODEL"
+fi
 MAX_BUDGET=${CLAUDE_REVIEW_MAX_BUDGET:-10}
 echo "Budget: $([ "$MAX_BUDGET" = none ] && echo "none (CLAUDE_REVIEW_MAX_BUDGET=none)" || echo "\$$MAX_BUDGET")"
 

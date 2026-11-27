@@ -319,6 +319,9 @@ class ReviewSettingsForm
             self::model($defaults, 'claude_advisor', ['none' => __('none: no advisor'), ...self::claudeModels()])
                 ->label(__('Advisor'))
                 ->helperText(__('A stronger model Claude consults at the moments that decide a review; none for no advisor.')),
+            self::model($defaults, 'claude_subagent_model', ['none' => __('none: no subagents'), ...self::claudeModels()])
+                ->label(__('Subagents'))
+                ->helperText(__('Lets Claude check each candidate in a subagent of its own, on this model, so the reading happens there and the review keeps a short context. A cheaper model than the review\'s saves on long reviews. None or empty: no subagents, unless Extra passes is on.')),
             TextInput::make('claude_max_budget')
                 ->label(__('Budget per review ($)'))
                 ->maxLength(16)
@@ -511,6 +514,7 @@ class ReviewSettingsForm
         // time; as opposed to the Laravel AI SDK's default, a tier picked by name.
         $auto = match (true) {
             str_starts_with($field, 'claude_advisor') => __('Not set: no advisor'),
+            str_starts_with($field, 'claude_subagent_model') => __('Not set: no subagents'),
             str_starts_with($field, 'claude_') => __('Not set: Claude Code picks'),
             str_starts_with($field, 'codex_') => __('Not set: Codex picks'),
             str_starts_with($field, 'ocr_') => __('Not set: OpenCodeReview picks'),
@@ -698,7 +702,7 @@ class ReviewSettingsForm
     public static function state(?ReviewSetting $setting): array
     {
         return $setting === null ? [] : collect($setting->attributesToArray())
-            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'ocr', 'scan', 'floor_guard', 'reach', 'code_index', 'max_rounds', 'fail_on', 'pull_request_budget', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model', 'findings_check'])
+            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_subagent_model', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'ocr', 'scan', 'floor_guard', 'reach', 'code_index', 'max_rounds', 'fail_on', 'pull_request_budget', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model', 'findings_check'])
             ->all();
     }
 }

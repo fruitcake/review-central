@@ -1186,5 +1186,9 @@
     "what Codex and the review from the diff review through, where the console lists it apart.": "waar Codex en de review van de diff mee reviewen, als de console het apart noemt.",
     "what the review printed": "wat de review printte",
     "without :modules": "zonder :modules",
-    "your-organisation": "je-organisatie"
+    "your-organisation": "je-organisatie",
+    "none: no subagents": "none: geen subagents",
+    "Subagents": "Subagents",
+    "Lets Claude check each candidate in a subagent of its own, on this model, so the reading happens there and the review keeps a short context. A cheaper model than the review's saves on long reviews. None or empty: no subagents, unless Extra passes is on.": "Laat Claude elke kandidaat in een eigen subagent controleren, op dit model, zodat het lezen daar gebeurt en de review een korte context houdt. Een goedkoper model dan dat van de review bespaart bij lange reviews. None of leeg: geen subagents, tenzij Extra rondes aan staat.",
+    "Not set: no subagents": "Niet ingesteld: geen subagents"
 }
