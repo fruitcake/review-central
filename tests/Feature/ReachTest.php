@@ -100,6 +100,42 @@ it('names the entry points that reach a check the change makes, and those that r
         ->not->toContain('`app/Http/Controllers/BookingController.php::store`, through');
 });
 
+it('says of an entry point its route, and whether any of its middleware signs anyone in', function () {
+    ($this->put)('routes/web.php', "<?php\n\nRoute::middleware('auth')->group(function () {\n    Route::post('book/{lesson}', [BookingController::class, 'store']);\n});\n\nRoute::post('pay/{lesson}', [PaymentController::class, 'pay'])->middleware('throttle:10');\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Routes');
+    ($this->put)('app/Models/Lesson.php', str_replace('return null;', "return \$this->invited(\$member) ? null : 'Not invited';", File::get("{$this->dir}/app/Models/Lesson.php")));
+    ($this->git)('commit', '-qam', 'Only invited members');
+
+    expect(($this->reach)())
+        ->toContain('- `app/Http/Controllers/PaymentController.php::pay` (POST /pay/{lesson}; no middleware that signs anyone in: web, throttle:10), through `createParticipant`');
+});
+
+it('puts a route no one signs in for before an authenticated one, and calls a stack it cannot read unknown', function (string $routes, string $said) {
+    ($this->put)('routes/web.php', "<?php\n\n{$routes}\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Routes');
+    ($this->put)('app/Models/Lesson.php', str_replace('return null;', "return \$this->invited(\$member) ? null : 'Not invited';", File::get("{$this->dir}/app/Models/Lesson.php")));
+    ($this->git)('commit', '-qam', 'Only invited members');
+
+    expect(($this->reach)())->toContain("- `app/Http/Controllers/PaymentController.php::pay` ({$said}), through `createParticipant`");
+})->with([
+    'public after authenticated' => ["Route::post('a/pay', [PaymentController::class, 'pay'])->middleware('auth');\nRoute::post('pay', [PaymentController::class, 'pay']);", 'POST /pay, and 1 more route(s); no middleware that signs anyone in: web'],
+    'session check only' => ["Route::post('pay', [PaymentController::class, 'pay'])->middleware('auth.session');", 'POST /pay; no middleware that signs anyone in: web, auth.session'],
+    'read from configuration' => ["Route::post('pay', [PaymentController::class, 'pay'])->middleware(config('pay.middleware'));", 'POST /pay; middleware the route files do not let be read, besides web'],
+]);
+
+it('says of a Livewire action the page it runs on, and that its own request runs less', function () {
+    ($this->put)('app/Livewire/Booking.php', "<?php\n\nclass Booking\n{\n    public function pay(Lesson \$lesson)\n    {\n        \$lesson->createParticipant(auth()->user());\n    }\n}\n");
+    ($this->put)('routes/web.php', "<?php\n\nRoute::get('booking', Booking::class)->middleware('auth');\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Booking');
+    ($this->put)('app/Models/Lesson.php', str_replace('return null;', "return \$this->invited(\$member) ? null : 'Not invited';", File::get("{$this->dir}/app/Models/Lesson.php")));
+    ($this->git)('commit', '-qam', 'Only invited members');
+
+    expect(($this->reach)())->toContain("- `app/Livewire/Booking.php::pay` (on the page GET|HEAD /booking; behind auth: an action's own request runs only the middleware Livewire persists), through `createParticipant`");
+});
+
 it('says nothing when the change makes no check', function () {
     ($this->put)('app/Services/PaymentService.php', str_replace('$lesson->createParticipant($member);', "\$lesson->createParticipant(\$member);\n        logger('paid');", File::get("{$this->dir}/app/Services/PaymentService.php")));
     ($this->git)('commit', '-qam', 'Log payments');
@@ -354,4 +390,226 @@ it('does not list an action that reaches the check through a helper as one witho
     expect(($this->reach)())
         ->toContain('- `app/Http/Controllers/BookingFlowController.php::update`, which writes itself, with no guard of its own')
         ->not->toContain('BookingFlowController.php::store`, which');
+});
+
+it('names, with the code index, the ways in that add to the models a changed check reads without passing it', function () {
+    // A group of courses whose members are on a list; the check reads the list and the group.
+    ($this->put)('app/Models/Group.php', <<<'PHP'
+        <?php
+
+        namespace App\Models;
+
+        class Group extends Model
+        {
+            public function participants()
+            {
+                return $this->belongsToMany(Member::class);
+            }
+        }
+        PHP);
+    ($this->put)('app/Models/AllowedMember.php', "<?php\n\nnamespace App\\Models;\n\nclass AllowedMember extends Model\n{\n}\n");
+    ($this->put)('app/Services/GroupAccess.php', <<<'PHP'
+        <?php
+
+        namespace App\Services;
+
+        use App\Models\AllowedMember;
+        use App\Models\Group;
+
+        class GroupAccess
+        {
+            public function allows($group, $member)
+            {
+                return $this->isOpen($group) || AllowedMember::query()->where('member_id', $member->id)->exists();
+            }
+
+            private function isOpen($group)
+            {
+                return Group::query()->whereKey($group->id)->where('open', true)->exists();
+            }
+        }
+        PHP);
+    // Joins with the check; joins without it; and a form that adds through its parent's update.
+    ($this->put)('app/Http/Controllers/JoinController.php', <<<'PHP'
+        <?php
+
+        namespace App\Http\Controllers;
+
+        class JoinController
+        {
+            public function store(Group $group, GroupAccess $access)
+            {
+                abort_unless($access->allows($group, auth()->user()), 403);
+                $group->participants()->attach(auth()->id());
+            }
+        }
+        PHP);
+    ($this->put)('app/Http/Controllers/SignupController.php', <<<'PHP'
+        <?php
+
+        namespace App\Http\Controllers;
+
+        class SignupController
+        {
+            public function store(Group $group)
+            {
+                $member = Member::create(request()->all());
+                $group->participants()
+                    ->attach($member->id);
+            }
+        }
+        PHP);
+    ($this->put)('app/Http/Controllers/CrudController.php', "<?php\n\nnamespace App\\Http\\Controllers;\n\nclass CrudController\n{\n    public function update(\$item)\n    {\n        \$this->handleForm(\$item);\n    }\n\n    protected function handleForm(\$item)\n    {\n    }\n}\n");
+    ($this->put)('app/Http/Controllers/GroupController.php', <<<'PHP'
+        <?php
+
+        namespace App\Http\Controllers;
+
+        use App\Models\AllowedMember;
+
+        class GroupController extends CrudController
+        {
+            protected function handleForm($group)
+            {
+                AllowedMember::create(['group_id' => $group->id]);
+            }
+        }
+        PHP);
+    ($this->put)('app/Http/Controllers/InvoiceController.php', "<?php\n\nnamespace App\\Http\\Controllers;\n\nclass InvoiceController extends CrudController\n{\n}\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Groups');
+    ($this->put)('app/Services/GroupAccess.php', str_replace("where('open', true)", "where('open', true)->whereNull('closed_at')", File::get("{$this->dir}/app/Services/GroupAccess.php")));
+    ($this->git)('commit', '-qam', 'A closed group is not open');
+
+    $index = "{$this->dir}/.index";
+    File::ensureDirectoryExists($index);
+    File::put("{$index}/edges.tsv", implode("\n", [
+        "app\\http\\controllers\\joincontroller::store\tapp\\services\\groupaccess::allows",
+        "app\\http\\controllers\\joincontroller::store\tapp\\models\\group::participants",
+        "app\\http\\controllers\\signupcontroller::store\tapp\\models\\group::participants",
+        "app\\http\\controllers\\crudcontroller::update\tapp\\http\\controllers\\crudcontroller::handleform",
+    ])."\n");
+    File::put("{$index}/classes.tsv", implode("\n", [
+        "app\\models\\group\tapp/Models/Group.php", "app\\models\\allowedmember\tapp/Models/AllowedMember.php",
+        "app\\services\\groupaccess\tapp/Services/GroupAccess.php", "app\\http\\controllers\\joincontroller\tapp/Http/Controllers/JoinController.php",
+        "app\\http\\controllers\\signupcontroller\tapp/Http/Controllers/SignupController.php", "app\\http\\controllers\\crudcontroller\tapp/Http/Controllers/CrudController.php",
+        "app\\http\\controllers\\groupcontroller\tapp/Http/Controllers/GroupController.php", "app\\http\\controllers\\invoicecontroller\tapp/Http/Controllers/InvoiceController.php",
+    ])."\n");
+    File::put("{$index}/ancestors.tsv", implode("\n", [
+        "app\\models\\group\tilluminate\\database\\eloquent\\model", "app\\models\\allowedmember\tilluminate\\database\\eloquent\\model",
+        "app\\http\\controllers\\groupcontroller\tapp\\http\\controllers\\crudcontroller", "app\\http\\controllers\\invoicecontroller\tapp\\http\\controllers\\crudcontroller",
+    ])."\n");
+
+    $reach = Process::path($this->dir)->env(['REACH_INDEX' => $index])
+        ->run(['php', realpath(__DIR__.'/../../resources/review/skill/reach.php'), 'main', 'HEAD'])->throw()->output();
+
+    expect($reach)
+        ->toContain('`allows` reads `AllowedMember`, `Group`. These add to it without passing `allows`:')
+        ->toContain('- `app/Http/Controllers/SignupController.php::store`, with `Group->participants()->attach()` at line 10')
+        // The parent's update runs the form for this class only, and the form is no way in itself.
+        ->toContain('- `app/Http/Controllers/GroupController.php::update`, through `handleForm`, with `AllowedMember::create()` at `app/Http/Controllers/GroupController.php:11`')
+        ->not->toContain('InvoiceController')
+        ->not->toContain('CrudController.php::update')
+        ->not->toContain('GroupController.php::handleForm`,')
+        ->not->toContain('JoinController.php::store`, with');
+});
+
+it('finds the data a check reads through a trait\'s relation and a renamed import, and names a model added to everywhere with a count', function () {
+    ($this->put)('app/Models/Concerns/HasParticipants.php', "<?php\n\nnamespace App\\Models\\Concerns;\n\ntrait HasParticipants\n{\n    public function participants()\n    {\n        return \$this->belongsToMany(\\App\\Models\\Member::class);\n    }\n}\n");
+    ($this->put)('app/Models/Group.php', "<?php\n\nnamespace App\\Models;\n\nclass Group extends Model\n{\n    use Concerns\\HasParticipants;\n}\n");
+    ($this->put)('app/Models/Event.php', "<?php\n\nnamespace App\\Models;\n\nclass Event extends Model\n{\n    use Concerns\\HasParticipants;\n}\n");
+    ($this->put)('app/Models/AllowedMember.php', "<?php\n\nnamespace App\\Models;\n\nclass AllowedMember extends Model\n{\n}\n");
+    ($this->put)('app/Models/Log.php', "<?php\n\nnamespace App\\Models;\n\nclass Log extends Model\n{\n}\n");
+    ($this->put)('app/Services/GroupAccess.php', "<?php\n\nnamespace App\\Services;\n\nuse App\\Models\\AllowedMember;\nuse App\\Models\\Group;\nuse App\\Models\\Log;\n\nclass GroupAccess\n{\n    public function allows(\$group, \$member)\n    {\n        Log::query()->count();\n\n        return Group::query()->whereKey(\$group->id)->exists() && AllowedMember::query()->exists();\n    }\n}\n");
+    ($this->put)('app/Http/Controllers/SignupController.php', <<<'PHP'
+        <?php
+
+        namespace App\Http\Controllers;
+
+        use App\Models\AllowedMember as Allowed;
+        use App\Models\Event;
+        use App\Models\Group;
+
+        class SignupController
+        {
+            public function store($id)
+            {
+                Group::find($id)->participants()->attach(auth()->id());
+            }
+
+            public function both($id)
+            {
+                Group::find($id)->participants()->count();
+                Event::find($id)->participants()->attach(auth()->id());
+            }
+
+            public function mixed($id)
+            {
+                Group::find($id)->participants()->count();
+                Event::find($id)->participants()->attach(auth()->id());
+            }
+
+            public function grant()
+            {
+                Allowed::create(['member_id' => auth()->id()]);
+            }
+
+            public function invite()
+            {
+                \App\Models\AllowedMember::create(['member_id' => request('member')]);
+            }
+        }
+        PHP);
+    ($this->put)('app/Http/Controllers/EventController.php', "<?php\n\nnamespace App\\Http\\Controllers;\n\nuse App\\Models\\Event;\n\nclass EventController\n{\n    public function join(\$id)\n    {\n        Event::find(\$id)->participants()->attach(auth()->id());\n    }\n}\n");
+
+    // Every request writes a log line: a model added to everywhere.
+    $logs = '';
+
+    foreach (range(1, 11) as $number) {
+        $logs .= "    public function write{$number}()\n    {\n        \\App\\Models\\Log::create([]);\n    }\n\n";
+    }
+
+    ($this->put)('app/Http/Controllers/LogController.php', "<?php\n\nnamespace App\\Http\\Controllers;\n\nclass LogController\n{\n{$logs}}\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Groups');
+    ($this->put)('app/Services/GroupAccess.php', str_replace('->exists() &&', "->where('open', true)->exists() &&", File::get("{$this->dir}/app/Services/GroupAccess.php")));
+    ($this->git)('commit', '-qam', 'Only open groups');
+
+    $index = "{$this->dir}/.index";
+    File::ensureDirectoryExists($index);
+    // A trait's relation is known by the trait; the model the call is on, by the other calls the method makes.
+    File::put("{$index}/edges.tsv", implode("\n", [
+        "app\\http\\controllers\\signupcontroller::store\tapp\\models\\group::find",
+        "app\\http\\controllers\\signupcontroller::store\tapp\\models\\concerns\\hasparticipants::participants",
+        "app\\http\\controllers\\signupcontroller::both\tapp\\models\\group::participants",
+        "app\\http\\controllers\\signupcontroller::both\tapp\\models\\event::participants",
+        // Both through the trait: the index cannot say which model the attach is on.
+        "app\\http\\controllers\\signupcontroller::mixed\tapp\\models\\group::find",
+        "app\\http\\controllers\\signupcontroller::mixed\tapp\\models\\event::find",
+        "app\\http\\controllers\\signupcontroller::mixed\tapp\\models\\concerns\\hasparticipants::participants",
+        "app\\http\\controllers\\eventcontroller::join\tapp\\models\\event::find",
+        "app\\http\\controllers\\eventcontroller::join\tapp\\models\\concerns\\hasparticipants::participants",
+    ])."\n");
+    File::put("{$index}/classes.tsv", implode("\n", [
+        "app\\models\\group\tapp/Models/Group.php", "app\\models\\event\tapp/Models/Event.php", "app\\models\\log\tapp/Models/Log.php",
+        "app\\models\\allowedmember\tapp/Models/AllowedMember.php", "app\\models\\concerns\\hasparticipants\tapp/Models/Concerns/HasParticipants.php",
+        "app\\services\\groupaccess\tapp/Services/GroupAccess.php", "app\\http\\controllers\\signupcontroller\tapp/Http/Controllers/SignupController.php",
+        "app\\http\\controllers\\eventcontroller\tapp/Http/Controllers/EventController.php", "app\\http\\controllers\\logcontroller\tapp/Http/Controllers/LogController.php",
+    ])."\n");
+    File::put("{$index}/ancestors.tsv", implode("\n", array_map(fn (string $model): string => "app\\models\\{$model}\tilluminate\\database\\eloquent\\model", ['group', 'event', 'log', 'allowedmember']))."\n");
+
+    $reach = Process::path($this->dir)->env(['REACH_INDEX' => $index])
+        ->run(['php', realpath(__DIR__.'/../../resources/review/skill/reach.php'), 'main', 'HEAD'])->throw()->output();
+
+    expect($reach)
+        ->toContain('`allows` reads `Log`, `Group`, `AllowedMember` (of which `Log` (11 methods) are added to in too many places to list)')
+        // A trait's relation, called on a value the index may not type: said so.
+        ->toContain('- `app/Http/Controllers/SignupController.php::store`, with `Group->participants()->attach()` at line 13, if it is called on `Group`: `HasParticipants` gives other classes this relation too')
+        ->toContain('- `app/Http/Controllers/SignupController.php::both`, with `Group->participants()->attach()` at line 19, or on `Event`, which it calls it on as well')
+        ->toContain('- `app/Http/Controllers/SignupController.php::mixed`, with `Group->participants()->attach()` at line 25, or on `Event`, which it calls it on as well')
+        ->toContain('- `app/Http/Controllers/SignupController.php::grant`, with `AllowedMember::create()` at line 30')
+        ->toContain('- `app/Http/Controllers/SignupController.php::invite`, with `AllowedMember::create()` at line 35')
+        // Event has the same trait; joining one is not joining a group.
+        ->not->toContain('EventController')
+        ->not->toContain('LogController');
 });
