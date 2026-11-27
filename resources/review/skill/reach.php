@@ -69,6 +69,15 @@ const POLICIES = 'app/Policies/';
 /** What makes a method an effect: it writes. */
 const WRITES = '/(->|::)(save|create|createMany|insert|update|updateOrCreate|firstOrCreate|attach|sync|syncWithoutDetaching|delete|forceDelete|restore|increment|decrement|push)\(/';
 
+/** How many calls from a changed method it looks for a call that can land on more than one implementation. */
+const IMPLEMENTATION_DEPTH = 2;
+
+/** How many implementations of one call at most: past that it is a framework hook, not a choice. */
+const IMPLEMENTATIONS = 6;
+
+/** How many calls with more than one implementation it names. */
+const IMPLEMENTATIONS_LISTED = 10;
+
 /** Names too common to follow by name alone. */
 const COMMON = ['get', 'set', 'find', 'first', 'save', 'create', 'update', 'delete', 'handle', 'render', 'mount', 'boot', 'make', 'query', 'where', 'all', 'toArray', 'fill', 'load', 'fresh', 'refresh', 'map', 'filter', 'each', 'count', 'exists', 'push', 'attach', 'sync', 'value', 'has', 'is', 'can', 'check', 'add', 'remove', 'store', 'show', 'index', 'edit', 'destroy', 'run', 'send', 'build', 'with', 'when', 'tap', '__construct', '__invoke'];
 
@@ -204,8 +213,10 @@ $isHidden = function (string $file, string $name) use ($functions, $linesOf): bo
 };
 
 // The checks the change adds or changes: methods named as one, policies' methods, and
-// methods with a changed line that guards who may go on.
+// methods with a changed line that guards who may go on. And every method it changes,
+// for the calls that land on more than one implementation.
 $checks = [];
+$changed = [];
 
 foreach (array_filter(explode("\n", $sh(['diff', '--name-only', "{$mergeBase}...{$commit}", '--', 'app']))) as $file) {
     if (! str_ends_with($file, '.php') || ! is_file($file)) {
@@ -224,6 +235,8 @@ foreach (array_filter(explode("\n", $sh(['diff', '--name-only', "{$mergeBase}...
                 continue;
             }
 
+            $changed["{$file}::{$name}"] = ['file' => $file, 'name' => $name];
+
             // Named as a check; any public method of a policy; or a method a changed line guards.
             if (preg_match(CHECK, $name) === 1
                 || (str_starts_with($file, POLICIES) && $isPublic($file, $name))
@@ -234,7 +247,8 @@ foreach (array_filter(explode("\n", $sh(['diff', '--name-only', "{$mergeBase}...
     }
 }
 
-if ($checks === []) {
+// Without a check there is only the index's part to say, and without the index nothing.
+if ($checks === [] && ($changed === [] || (string) getenv('REACH_INDEX') === '')) {
     exit(0);
 }
 
@@ -315,14 +329,14 @@ $directory = (string) getenv('REACH_INDEX');
 
 if ($directory !== '' && @filesize("{$directory}/edges.tsv") > 0) {
     require_once __DIR__.'/code-index-models.php';
-    $indexed = ['callers' => [], 'files' => [], 'ancestors' => []];
+    $indexed = ['callers' => [], 'calls' => [], 'files' => [], 'ancestors' => []];
 
     foreach (['edges' => 'callers', 'classes' => 'files', 'ancestors' => 'ancestors'] as $file => $field) {
         foreach (@file("{$directory}/{$file}.tsv", FILE_IGNORE_NEW_LINES) ?: [] as $row) {
             [$left, $right] = array_pad(explode("\t", $row, 2), 2, '');
 
             match ($field) {
-                'callers' => $indexed['callers'][$right][$left] = true,
+                'callers' => $indexed['callers'][$right][$left] = $indexed['calls'][$left][$right] = true,
                 'files' => $indexed['files'][$left] = $right,
                 'ancestors' => $indexed['ancestors'][$left][] = $right,
             };
@@ -841,9 +855,148 @@ if (strlen($text) > BUDGET) {
     $text = substr($text, 0, strrpos(substr($text, 0, BUDGET), "\n") ?: BUDGET)."\n  - (cut short)";
 }
 
+/**
+ * The methods of a class and of its subclasses in app/ that a call to the class's
+ * method can run, with where each is written. A declaration without a body (an
+ * interface's, an abstract one) runs nothing of its own.
+ *
+ * @return array<string, array{class: string, file: string, line: int, name: string}>
+ */
+$descendants = null;
+$implementationsOf = function (string $target) use (&$indexed, &$descendants, $functions): array {
+    [$class, $method] = explode('::', $target, 2);
+
+    if (str_starts_with($method, '$') || str_starts_with($method, '__')) {
+        return [];
+    }
+
+    if ($descendants === null) {
+        $descendants = [];
+
+        foreach ($indexed['ancestors'] as $child => $ancestors) {
+            foreach ($ancestors as $ancestor) {
+                $descendants[$ancestor][] = $child;
+            }
+        }
+    }
+
+    $found = [];
+
+    foreach ([$class, ...($descendants[$class] ?? [])] as $candidate) {
+        $file = $indexed['files'][$candidate] ?? null;
+
+        if ($file === null || ! str_starts_with($file, 'app/')) {
+            continue;
+        }
+
+        foreach ($functions($file) as $function) {
+            if (strtolower($function['name']) === $method) {
+                $found[$candidate] = ['class' => $candidate, 'file' => $file, 'line' => $function['start'], 'name' => $function['name']];
+
+                break;
+            }
+        }
+    }
+
+    return $found;
+};
+
+// With the index: the calls from the changed methods, and from what they call, that can
+// land on more than one implementation, because the type they are made on is a union
+// (a factory returning one of two classes), a parent or an interface. Reading one of
+// them and taking the other to be alike is how a change breaks on the one not read.
+$several = [];
+
+if ($indexed !== null) {
+    $queue = [];
+
+    foreach ($changed as $key => $method) {
+        $class = $fullClassOf($method['file']);
+
+        if ($class !== null) {
+            $queue[] = ["{$class}::".strtolower($method['name']), 0, $key, null];
+        }
+    }
+
+    $seen = [];
+    $reported = [];
+
+    while ($queue !== [] && count($several) < IMPLEMENTATIONS_LISTED) {
+        [$source, $depth, $changedKey, $written] = array_shift($queue);
+
+        if (isset($seen[$source])) {
+            continue;
+        }
+
+        $seen[$source] = true;
+        [$sourceClass, $sourceMethod] = explode('::', $source, 2);
+        $byMethod = [];
+
+        foreach (array_keys($indexed['calls'][$source] ?? []) as $target) {
+            [$targetClass, $targetMethod] = explode('::', $target, 2);
+
+            // parent::method() runs the parent's own, not every subclass's.
+            if ($targetMethod === $sourceMethod && in_array($targetClass, $indexed['ancestors'][$sourceClass] ?? [], true)) {
+                continue;
+            }
+
+            $byMethod[$targetMethod] = ($byMethod[$targetMethod] ?? []) + $implementationsOf($target);
+
+            if ($depth + 1 < IMPLEMENTATION_DEPTH && ! str_starts_with($targetMethod, '$') && str_starts_with($indexed['files'][$targetClass] ?? '', 'app/')) {
+                $queue[] = [$target, $depth + 1, $changedKey, $target];
+            }
+        }
+
+        foreach ($byMethod as $implementations) {
+            if (count($implementations) < 2 || count($implementations) > IMPLEMENTATIONS) {
+                continue;
+            }
+
+            ksort($implementations);
+            $same = implode('|', array_keys($implementations)).'::'.reset($implementations)['name'];
+
+            if (isset($reported[$same]) || count($several) >= IMPLEMENTATIONS_LISTED) {
+                continue;
+            }
+
+            $reported[$same] = true;
+            $where = implode(' or ', array_map(fn (array $one): string => "`{$writtenClass($one['class'])}` (`{$one['file']}:{$one['line']}`)", $implementations));
+            $name = reset($implementations)['name'];
+            $caller = $written === null ? "`{$changedKey}`, which this change changes," : (function () use ($written, $indexed, $functions, $changed, $changedKey): string {
+                [$class, $method] = explode('::', $written, 2);
+                $file = $indexed['files'][$class];
+
+                foreach ($functions($file) as $function) {
+                    if (strtolower($function['name']) === $method) {
+                        $method = $function['name'];
+
+                        break;
+                    }
+                }
+
+                return "`{$file}::{$method}`, which the changed `".$changed[$changedKey]['name'].'` calls,';
+            })();
+            $several[] = "- {$caller} calls `{$name}` on {$where}.";
+        }
+    }
+}
+
+if ($text === '' && $several === []) {
+    exit(0);
+}
+
+if ($several !== []) {
+    $text .= ($text === '' ? '' : "\n\n")."Calls that can land on more than one implementation, as the type they are made on is a union (such as a factory that returns one of two classes), a parent or an interface:\n".implode("\n", $several)
+        ."\nRead each implementation such a call can run, with what it does for an argument that is null or missing, not the first one you find: the one that behaves differently is where the change breaks.";
+}
+
 echo "\nREACH:\n\n";
 echo $indexed !== null
     ? 'Worked out from the code before you started, from a code index that resolves each call by the type of what it is called on: a path listed is one the code takes. A call on a value whose type is not known (mixed) is not in the index, so a path can be missing; search for one you expect.'
     : 'Worked out from the code before you started, by method name: a call to ->name( is taken to reach every method of that name, so this is a floor that can also name a path that does not apply. Verify each before you rely on it.';
-echo ' For each check this change adds or changes, it lists the entry points (controllers, Livewire components, jobs, commands, routes, views) that reach it, and the entry points that reach a method of the same class that writes without passing the check.'.($indexed !== null ? ' With the index it also lists the models the check reads, and the entry points that add to them, through a relation or with create, without passing the check: another way into what the check guards.' : '')." An entry point with a route says it, as the route files declare it, and whether any of its middleware signs anyone in: a way in that no one has to sign in for weighs heaviest. Where the change brings in a rule about who may do something, decide for each of those whether the rule has to hold there too: one that skips it is this change's finding, though the path is old.\n\n";
+if ($out === []) {
+    echo "\n\n";
+} else {
+    echo ' For each check this change adds or changes, it lists the entry points (controllers, Livewire components, jobs, commands, routes, views) that reach it, and the entry points that reach a method of the same class that writes without passing the check.'.($indexed !== null ? ' With the index it also lists the models the check reads, and the entry points that add to them, through a relation or with create, without passing the check: another way into what the check guards.' : '')." An entry point with a route says it, as the route files declare it, and whether any of its middleware signs anyone in: a way in that no one has to sign in for weighs heaviest. Where the change brings in a rule about who may do something, decide for each of those whether the rule has to hold there too: one that skips it is this change's finding, though the path is old.\n\n";
+}
 echo $text."\n";

@@ -219,20 +219,24 @@ reviewer_reach() {
     echo "Reach: reach.php failed (exit $?); the reviewer gets no REACH." >&2
     _reach=""
   }
-  if [ -n "$_reach" ] && [ "${REVIEW_CODE_INDEX:-false}" = "true" ]; then
+  # The index also finds the calls of a changed method that can land on more than one
+  # implementation, so it is built for any change to PHP in app/, check or not.
+  if [ "${REVIEW_CODE_INDEX:-false}" = "true" ] \
+    && { [ -n "$_reach" ] || [ -n "$(git diff --name-only "origin/$_destination...${BITBUCKET_COMMIT:-HEAD}" -- 'app/*.php' 2>/dev/null | head -1)" ]; }; then
     _index=$(reviewer_code_index "$_php")
     [ -n "$_index" ] && _reach=$(REACH_INDEX="$_index" "$_php" "$HERE/reach.php" "origin/$_destination" "${BITBUCKET_COMMIT:-HEAD}" 2>/dev/null || printf '%s' "$_reach")
   elif [ "${REVIEW_CODE_INDEX:-false}" = "true" ]; then
-    echo "Code index: not built, as the change touches no check." >&2
+    echo "Code index: not built, as the change touches no PHP in app/." >&2
   fi
   # What the reviewer is given, in the run's log too: whether a path was there to
   # see is the first question when a review misses one.
   if [ -n "$_reach" ]; then
-    echo "Reach: $(printf '%s\n' "$_reach" | grep -c '^- `') check(s), $(printf '%s\n' "$_reach" | grep -c '^  - `') way(s) in listed; as the reviewer gets it:" >&2
+    _several=$(printf '%s\n' "$_reach" | sed -n '/^Calls that can land on more than one implementation/,$p' | grep -c '^- `')
+    echo "Reach: $(printf '%s\n' "$_reach" | sed '/^Calls that can land on more than one implementation/,$d' | grep -c '^- `') check(s), $(printf '%s\n' "$_reach" | grep -c '^  - `') way(s) in listed, ${_several} call(s) with more than one implementation; as the reviewer gets it:" >&2
     printf '%s\n' "$_reach" | sed 's/^/  | /' >&2
     printf '%s\n' "$_reach"
   else
-    echo "Reach: the change adds or changes no check, so the reviewer gets no REACH." >&2
+    echo "Reach: nothing to say about this change, so the reviewer gets no REACH." >&2
   fi
   return 0
 }

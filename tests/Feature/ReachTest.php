@@ -282,7 +282,7 @@ it('gives no reach when the team turned it off', function () {
         ->and($reach(['REVIEW_REACH' => 'false']))->toBe('');
 });
 
-it('builds the code index only for a change that touches a check, and goes by name when it cannot', function () {
+it('builds the code index only for a change to PHP in app/, and goes by name when it cannot', function () {
     ($this->git)('update-ref', 'refs/remotes/origin/main', 'main');
     File::put("{$this->dir}/review-context.json", json_encode(['settings' => ['stack' => ['laravel']], 'pull_request' => ['destination_branch' => 'main']]));
     // A curl that leaves a mark, and fails the download.
@@ -294,17 +294,26 @@ it('builds the code index only for a change that touches a check, and goes by na
         ->env(['REVIEW_CODE_INDEX' => 'true', 'HOME' => "{$this->dir}/home", 'PATH' => "{$this->dir}/bin:".getenv('PATH')])
         ->run(['sh', '-c', ". {$skill}/reviewer-env.sh; HERE={$skill}; reviewer_reach"])->throw();
 
-    // No check changed: nothing is installed or built.
-    ($this->put)('app/Services/PaymentService.php', str_replace('$lesson->createParticipant($member);', "\$lesson->createParticipant(\$member);\n        logger('paid');", File::get("{$this->dir}/app/Services/PaymentService.php")));
-    ($this->git)('commit', '-qam', 'Log payments');
+    // No PHP in app/ changed: nothing is installed or built.
+    ($this->put)('README.md', "Lessons\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Readme');
     $quiet = $reach();
 
     expect($quiet->output())->toBe('')
-        ->and($quiet->errorOutput())->toContain('Code index: not built, as the change touches no check.')
+        ->and($quiet->errorOutput())->toContain('Code index: not built, as the change touches no PHP in app/.')
         // Its own phase in the run's log, on stderr: stdout is the prompt.
         ->and($quiet->errorOutput())->toContain('##[phase] reach')
-        ->and($quiet->errorOutput())->toContain('Reach: the change adds or changes no check, so the reviewer gets no REACH.')
+        ->and($quiet->errorOutput())->toContain('Reach: nothing to say about this change, so the reviewer gets no REACH.')
         ->and(File::exists("{$this->dir}/curl-called"))->toBeFalse();
+
+    // PHP in app/ changed without a check: the index is wanted for the calls with more than one implementation.
+    ($this->put)('app/Services/PaymentService.php', str_replace('$lesson->createParticipant($member);', "\$lesson->createParticipant(\$member);\n        logger('paid');", File::get("{$this->dir}/app/Services/PaymentService.php")));
+    ($this->git)('commit', '-qam', 'Log payments');
+
+    expect($reach()->output())->toBe('')
+        ->and(File::exists("{$this->dir}/curl-called"))->toBeTrue();
+    File::delete("{$this->dir}/curl-called");
 
     // A check changed, and Mago cannot be had: the reach by name.
     ($this->put)('app/Models/Lesson.php', str_replace('return null;', "return \$this->invited(\$member) ? null : 'Not invited';", File::get("{$this->dir}/app/Models/Lesson.php")));
@@ -313,9 +322,58 @@ it('builds the code index only for a change that touches a check, and goes by na
 
     expect($byName->output())->toContain('by method name')
         // The log has what the reviewer got, line for line.
-        ->and($byName->errorOutput())->toContain('Reach: 1 check(s), 1 way(s) in listed; as the reviewer gets it:')
+        ->and($byName->errorOutput())->toContain('Reach: 1 check(s), 1 way(s) in listed, 0 call(s) with more than one implementation; as the reviewer gets it:')
         ->and($byName->errorOutput())->toContain('  |   - `app/Http/Controllers/PaymentController.php::pay`, through `createParticipant`')
         ->and(File::exists("{$this->dir}/curl-called"))->toBeTrue();
+});
+
+it('names, with the code index, the calls of a changed method that can land on more than one implementation', function () {
+    // The gateways are there before the change.
+    ($this->git)('checkout', '-q', 'main');
+    ($this->put)('app/Payments/Gateway.php', "<?php\n\ninterface Gateway\n{\n    public function refund(\$amount);\n}\n");
+    foreach (['Card', 'Cash'] as $kind) {
+        ($this->put)("app/Payments/{$kind}Gateway.php", "<?php\n\nclass {$kind}Gateway implements Gateway\n{\n    public static function init()\n    {\n        return new self;\n    }\n\n    public function charge(\$amount)\n    {\n    }\n\n    public function refund(\$amount)\n    {\n    }\n}\n");
+    }
+    ($this->put)('app/Payments/Receipt.php', "<?php\n\nclass Receipt\n{\n    public function print()\n    {\n    }\n}\n");
+    ($this->put)('app/Payments/Ledger.php', "<?php\n\nclass Ledger\n{\n    public function book(\$gateway)\n    {\n        \$gateway->refund(1);\n    }\n}\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Gateways');
+    ($this->git)('checkout', '-q', 'feature');
+    ($this->git)('rebase', '-q', 'main');
+    // The change charges through a factory that returns one gateway or the other, and books through a helper.
+    ($this->put)('app/Services/PaymentService.php', str_replace('$lesson->createParticipant($member);', "\$lesson->createParticipant(\$member);\n        Gateways::for(\$member)->charge(10);\n        (new Receipt)->print();\n        (new Ledger)->book(null);", File::get("{$this->dir}/app/Services/PaymentService.php")));
+    ($this->git)('commit', '-qam', 'Charge');
+
+    $index = "{$this->dir}/.index";
+    File::ensureDirectoryExists($index);
+    File::put("{$index}/edges.tsv", implode("\n", [
+        "paymentservice::pay\tlesson::createparticipant",
+        "paymentservice::pay\tcardgateway::charge",
+        "paymentservice::pay\tcashgateway::charge",
+        "paymentservice::pay\treceipt::print",
+        "paymentservice::pay\tledger::book",
+        "paymentservice::pay\tpaymentservice::\$table",
+        "ledger::book\tgateway::refund",
+    ])."\n");
+    File::put("{$index}/classes.tsv", implode("\n", [
+        "lesson\tapp/Models/Lesson.php", "paymentservice\tapp/Services/PaymentService.php",
+        "gateway\tapp/Payments/Gateway.php", "cardgateway\tapp/Payments/CardGateway.php",
+        "cashgateway\tapp/Payments/CashGateway.php", "receipt\tapp/Payments/Receipt.php", "ledger\tapp/Payments/Ledger.php",
+    ])."\n");
+    File::put("{$index}/ancestors.tsv", "cardgateway\tgateway\ncashgateway\tgateway\n");
+
+    $reach = Process::path($this->dir)->env(['REACH_INDEX' => $index])
+        ->run(['php', realpath(__DIR__.'/../../resources/review/skill/reach.php'), 'main', 'HEAD'])->throw()->output();
+
+    expect($reach)
+        ->toContain('REACH:')
+        // No check changed, so nothing about checks.
+        ->not->toContain('For each check this change adds or changes')
+        ->toContain('- `app/Services/PaymentService.php::pay`, which this change changes, calls `charge` on `CardGateway` (`app/Payments/CardGateway.php:10`) or `CashGateway` (`app/Payments/CashGateway.php:10`).')
+        // A call one step on, through an interface: the implementations, not the declaration without a body.
+        ->toContain('- `app/Payments/Ledger.php::book`, which the changed `pay` calls, calls `refund` on `CardGateway` (`app/Payments/CardGateway.php:14`) or `CashGateway` (`app/Payments/CashGateway.php:14`).')
+        ->not->toContain('`print`')
+        ->not->toContain('createParticipant');
 });
 
 it('takes a policy\'s methods, and a method a changed line guards, as checks', function () {
@@ -513,7 +571,8 @@ it('names, with the code index, the ways in that add to the models a changed che
         // The parent's update runs the form for this class only, and the form is no way in itself.
         ->toContain('- `app/Http/Controllers/GroupController.php::update`, through `handleForm`, with `AllowedMember::create()` at `app/Http/Controllers/GroupController.php:11`')
         ->not->toContain('InvoiceController')
-        ->not->toContain('CrudController.php::update')
+        ->not->toContain('CrudController.php::update`, through')
+        ->not->toContain('CrudController.php::update`, with')
         ->not->toContain('GroupController.php::handleForm`,')
         ->not->toContain('JoinController.php::store`, with');
 });
