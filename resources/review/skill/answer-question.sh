@@ -37,6 +37,10 @@ if [ -z "${REVIEW_QUESTION:-}" ]; then
   exit 1
 fi
 
+# The packages' code, as the review had it: many answers are in vendor/.
+echo "##[phase] vendor"
+reviewer_vendor
+
 SESSION=""
 [ -s "$HOME/.review-session" ] && SESSION=$(head -n 1 "$HOME/.review-session" | tr -cd 'A-Za-z0-9-')
 

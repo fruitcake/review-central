@@ -146,6 +146,9 @@ it('answers from the session of the last review, in a copy of it, and replies un
         ->and($step['command'])->toContain('--runtime=runsc', '--cap-drop=ALL')
         ->and(end($step['command']))->toContain('answer-question.sh')
         ->and($volumes)->toContain('-home:/home/reviewer')->not->toContain("{$home}:")
+        // With the repository's Composer cache, for vendor/ as the review has it.
+        ->and($volumes)->toContain(':/cache/composer')
+        ->and($step['environment'])->toHaveKey('COMPOSER_CACHE_DIR')
         // The branch's own session is as it was, and nothing of the question stays behind.
         ->and(File::get("{$home}/.review-session"))->toBe("session-one\n")
         ->and(File::directories(storage_path('framework/testing/review-work')))->toBe([]);
@@ -559,4 +562,31 @@ it('prints what the reviewer reads and says while it answers, and keeps the resu
         ->and($result->output())->toContain('It escapes nothing.')
         ->and($result->output())->toContain('Answered, for $0.12.')
         ->and(json_decode(File::get("{$dir}/review-answer.json"), true))->toMatchArray(['type' => 'result', 'result' => 'It escapes nothing.']);
+});
+
+it('gives the question vendor/ from what the review keeps, installing without the packages\' scripts', function () {
+    $dir = storage_path('framework/testing/question-vendor');
+    File::deleteDirectory($dir);
+    File::ensureDirectoryExists("{$dir}/work/vendor/acme/lib");
+    File::ensureDirectoryExists("{$dir}/bin");
+    File::put("{$dir}/work/vendor/acme/lib/Lib.php", '<?php');
+    Process::path("{$dir}/work")->run(['tar', '-cf', "{$dir}/vendor-base.tar", 'vendor'])->throw();
+    File::deleteDirectory("{$dir}/work/vendor");
+    File::put("{$dir}/work/composer.json", '{}');
+    // A Composer that says how it was asked.
+    File::put("{$dir}/bin/composer", "#!/bin/sh\necho \"composer \$*\" > \"{$dir}/composer-called\"\n");
+    chmod("{$dir}/bin/composer", 0755);
+    Process::path("{$dir}/work")->run(['git', 'init', '-q'])->throw();
+    $skill = realpath(__DIR__.'/../../resources/review/skill');
+
+    $result = Process::path("{$dir}/work")
+        ->env(['REVIEW_VENDOR_BASE' => "{$dir}/vendor-base.tar", 'COMPOSER_AUTH' => '{"secret":1}', 'PATH' => "{$dir}/bin:".getenv('PATH')])
+        ->run(['sh', '-c', ". {$skill}/reviewer-env.sh; reviewer_vendor; echo \"auth:\${COMPOSER_AUTH:-gone}\""])->throw();
+
+    expect($result->output())->toContain('vendor/ of the destination branch unpacked')
+        ->toContain('auth:gone')
+        ->and(File::exists("{$dir}/work/vendor/acme/lib/Lib.php"))->toBeTrue()
+        ->and(File::get("{$dir}/composer-called"))->toContain('install')->toContain('--no-scripts')->toContain('--no-plugins')->toContain('--no-dev');
+
+    File::deleteDirectory($dir);
 });
