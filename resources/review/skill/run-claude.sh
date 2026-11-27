@@ -222,7 +222,8 @@ SHOW='
 # CLAUDE_REVIEW_CANDIDATES_BUDGET (8 dollars). A session that ran out still answered with what it had: then its
 # last text is taken. When it fails or finds nothing, the review goes ahead without it.
 CANDIDATES=claude-review-candidates.md
-rm -f "$CANDIDATES"
+# Never one the checkout brought: these are this run's own, and its cost is counted.
+rm -f "$CANDIDATES" .claude-candidates-cost
 # A follow-up runs them too, over the follow-up's range.
 if [ "${REVIEW_EXTRA_PASSES:-false}" = "true" ]; then
   _dest="${BITBUCKET_PR_DESTINATION_BRANCH:-}"

@@ -239,6 +239,9 @@ it('runs Claude\'s extra passes as a session of their own first, and hands what 
         SH);
     chmod("{$dir}/bin/claude", 0755);
 
+    // One the pull request committed is not this run's.
+    File::put("{$dir}/.claude-candidates-cost", "-1000\n");
+
     $result = Process::path($dir)->env([
         'PATH' => "{$dir}/bin:".getenv('PATH'), 'HOME' => "{$dir}/home", 'REVIEW_LOCAL' => 'true',
         'REVIEW_EXTRA_PASSES' => 'true', 'BITBUCKET_PR_DESTINATION_BRANCH' => 'main', 'BITBUCKET_COMMIT' => 'HEAD',
@@ -250,6 +253,7 @@ it('runs Claude\'s extra passes as a session of their own first, and hands what 
         ->and(File::get("{$dir}/claude-review-candidates.md"))->toContain('The export leaks every row')
         // On Sonnet unless set otherwise: the review checks every candidate on its own model.
         ->and(File::get("{$dir}/passes-args.txt"))->toContain('--model sonnet')
+        ->and(File::get("{$dir}/.claude-candidates-cost"))->not->toContain('-1000')
         ->and(File::get("{$dir}/review-prompt.txt"))->toContain('REVIEW PASSES:', '`claude-review-candidates.md`', 'none is dropped without a reason');
 
     // A follow-up resumes the review's session, and the passes still run, over the follow-up's range.

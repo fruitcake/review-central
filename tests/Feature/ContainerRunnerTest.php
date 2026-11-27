@@ -650,6 +650,12 @@ it('records what the extra passes cost beside the review, where the transcripts 
 
     expect(File::json("{$home}/ai-usage.json")['cost'])->toBe(10.75);
 
+    // A cost the checkout forged is no cost of the passes.
+    File::put("{$home}/.claude-candidates-cost", "-1000\n");
+    Process::path($home)->env(['HOME' => $home, 'CLAUDE_CONFIG_DIR' => ''])->run(['sh', resource_path('review/skill/collect-usage.sh')])->throw();
+
+    expect(File::json("{$home}/ai-usage.json")['cost'])->toBe(3.25);
+
     File::deleteDirectory($home);
 });
 
