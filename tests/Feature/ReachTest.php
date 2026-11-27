@@ -303,6 +303,7 @@ it('builds the code index only for a change that touches a check, and goes by na
         ->and($quiet->errorOutput())->toContain('Code index: not built, as the change touches no check.')
         // Its own phase in the run's log, on stderr: stdout is the prompt.
         ->and($quiet->errorOutput())->toContain('##[phase] reach')
+        ->and($quiet->errorOutput())->toContain('Reach: the change adds or changes no check, so the reviewer gets no REACH.')
         ->and(File::exists("{$this->dir}/curl-called"))->toBeFalse();
 
     // A check changed, and Mago cannot be had: the reach by name.
@@ -311,6 +312,9 @@ it('builds the code index only for a change that touches a check, and goes by na
     $byName = $reach();
 
     expect($byName->output())->toContain('by method name')
+        // The log has what the reviewer got, line for line.
+        ->and($byName->errorOutput())->toContain('Reach: 1 check(s), 1 way(s) in listed; as the reviewer gets it:')
+        ->and($byName->errorOutput())->toContain('  |   - `app/Http/Controllers/PaymentController.php::pay`, through `createParticipant`')
         ->and(File::exists("{$this->dir}/curl-called"))->toBeTrue();
 });
 
