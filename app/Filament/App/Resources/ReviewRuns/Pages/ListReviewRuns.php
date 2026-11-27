@@ -257,6 +257,12 @@ class ListReviewRuns extends ListRecords
                         ->required()
                         ->maxLength(500)
                         ->placeholder('https://bitbucket.org/workspace/repository/pull-requests/12'),
+                    TextInput::make('commit')
+                        ->label(__('Commit'))
+                        ->maxLength(40)
+                        ->regex('/^[0-9a-fA-F]{7,40}$/')
+                        ->placeholder(__('The head of the pull request'))
+                        ->helperText(__('An earlier commit of the open pull request to review, by its hash. It is reviewed as though nobody had, and not from the diff alone.')),
                     ...ReviewRunResource::trialFields(),
                 ])
                 ->action(function (array $data, ReviewTrial $trials): void {

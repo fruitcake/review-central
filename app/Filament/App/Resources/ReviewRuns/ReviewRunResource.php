@@ -334,8 +334,11 @@ class ReviewRunResource extends Resource
             'effort' => filled($data['effort'] ?? null) ? (string) $data['effort'] : null,
             // The second check is one of the parts, and kept apart for the run's scripts.
             'verify' => $modules['verify'] ?? null,
-            'ignore_existing' => (bool) ($data['ignore_existing'] ?? true),
+            // An earlier commit is always reviewed as though nobody had: what was said since is about later code.
+            'ignore_existing' => filled($data['commit'] ?? null) || (bool) ($data['ignore_existing'] ?? true),
             'modules' => $modules === [] ? null : $modules,
+            // An earlier commit of the pull request, where one is named; its head otherwise.
+            'commit' => filled($data['commit'] ?? null) ? trim((string) $data['commit']) : null,
         ];
     }
 
