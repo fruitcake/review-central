@@ -458,6 +458,13 @@ it('follows each body with the classes that run it, magic methods included, and 
         'OtherRunner' => $class('OtherRunner', $method('respond()'), ' extends BaseRunner'),
         'Runner' => $class('Runner', $method('__invoke()', 'Gateways::any()->settle(1);')),
         'PayDesk' => $class('PayDesk', $method('pay(Processor $processor, Runner $runner)')),
+        // Two interfaces, one call: both runners share the base's run, each with its own reply.
+        'Sender' => "<?php\n\ninterface Sender\n{\n    public function run();\n}\n",
+        'Mailer' => "<?php\n\ninterface Mailer\n{\n    public function run();\n}\n",
+        'BaseSender' => $class('BaseSender', $method('run()', '$this->reply();')),
+        'MailSender' => $class('MailSender', $method('reply()'), ' extends BaseSender implements Sender'),
+        'TextSender' => $class('TextSender', $method('reply()'), ' extends BaseSender implements Mailer'),
+        'Outbox' => $class('Outbox', $method('send($sender)')),
         'Refunder' => $class('Refunder', $method('refund()')),
     ];
     ($this->git)('checkout', '-q', 'main');
@@ -470,6 +477,7 @@ it('follows each body with the classes that run it, magic methods included, and 
     ($this->git)('rebase', '-q', 'main');
     ($this->put)('app/Desk/ChildStep.php', $class('ChildStep', $method('run()', 'parent::run();'), ' extends BaseStep'));
     ($this->put)('app/Desk/PayDesk.php', $class('PayDesk', $method('pay(Processor $processor, Runner $runner)', "\$processor->run();\n        \$runner();")));
+    ($this->put)('app/Desk/Outbox.php', $class('Outbox', $method('send($sender)', '$sender->run();')));
     ($this->put)('app/Desk/Refunder.php', $class('Refunder', $method('refund()', "// \$gateway->charge(1) was the old way\n        Gateways::any()->charge(2);")));
     ($this->git)('commit', '-qam', 'Desk changes');
 
@@ -484,11 +492,14 @@ it('follows each body with the classes that run it, magic methods included, and 
         "baserunner::run\tbaserunner::respond",
         "runner::__invoke\tcardgateway::settle",
         "runner::__invoke\tcashgateway::settle",
+        "outbox::send\tsender::run",
+        "outbox::send\tmailer::run",
+        "basesender::run\tbasesender::reply",
         "refunder::refund\tcardgateway::charge",
         "refunder::refund\tcashgateway::charge",
     ])."\n");
     File::put("{$index}/classes.tsv", implode("\n", array_map(fn (string $name): string => strtolower($name)."\tapp/Desk/{$name}.php", array_keys($files)))."\n");
-    File::put("{$index}/ancestors.tsv", "siblingstep\tbasestep\nchildstep\tbasestep\ncardrunner\tbaserunner\ncardrunner\tprocessor\notherrunner\tbaserunner\n");
+    File::put("{$index}/ancestors.tsv", "siblingstep\tbasestep\nchildstep\tbasestep\ncardrunner\tbaserunner\ncardrunner\tprocessor\notherrunner\tbaserunner\nmailsender\tbasesender\nmailsender\tsender\ntextsender\tbasesender\ntextsender\tmailer\n");
 
     $reach = Process::path($this->dir)->env(['REACH_INDEX' => $index])
         ->run(['php', realpath(__DIR__.'/../../resources/review/skill/reach.php'), 'main', 'HEAD'])->throw()->output();
@@ -500,6 +511,8 @@ it('follows each body with the classes that run it, magic methods included, and 
         ->not->toContain('`respond`')
         // Through __invoke into its body.
         ->toContain('- `app/Desk/Runner.php::__invoke`, which the changed `pay` calls, calls `settle` on `CardGateway`')
+        // A body two targets of one call share runs for the classes of both.
+        ->toContain('- `app/Desk/BaseSender.php::run`, which the changed `send` calls, calls `reply` on `MailSender` (`app/Desk/MailSender.php:5`) or `TextSender` (`app/Desk/TextSender.php:5`).')
         // A call in a comment is no second call.
         ->toContain('- `app/Desk/Refunder.php::refund`, which this change changes, calls `charge` on `CardGateway`');
 });

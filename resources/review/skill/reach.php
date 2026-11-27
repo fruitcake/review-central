@@ -1006,6 +1006,7 @@ if ($indexed !== null) {
         $seen[$visit] = true;
         $byMethod = [];
         $sites = [];
+        $next = [];
 
         foreach (array_keys($indexed['calls'][$source] ?? []) as $target) {
             [$targetClass, $method] = explode('::', $target, 2);
@@ -1032,12 +1033,17 @@ if ($indexed !== null) {
             $byMethod[$method] = ($byMethod[$method] ?? []) + $bodies;
 
             // On into the bodies that run, with the classes that run them: an interface's
-            // declaration has none, and a magic method's runs like any other.
+            // declaration has none, and a magic method's runs like any other. A body two
+            // targets share is followed once, with the classes of both.
             if ($depth + 1 < IMPLEMENTATION_DEPTH) {
                 foreach ($bodies as $body) {
-                    $queue[] = ["{$body['class']}::{$method}", $body['for'], $depth + 1, $changedKey];
+                    $next["{$body['class']}::{$method}"] = array_values(array_unique([...($next["{$body['class']}::{$method}"] ?? []), ...$body['for']]));
                 }
             }
+        }
+
+        foreach ($next as $body => $runBy) {
+            $queue[] = [$body, $runBy, $depth + 1, $changedKey];
         }
 
         foreach ($byMethod as $method => $implementations) {
