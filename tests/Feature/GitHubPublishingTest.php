@@ -179,7 +179,7 @@ beforeEach(function () {
 
         if ($path === "{$repo}/pulls/12/reviews") {
             if ($method === 'POST') {
-                $g->reviews[] = $review = ['id' => $g->next++, 'state' => ['APPROVE' => 'APPROVED', 'REQUEST_CHANGES' => 'CHANGES_REQUESTED'][$request['event']], 'user' => ['id' => 42], 'body' => $request['body'] ?? ''];
+                $g->reviews[] = $review = ['id' => $g->next++, 'state' => ['APPROVE' => 'APPROVED', 'REQUEST_CHANGES' => 'CHANGES_REQUESTED'][$request['event']], 'user' => ['id' => 42], 'body' => $request['body'] ?? '', 'commit_id' => $request['commit_id'] ?? 'head'];
 
                 return Http::response($review);
             }
@@ -292,6 +292,18 @@ it('approves once, requests changes in its place, and withdraws by dismissing it
 
     expect($this->client->requestChanges('12', false))->toBe(200)
         ->and($this->github->reviews[1]['state'])->toBe('DISMISSED');
+});
+
+it('approves the commit that was reviewed, and that commit again only once', function () {
+    expect($this->client->approve('12', true, 'aaa111'))->toBe(200)
+        ->and($this->github->reviews[0])->toMatchArray(['state' => 'APPROVED', 'commit_id' => 'aaa111'])
+        ->and($this->client->approve('12', true, 'aaa111'))->toBe(200)
+        ->and($this->github->reviews)->toHaveCount(1);
+
+    // A newer commit reviewed is a new approval, of that commit.
+    expect($this->client->approve('12', true, 'bbb222'))->toBe(200)
+        ->and($this->github->reviews)->toHaveCount(2)
+        ->and($this->github->reviews[1]['commit_id'])->toBe('bbb222');
 });
 
 it('shows the review as a commit status, and posts nothing without a token', function () {

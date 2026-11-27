@@ -910,6 +910,11 @@ class ReviewPublisher
      * Both are said every run rather than only on a change: an approval that was
      * never withdrawn when findings appeared would be worse than no approval at all.
      *
+     * Only the commit that was reviewed is approved: when the pull request has moved
+     * on to a newer one while the review ran, it approves nothing and takes back an
+     * approval that stands, as that would approve code nobody reviewed. A request for
+     * changes stays until the review of the newer commit says otherwise.
+     *
      * Never throws. Bitbucket may refuse a participant action from an access token,
      * which costs a nicety and nothing else - the findings are on the pull request
      * either way.
@@ -917,11 +922,15 @@ class ReviewPublisher
     protected function recordVerdict(Repository $repository, string $pullRequestId, ReviewRun $run): string
     {
         $failing = strtoupper((string) ($run->result ?? '')) === 'FAILED';
-        $approving = ! $failing && ! $run->needsManualReview();
 
         try {
-            $changes = $repository->sourceControl()->requestChanges($pullRequestId, $failing);
-            $approval = $repository->sourceControl()->approve($pullRequestId, $approving);
+            // Read again just before: a push may have landed while the review was published.
+            $head = (string) ($repository->sourceControl()->getPullRequest($pullRequestId)['source']['commit']['hash'] ?? '');
+            $moved = $head !== '' && ! ReviewContext::isSameCommit($head, $run->commit);
+            $approving = ! $failing && ! $run->needsManualReview() && ! $moved;
+
+            $changes = $repository->sourceControl()->requestChanges($pullRequestId, $failing, $run->commit);
+            $approval = $repository->sourceControl()->approve($pullRequestId, $approving, $run->commit);
         } catch (Throwable $exception) {
             report($exception);
 
@@ -943,6 +952,7 @@ class ReviewPublisher
         return match (true) {
             $failing => 'changes requested',
             $approving => 'approved',
+            $moved => 'not approved: the pull request moved on to '.substr($head, 0, 12).' while '.substr($run->commit, 0, 12).' was reviewed',
             default => 'manual review',
         };
     }
