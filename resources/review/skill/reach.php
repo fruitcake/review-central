@@ -7,7 +7,9 @@
  * points that reach a method of the same class that writes, without passing the
  * check. With the code index, also the models the check reads by name and the
  * entry points that add to them without passing it: through a relation, or with
- * the model's own create. A rule about who may do something has to hold on every
+ * the model's own create. An entry point with a route says its route and whether
+ * its middleware signs anyone in, from reach-routes.php, which reads the route
+ * files without running them. A rule about who may do something has to hold on every
  * path to what it guards, and a path the change never touches is the one a
  * review misses.
  *
@@ -51,6 +53,9 @@ const CREATES = 'create|forceCreate|insert|firstOrCreate|updateOrCreate';
 
 /** Where a request, a command or a job starts. */
 const ENTRY = '#^(app/Http/Controllers/|app/Livewire/|app/Console/Commands/|app/Jobs/|app/Listeners/|app/Mcp/|app/Filament/|routes/|resources/views/)#';
+
+/** A middleware that signs someone in or checks what they may do, by its name or its class's. */
+const AUTHENTICATES = '/(?<!RedirectIf)Authenticat|\\bauth\\b|auth[.:]|sanctum|passport|signed|ValidateSignature|can:|Authorize|permission|role|admin|verified/i';
 
 /** A method named as a check. */
 const CHECK = '/^(can[A-Z]\w*|allows?|allows[A-Z]\w*|authori[sz]e\w*|check[A-Z]\w*|has\w*(Error|Errors|Access|Permission)|is\w*(Allowed|Accessible|Permitted|Authori[sz]ed)|\w*Access(Error|Errors)?|\w*Permission)$/';
@@ -658,6 +663,39 @@ $addersTo = function (string $model) use (&$indexed, $linesOf, $enclosing, $full
     return $adders;
 };
 
+// The routes, read from the route files without running them: which way in is reached
+// how, and behind what middleware.
+require_once __DIR__.'/reach-routes.php';
+$routesTo = [];
+
+foreach (is_dir('routes') ? reach_routes((string) getcwd()) : [] as $route) {
+    $routesTo[$route['action']][] = $route;
+}
+
+/** For an entry point in a controller or a component: its route and whether its middleware signs anyone in. */
+$routed = function (string $entry) use (&$routesTo, $fullClassOf): string {
+    if (! str_contains($entry, '::') || $routesTo === []) {
+        return '';
+    }
+
+    [$file, $name] = explode('::', $entry, 2);
+    $class = $fullClassOf($file);
+    // A full-page component is routed as the class; its actions run on that page.
+    $routes = $routesTo["{$class}::".strtolower($name)] ?? (str_starts_with($file, 'app/Livewire/') ? $routesTo["{$class}::__invoke"] ?? [] : []);
+
+    if ($routes === []) {
+        return '';
+    }
+
+    $route = $routes[0];
+    $middleware = array_map(fn (string $name): string => substr((string) strrchr('\\'.$name, '\\'), 1), $route['middleware']);
+    $guarding = array_values(array_filter($middleware, fn (string $name): bool => preg_match(AUTHENTICATES, $name) === 1));
+    $more = count($routes) > 1 ? ', and '.(count($routes) - 1).' more route(s)' : '';
+
+    return " ({$route['methods']} {$route['uri']}{$more}; "
+        .($guarding === [] ? 'no middleware that signs anyone in'.($middleware === [] ? '' : ': '.implode(', ', $middleware)) : 'behind '.implode(', ', $guarding)).')';
+};
+
 $out = [];
 
 foreach ($checks as $key => $check) {
@@ -704,8 +742,8 @@ foreach ($checks as $key => $check) {
 
         foreach (array_slice($without, 0, LISTED, true) as $entry => $hit) {
             $out[] = $hit['distance'] === 0
-                ? "  - `{$entry}`, which writes itself, with no guard of its own"
-                : "  - `{$entry}`, through `".implode('`, `', array_unique($hit['via'])).'`';
+                ? "  - `{$entry}`{$routed($entry)}, which writes itself, with no guard of its own"
+                : "  - `{$entry}`{$routed($entry)}, through `".implode('`, `', array_unique($hit['via'])).'`';
         }
 
         if (count($without) > LISTED) {
@@ -771,8 +809,8 @@ foreach ($checks as $key => $check) {
 
     foreach ($adding as $entry => ['adder' => $adder, 'distance' => $distance]) {
         $out[] = $distance === 0
-            ? "  - `{$entry}`, with `{$adder['what']}` at line {$adder['line']}{$adder['note']}"
-            : "  - `{$entry}`, through `{$adder['name']}`, with `{$adder['what']}` at `{$adder['file']}:{$adder['line']}`{$adder['note']}";
+            ? "  - `{$entry}`{$routed($entry)}, with `{$adder['what']}` at line {$adder['line']}{$adder['note']}"
+            : "  - `{$entry}`{$routed($entry)}, through `{$adder['name']}`, with `{$adder['what']}` at `{$adder['file']}:{$adder['line']}`{$adder['note']}";
     }
 }
 
@@ -786,5 +824,5 @@ echo "\nREACH:\n\n";
 echo $indexed !== null
     ? 'Worked out from the code before you started, from a code index that resolves each call by the type of what it is called on: a path listed is one the code takes. A call on a value whose type is not known (mixed) is not in the index, so a path can be missing; search for one you expect.'
     : 'Worked out from the code before you started, by method name: a call to ->name( is taken to reach every method of that name, so this is a floor that can also name a path that does not apply. Verify each before you rely on it.';
-echo ' For each check this change adds or changes, it lists the entry points (controllers, Livewire components, jobs, commands, routes, views) that reach it, and the entry points that reach a method of the same class that writes without passing the check.'.($indexed !== null ? ' With the index it also lists the models the check reads, and the entry points that add to them, through a relation or with create, without passing the check: another way into what the check guards.' : '')." Where the change brings in a rule about who may do something, decide for each of those whether the rule has to hold there too: one that skips it is this change's finding, though the path is old.\n\n";
+echo ' For each check this change adds or changes, it lists the entry points (controllers, Livewire components, jobs, commands, routes, views) that reach it, and the entry points that reach a method of the same class that writes without passing the check.'.($indexed !== null ? ' With the index it also lists the models the check reads, and the entry points that add to them, through a relation or with create, without passing the check: another way into what the check guards.' : '')." An entry point with a route says it, as the route files declare it, and whether any of its middleware signs anyone in: a way in that no one has to sign in for weighs heaviest. Where the change brings in a rule about who may do something, decide for each of those whether the rule has to hold there too: one that skips it is this change's finding, though the path is old.\n\n";
 echo $text."\n";

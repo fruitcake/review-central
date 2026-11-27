@@ -100,6 +100,17 @@ it('names the entry points that reach a check the change makes, and those that r
         ->not->toContain('`app/Http/Controllers/BookingController.php::store`, through');
 });
 
+it('says of an entry point its route, and whether any of its middleware signs anyone in', function () {
+    ($this->put)('routes/web.php', "<?php\n\nRoute::middleware('auth')->group(function () {\n    Route::post('book/{lesson}', [BookingController::class, 'store']);\n});\n\nRoute::post('pay/{lesson}', [PaymentController::class, 'pay'])->middleware('throttle:10');\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Routes');
+    ($this->put)('app/Models/Lesson.php', str_replace('return null;', "return \$this->invited(\$member) ? null : 'Not invited';", File::get("{$this->dir}/app/Models/Lesson.php")));
+    ($this->git)('commit', '-qam', 'Only invited members');
+
+    expect(($this->reach)())
+        ->toContain('- `app/Http/Controllers/PaymentController.php::pay` (POST /pay/{lesson}; no middleware that signs anyone in: web, throttle:10), through `createParticipant`');
+});
+
 it('says nothing when the change makes no check', function () {
     ($this->put)('app/Services/PaymentService.php', str_replace('$lesson->createParticipant($member);', "\$lesson->createParticipant(\$member);\n        logger('paid');", File::get("{$this->dir}/app/Services/PaymentService.php")));
     ($this->git)('commit', '-qam', 'Log payments');
