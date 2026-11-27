@@ -7,6 +7,7 @@ namespace App\Runners\Container;
 use App\Enums\ReviewProvider;
 use App\Exceptions\ReviewStepFailed;
 use App\Models\Repository;
+use App\Models\ReviewRun;
 use App\Runners\ContainerRunner;
 use App\Services\PullRequestClassifier;
 use App\Services\ReviewContext;
@@ -186,6 +187,11 @@ class Precheck
             'server_variables' => (object) $settings,
         ] + ReviewSettings::options($settings);
 
+        // An earlier commit with the description of later rounds would be told their fixes.
+        if ($trial?->commit !== null) {
+            $context = $this->describedAsThen($repository, $context, $commit, $say);
+        }
+
         if ($trial?->ignoreExisting === true) {
             $context = $this->withoutWhatIsThere($context, $say);
         } elseif ($trial !== null) {
@@ -325,6 +331,44 @@ class Precheck
         }
 
         $say("Ignoring what is already on the pull request: {$context['ignored_existing']['comments']} comment(s) and {$context['ignored_existing']['findings']} finding(s) left out; new findings are numbered after F{$context['ignored_existing']['highest_finding_id']}.");
+
+        return $context;
+    }
+
+    /**
+     * The pull request's title and description as they were when its own review
+     * first read this commit. The ones it has now can describe later rounds, such
+     * as the fixes for what was found at this commit, and a trial that replays it
+     * would then be told the answers. Without such a review, the ones it has now.
+     *
+     * @param  array<string, mixed>  $context
+     * @return array<string, mixed>
+     */
+    protected function describedAsThen(Repository $repository, array $context, string $commit, callable $say): array
+    {
+        $then = ReviewRun::query()
+            ->where('repository_id', $repository->getKey())
+            ->where('pull_request_id', $context['pull_request']['id'] ?? null)
+            ->where('commit', 'like', substr($commit, 0, 12).'%')
+            ->where('custom', false)
+            ->whereNotNull('context')
+            ->oldest('started_at')
+            ->first();
+        $pullRequest = $then?->context['pull_request'] ?? null;
+
+        if (! is_array($pullRequest) || ! array_key_exists('description', $pullRequest)) {
+            $say("The pull request's description as it is now: no review of {$commit} kept the one it had then, so it may describe later changes.");
+
+            return $context;
+        }
+
+        $context['pull_request']['description'] = $pullRequest['description'];
+
+        if (is_string($pullRequest['title'] ?? null)) {
+            $context['pull_request']['title'] = $pullRequest['title'];
+        }
+
+        $say("The pull request's description as it was when its review of {$commit} began ({$then->started_at->toDateTimeString()}), not as it is now.");
 
         return $context;
     }
