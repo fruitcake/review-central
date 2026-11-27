@@ -161,15 +161,28 @@ it('opens one in a repository not added yet, in a workspace the user\'s tenant c
 
     ($this->create)(['repository' => 'git@bitbucket.org:ACME/blog.git'])
         ->assertOk()
-        ->assertStructuredContentPaths(['repository' => 'acme/blog', 'pull_request_id' => 3]);
+        ->assertStructuredContentPaths(['repository' => 'acme/blog', 'pull_request_id' => 3])
+        ->assertSee('nothing reviews this pull request');
 
     Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
         && $request->url() === 'https://api.bitbucket.org/2.0/repositories/acme/blog/pullrequests'
         && $request->hasHeader('Authorization', 'Bearer sam-token'));
     expect(Repository::query()->where('slug', 'blog')->exists())->toBeFalse();
 
+    // A connection that adds and reviews the repositories its webhook tells of reviews this one too.
+    $this->repository->integration->update(['settings' => ['workspace' => 'acme', 'add_repositories' => true, 'review_added_repositories' => true]]);
+
+    ($this->create)(['repository' => 'acme/blog', 'branch' => 'feature/other'])->assertOk()->assertSee('reviews it then');
+
     // A workspace only another tenant connects is not the user's to write in through here.
     Connection::factory()->create(['settings' => ['workspace' => 'globex']]);
 
     ($this->create)(['repository' => 'globex/blog'])->assertHasErrors(['none of your tenants has a Bitbucket or GitHub App connection for the workspace globex']);
+});
+
+it('does not take a remote on another host for the repository of that name on Bitbucket', function () {
+    ($this->create)(['repository' => 'git@gitlab.com:acme/blog.git'])->assertHasErrors(['acme/blog is on gitlab.com']);
+    ($this->update)(['repository' => 'https://gitlab.com/acme/blog.git'])->assertHasErrors(['acme/blog is on gitlab.com']);
+
+    Http::assertNothingSent();
 });

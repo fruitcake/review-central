@@ -93,6 +93,13 @@ class RepositoryAccess
         }
 
         [$workspace, $slug] = $fullName;
+        $host = self::host($name);
+
+        // A remote on another host, such as GitLab, is not the same repository as
+        // one of that name on Bitbucket or GitHub.
+        if ($host !== null && $drivers === null) {
+            throw new RepositoryNotFound("{$workspace}/{$slug} is on {$host}: pull requests are opened as you only on Bitbucket and on GitHub.");
+        }
 
         // The hosts a pull request is opened on as the user.
         $authoring = array_values(array_intersect($drivers ?? ['bitbucket', 'github-app'], ['bitbucket', 'github-app']));
