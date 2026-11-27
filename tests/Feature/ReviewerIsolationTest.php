@@ -130,7 +130,8 @@ it('adds the steps that only some runs have to the prompt only on a run they app
     File::put("{$dir}/review-ticket.md", '# SHOP-12');
     File::put("{$dir}/review-scan.md", 'No secrets.');
 
-    expect($parts('claude-code', ['REVIEW_EXTRA_PASSES' => 'true']))->toContain('FOLLOW-UP ROUNDS:', 'TICKET:', 'SCOPE AND CHECKLISTS', 'THE SCAN:', 'EXTRA PASSES:')
+    // The extra passes are a step of run-claude.sh now, not a request in the prompt.
+    expect($parts('claude-code', ['REVIEW_EXTRA_PASSES' => 'true']))->toContain('FOLLOW-UP ROUNDS:', 'TICKET:', 'SCOPE AND CHECKLISTS', 'THE SCAN:')->not->toContain('EXTRA PASSES:')
         ->and($parts('codex-cli', ['REVIEW_EXTRA_PASSES' => 'true']))->toContain('FOLLOW-UP ROUNDS:')->not->toContain('EXTRA PASSES:');
 
     // A trial that reviews as though nobody had is a first review, whatever the pull request holds.
@@ -206,4 +207,47 @@ it('stops before Claude when a skill cannot be moved out of its way', function (
     expect($result->failed())->toBeTrue()
         ->and($result->output())->toContain('could not all be moved')
         ->and(File::exists("{$dir}/locked/.claude/skills/audit/SKILL.md"))->toBeTrue();
+});
+
+it('runs Claude\'s extra passes as a session of their own first, and hands what they found to the review, also when they ran out of budget', function () {
+    $dir = storage_path('framework/testing/claude-passes');
+    File::deleteDirectory($dir);
+    File::ensureDirectoryExists("{$dir}/bin");
+    $git = fn (string ...$args) => Process::path($dir)->run(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...$args])->throw();
+    $git('init', '-q', '-b', 'main');
+    File::put("{$dir}/app.php", "<?php\n");
+    $git('add', '-A');
+    $git('commit', '-qm', 'base');
+    $git('update-ref', 'refs/remotes/origin/main', 'main');
+    File::put("{$dir}/review-context.json", json_encode(['settings' => ['stack' => []], 'pull_request' => ['destination_branch' => 'main']]));
+    // A Claude Code that answers the passes with a candidate and then runs out of budget,
+    // and keeps the prompt the review itself is given.
+    File::put("{$dir}/bin/claude", <<<SH
+        #!/bin/sh
+        [ "\$1" = "--version" ] && { echo "2.0.0 (Claude Code)"; exit 0; }
+        prompt=\$(cat)
+        case "\$prompt" in
+          *"first, independent pass"*)
+            echo '{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"code-review"}}]}}'
+            echo '{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"- `app.php:1` · high · The export leaks every row · code-reviewer"}]}}'
+            echo '{"type":"result","subtype":"error_max_budget_usd","is_error":true}' ;;
+          *)
+            printf '%s' "\$prompt" > "{$dir}/review-prompt.txt"
+            echo '{"type":"result","subtype":"success","is_error":false,"result":"done"}' ;;
+        esac
+        SH);
+    chmod("{$dir}/bin/claude", 0755);
+
+    $result = Process::path($dir)->env([
+        'PATH' => "{$dir}/bin:".getenv('PATH'), 'HOME' => "{$dir}/home", 'REVIEW_LOCAL' => 'true',
+        'REVIEW_EXTRA_PASSES' => 'true', 'BITBUCKET_PR_DESTINATION_BRANCH' => 'main', 'BITBUCKET_COMMIT' => 'HEAD',
+    ])->run(['sh', resource_path('review/skill/run-claude.sh')]);
+
+    expect($result->output())->toContain('The code-review skill and the pr-review-toolkit agents over origin/main...HEAD first, for candidates.')
+        ->toContain('-> Skill code-review')
+        ->toContain('Review passes: 1 candidate(s) for the review.')
+        ->and(File::get("{$dir}/claude-review-candidates.md"))->toContain('The export leaks every row')
+        ->and(File::get("{$dir}/review-prompt.txt"))->toContain('REVIEW PASSES:', '`claude-review-candidates.md`');
+
+    File::deleteDirectory($dir);
 });

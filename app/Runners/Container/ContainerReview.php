@@ -50,7 +50,7 @@ class ContainerReview
      */
     protected const REVIEW_FILES = [
         '/.review/', '/.review-variables', '/.review-skills/', '/.review-instructions/', '/review-context.json', '/review-ticket.md',
-        '/ai-review.json', '/ai-usage.json', '/claude-review.jsonl', '/codex-review.jsonl', '/codex-review-candidates.md', '/ocr-review.json', '/pi-review.jsonl',
+        '/ai-review.json', '/ai-usage.json', '/claude-review.jsonl', '/claude-review-candidates.md', '/claude-review-candidates.jsonl', '/codex-review.jsonl', '/codex-review-candidates.md', '/ocr-review.json', '/pi-review.jsonl',
         '/ocr-background.md', '/ocr-rules.json', '/review-scan.md', '/.review-started', '/.review-verdict', '/.claude-exit', '/.codex-exit', '/.pi-exit',
     ];
 

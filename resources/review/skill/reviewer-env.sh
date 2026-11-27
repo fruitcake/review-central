@@ -169,11 +169,6 @@ reviewer_prompt_parts() {
     cat "$_parts/scan.md"
   fi
 
-  # Claude's own subagents and skill; Codex runs its own pass before the review instead.
-  if [ "${1:-}" = "claude-code" ] && [ "${REVIEW_EXTRA_PASSES:-false}" = "true" ]; then
-    cat "$_parts/extra-passes.md"
-  fi
-
   if [ "${1:-}" = "claude-code" ] && [ -n "${2:-}" ] && [ -s "$2" ] && [ "$(jq -r '.advisorModel // ""' "$2" 2>/dev/null)" != "" ]; then
     cat "$_parts/advisor.md"
   fi
