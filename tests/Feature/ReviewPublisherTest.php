@@ -63,6 +63,9 @@ class ReviewPublisherTest extends TestCase
     /** The pull request's state, read live by the fake so a test can merge it. */
     protected string $state = 'OPEN';
 
+    /** The pull request's head, read live by the fake so a test can push to it. */
+    protected string $head = 'abc1234def5678';
+
     protected function fakeBitbucket(array $comments = [], array $tasks = [], bool $postsFail = false): void
     {
         $this->tasks = $tasks;
@@ -101,7 +104,7 @@ class ReviewPublisherTest extends TestCase
                     'description' => $this->description,
                     'state' => $this->state,
                     'draft' => false,
-                    'source' => ['branch' => ['name' => 'tweak-models'], 'commit' => ['hash' => 'abc1234def5678']],
+                    'source' => ['branch' => ['name' => 'tweak-models'], 'commit' => ['hash' => $this->head]],
                     'destination' => ['branch' => ['name' => 'master']],
                 ]);
             }
@@ -632,6 +635,21 @@ class ReviewPublisherTest extends TestCase
         $this->assertSame('Changes requested', RunPresenter::outcome(ReviewRun::query()->latest('id')->firstOrFail())['label']);
     }
 
+    public function test_it_approves_nothing_when_the_pull_request_moved_on_while_it_was_reviewed(): void
+    {
+        $this->fakeBitbucket();
+        // Pushed while the review of abc1234 ran.
+        $this->head = 'fed9876cba5432';
+
+        $this->report([], extra: ['result' => 'PASSED'])
+            ->assertOk()
+            ->assertJsonPath('publish.verdict', 'not approved: the pull request moved on to fed9876cba54 while abc1234def56 was reviewed');
+
+        // An approval that stands is taken back: it would cover the newer commit, which nobody reviewed.
+        Http::assertSent(fn (Request $r): bool => $r->method() === 'DELETE' && str_contains($r->url(), '/approve'));
+        Http::assertNotSent(fn (Request $r): bool => $r->method() === 'POST' && str_contains($r->url(), '/approve'));
+    }
+
     public function test_what_was_left_for_a_person_stays_until_a_review_clears_it(): void
     {
         $this->description = "[//]: # (ai-review-start)\n\n## AI Review\n\n**Result:** MANUAL REVIEW REQUIRED\n\n"
@@ -649,6 +667,7 @@ class ReviewPublisherTest extends TestCase
         $this->assertStringContainsString('- Whether prospects may be deleted.', $this->publishedDescription());
 
         // An empty list is the review saying the point no longer applies.
+        $this->head = 'def5678abc1234';
         $this->report([], commit: 'def5678abc1234', extra: ['result' => 'PASSED', 'manual_review' => []])
             ->assertOk()
             ->assertJsonPath('publish.verdict', 'approved');

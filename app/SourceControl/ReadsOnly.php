@@ -68,12 +68,12 @@ trait ReadsOnly
         throw $this->readOnly();
     }
 
-    public function approve(string $id, bool $approved): int
+    public function approve(string $id, bool $approved, ?string $commit = null): int
     {
         throw $this->readOnly();
     }
 
-    public function requestChanges(string $id, bool $requested): int
+    public function requestChanges(string $id, bool $requested, ?string $commit = null): int
     {
         throw $this->readOnly();
     }

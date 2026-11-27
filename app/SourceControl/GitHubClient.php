@@ -399,32 +399,35 @@ class GitHubClient implements FiltersSecrets, OpensPullRequests, SourceControl
      * again while the last one stands adds nothing, so it is left at that rather
      * than adding a review to the pull request's history on every run.
      */
-    public function approve(string $id, bool $approved): int
+    public function approve(string $id, bool $approved, ?string $commit = null): int
     {
-        return $this->verdict($id, 'APPROVED', 'APPROVE', $approved, '');
+        return $this->verdict($id, 'APPROVED', 'APPROVE', $approved, '', $commit);
     }
 
     /**
      * A review that requests changes, or the dismissal of the token's request.
      */
-    public function requestChanges(string $id, bool $requested): int
+    public function requestChanges(string $id, bool $requested, ?string $commit = null): int
     {
-        return $this->verdict($id, 'CHANGES_REQUESTED', 'REQUEST_CHANGES', $requested, 'The AI review found something that holds the merge: see its comments and the description.');
+        return $this->verdict($id, 'CHANGES_REQUESTED', 'REQUEST_CHANGES', $requested, 'The AI review found something that holds the merge: see its comments and the description.', $commit);
     }
 
     /**
      * @return int the HTTP status: 404 for nothing to withdraw, as Bitbucket answers
      */
-    protected function verdict(string $id, string $state, string $event, bool $wanted, string $body): int
+    protected function verdict(string $id, string $state, string $event, bool $wanted, string $body, ?string $commit = null): int
     {
         $last = $this->lastOwnReview($id);
 
         if ($wanted) {
-            if (($last['state'] ?? null) === $state) {
+            // The same verdict at the same commit adds nothing; at another commit it is a new one.
+            if (($last['state'] ?? null) === $state && ($commit === null || ($last['commit_id'] ?? null) === $commit)) {
                 return 200;
             }
 
-            return $this->request(15)->post($this->url("pulls/{$id}/reviews"), array_filter(['event' => $event, 'body' => $body]))->status();
+            // Without commit_id GitHub takes the head as it is then, which may be a
+            // commit pushed after the one that was reviewed.
+            return $this->request(15)->post($this->url("pulls/{$id}/reviews"), array_filter(['event' => $event, 'body' => $body, 'commit_id' => $commit]))->status();
         }
 
         if (($last['state'] ?? null) !== $state || ! isset($last['id'])) {
