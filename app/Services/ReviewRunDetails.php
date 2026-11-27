@@ -11,6 +11,7 @@ use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Models\User;
 use App\Runners\Container\RunLog;
+use App\Runners\Security\SecurityReview;
 
 /**
  * A review run as an admin looks into it to see why it found what it found: what
@@ -73,7 +74,7 @@ class ReviewRunDetails
             'log' => $this->log($chosen, $logLines, $match),
             'runs' => $siblings->map(fn (ReviewRun $sibling): array => [
                 'run' => $sibling->uuid,
-                'kind' => $sibling->custom ? 'trial' : 'review',
+                'kind' => self::kind($sibling),
                 'commit' => substr($sibling->commit, 0, 12),
                 'status' => $sibling->status,
                 'result' => $sibling->result,
@@ -91,7 +92,7 @@ class ReviewRunDetails
         return array_filter([
             'run' => $run->uuid,
             'url' => rescue(fn (): string => ReviewRunResource::getUrl('view', ['record' => $run], panel: 'app', tenant: $run->repository->tenant), null, false),
-            'kind' => $run->custom ? 'trial' : 'review',
+            'kind' => self::kind($run),
             'pull_request_id' => $run->pull_request_id,
             'branch' => $run->branch,
             'commit' => $run->commit,
@@ -122,8 +123,10 @@ class ReviewRunDetails
             'findings' => $run->findings,
             'restarted_as' => $run->restarted_as,
             'superseded_by' => $run->superseded_by,
-            // What the reviewer was given: the pull request, its comments and earlier findings.
-            'context' => $context ? $run->context : null,
+            // The context as the run was opened: the pull request, its comments and earlier
+            // findings. A trial reviewed as though nobody had got it without those.
+            'opening_context' => $context ? $run->context : null,
+            'opening_context_note' => $context && $run->context !== null ? 'The context as the run was opened. A trial or an earlier commit reviewed as though nobody had got it without the comments and earlier findings; a review of the pull request got it as it is.' : null,
         ], fn (mixed $value): bool => $value !== null && $value !== []);
     }
 
@@ -180,7 +183,7 @@ class ReviewRunDetails
             return ['note' => 'This run has no log here: it ran elsewhere, or its log was removed after the days logs are kept.'];
         }
 
-        $all = preg_split('/\R/', rtrim($tail['text'])) ?: [];
+        $all = preg_split('/\R/u', rtrim($tail['text'])) ?: [];
 
         if (filled($match)) {
             $all = array_values(array_filter($all, fn (string $line): bool => stripos($line, (string) $match) !== false));
@@ -194,6 +197,16 @@ class ReviewRunDetails
             // Only the end of a long log is kept for reading, or more lines matched than were asked for.
             'truncated' => $tail['truncated'] || count($all) > $lines,
         ];
+    }
+
+    /** What a run was: the pull request's own review, a trial, or a security review of a branch. */
+    protected static function kind(ReviewRun $run): string
+    {
+        return match (true) {
+            $run->kind === SecurityReview::KIND => 'security',
+            $run->custom => 'trial',
+            default => 'review',
+        };
     }
 
     /** A run's uuid from itself or from the address of its page. */

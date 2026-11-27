@@ -21,7 +21,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     - the repository's review settings as a review would start now (models, effort, parts, threshold, follow-up rounds; never a key);
     - the end of its log, where each step of the reviewer is: what it read and ran, and what it concluded;
     - the other runs of the same pull request or branch, by their `run` id.
-    Name the run by its id or the address of its page, or name a pull request or branch for its newest run. `log_match` keeps only the log lines that contain a text, such as `-> Bash` for the reviewer's commands. `context` adds the review-context.json the reviewer was given: the pull request, its comments and the earlier findings.
+    Name the run by its id or the address of its page, or name a pull request or branch for its newest run. `log_match` keeps only the log lines that contain a text, such as `-> Bash` for the reviewer's commands. `context` adds the context the run was opened with: the pull request, its comments and the earlier findings, which a trial reviewed as though nobody had did not get.
     TXT)]
 class ReviewRunTool extends ReviewTool
 {
@@ -33,7 +33,7 @@ class ReviewRunTool extends ReviewTool
             'repository' => ['required', 'string', 'max:500'],
             'tenant' => ['nullable', 'string', 'max:255'],
             'connection' => ['nullable', 'integer', 'min:1'],
-            'run' => ['nullable', 'string', 'max:500'],
+            'run' => ['nullable', 'string', 'max:500', 'required_without_all:pull_request_id,branch'],
             'pull_request_id' => ['nullable', 'integer', 'min:1'],
             'branch' => ['nullable', 'string', 'max:255'],
             'log_lines' => ['nullable', 'integer', 'min:0', 'max:'.ReviewRunDetails::MAX_LOG_LINES],
@@ -65,7 +65,7 @@ class ReviewRunTool extends ReviewTool
             'branch' => $schema->string()->description('The branch whose newest run to read, when no run or pull request is named.'),
             'log_lines' => $schema->integer()->description('How many of the log\'s last lines, 300 unless set; 0 for none, at most 5000.'),
             'log_match' => $schema->string()->description('Only the log lines that contain this, case-insensitively, such as `-> Bash` or `phase`.'),
-            'context' => $schema->boolean()->description('Also the review-context.json the reviewer was given. Off by default: it is long.'),
+            'context' => $schema->boolean()->description('Also the context the run was opened with. Off by default: it is long.'),
         ];
     }
 }

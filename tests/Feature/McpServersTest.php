@@ -983,7 +983,7 @@ it('shows an admin a run as it went: its setup, findings, verdicts, the reposito
     $this->run->forceFill(['build_number' => 41, 'agent' => 'claude-code', 'model' => 'claude-opus-5-5', 'effort' => 'high', 'cost' => 2.5])->save();
     $log = app(RunLog::class)->path($this->repository->id, 41);
     File::ensureDirectoryExists(dirname($log));
-    File::put($log, "08:39:30  ── reviewer ──\n08:39:44      -> Bash jq '.findings' review-context.json\n08:41:40  The review is not converging.\n08:41:55      -> Bash git diff a..b\n");
+    File::put($log, "08:39:30  ── reviewer ──\n08:39:44      -> Bash jq '.findings' review-context.json ✅\n08:41:40  The review is not converging.\n08:41:55      -> Bash git diff a..b\n");
     FindingVerdict::query()->create(['review_run_id' => $this->run->id, 'user_id' => $this->admin->id, 'finding_id' => 'F2', 'verdict' => FindingVerdictKind::Valid]);
 
     // Not for a member: the log quotes the repository's code.
@@ -999,7 +999,7 @@ it('shows an admin a run as it went: its setup, findings, verdicts, the reposito
             'run.model' => 'claude-opus-5-5',
             'run.findings.1.id' => 'F2',
             'verdicts.0.finding' => 'F2',
-            'log.lines' => ["08:39:44      -> Bash jq '.findings' review-context.json", '08:41:55      -> Bash git diff a..b'],
+            'log.lines' => ["08:39:44      -> Bash jq '.findings' review-context.json ✅", '08:41:55      -> Bash git diff a..b'],
             'runs.0.run' => $this->run->uuid,
         ])
         ->assertStructuredContentPath('settings.fail_on', ReviewSettings::failOn($this->repository));
@@ -1010,6 +1010,21 @@ it('shows an admin a run as it went: its setup, findings, verdicts, the reposito
         ->assertOk()
         ->assertStructuredContentPath('run.run', $this->run->uuid)
         ->assertStructuredContentPath('log.note', 'Left out: ask for log_lines to have it.');
+
+    // Without a run, pull request or branch it names none.
+    AgentServer::actingAs($this->admin)
+        ->tool(ReviewRunTool::class, ['repository' => 'acme/shop'])
+        ->assertHasErrors();
+
+    // A security review of a branch is told apart from a trial.
+    $security = ReviewRun::query()->create([
+        'tenant_id' => $this->tenant->id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'main', 'commit' => str_repeat('c', 40), 'kind' => 'security', 'custom' => true, 'status' => ReviewRun::STATUS_FINISHED, 'started_at' => now(),
+    ]);
+
+    AgentServer::actingAs($this->admin)
+        ->tool(ReviewRunTool::class, ['repository' => 'acme/shop', 'run' => $security->uuid, 'log_lines' => 0])
+        ->assertStructuredContentPath('run.kind', 'security');
 
     File::deleteDirectory(storage_path('framework/testing/run-logs'));
 });
