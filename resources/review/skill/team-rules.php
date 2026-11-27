@@ -41,65 +41,74 @@ if ($listing === null) {
 
 $changed = array_values(array_filter(explode("\0", $listing), fn (string $name): bool => $name !== ''));
 
+/** The headings ReviewRules::markdown() writes: a rule's own text may hold headings too. */
+const TEAM_RULE_SECTIONS = ['## Check these', '## Not a defect here'];
+
+/** Whether a rule applies: one limited to paths only when a file of this change matches them. */
+$applies = function (array $rule) use ($changed): bool {
+    // The meta line, when there is one, is the first line after the heading with text.
+    foreach (array_slice($rule, 1) as $line) {
+        if (trim($line) === '') {
+            continue;
+        }
+
+        if (! str_starts_with($line, 'Only in: ')) {
+            return true;
+        }
+
+        preg_match_all('/`([^`]+)`/', explode(' · ', $line)[0], $found);
+
+        return array_filter($changed, fn (string $path): bool => array_filter($found[1], fn (string $glob): bool => review_rule_glob_matches($glob, $path)) !== []) !== [];
+    }
+
+    return true;
+};
+
 foreach (glob(rtrim($directory, '/').'/review-rules*.md') ?: [] as $file) {
-    $lines = file($file, FILE_IGNORE_NEW_LINES) ?: [];
-    $kept = [];
-    $block = [];
-    $left = 0;
-    $total = 0;
+    // The file in parts: what comes before the first section, then each section with
+    // its introduction and its rules. A rule runs to the next rule or section.
+    $head = [];
+    $sections = [];
 
-    // A rule runs from its heading to the next heading of either level.
-    $flush = function () use (&$block, &$kept, &$left, &$total, $changed): void {
-        if ($block === []) {
-            return;
-        }
+    foreach (file($file, FILE_IGNORE_NEW_LINES) ?: [] as $line) {
+        $last = array_key_last($sections);
 
-        $total++;
-        $globs = null;
-
-        foreach ($block as $line) {
-            if (str_starts_with($line, 'Only in: ')) {
-                preg_match_all('/`([^`]+)`/', explode(' · ', $line)[0], $found);
-                $globs = $found[1];
-
-                break;
-            }
-        }
-
-        $applies = $globs === null || array_filter($changed, fn (string $path): bool => array_filter($globs, fn (string $glob): bool => review_rule_glob_matches($glob, $path)) !== []) !== [];
-
-        if ($applies) {
-            array_push($kept, ...$block);
+        if (in_array($line, TEAM_RULE_SECTIONS, true)) {
+            $sections[] = ['intro' => [$line], 'rules' => []];
+        } elseif ($last === null) {
+            $head[] = $line;
+        } elseif (preg_match('/^### [RC]\d+\. /', $line) === 1) {
+            $sections[$last]['rules'][] = [$line];
+        } elseif ($sections[$last]['rules'] === []) {
+            $sections[$last]['intro'][] = $line;
         } else {
-            $left++;
-        }
-
-        $block = [];
-    };
-
-    foreach ($lines as $line) {
-        if (preg_match('/^### [RC]\d+\. /', $line) === 1) {
-            $flush();
-            $block = [$line];
-        } elseif ($block !== [] && preg_match('/^#{1,2} /', $line) !== 1) {
-            $block[] = $line;
-        } else {
-            $flush();
-            $kept[] = $line;
+            $sections[$last]['rules'][array_key_last($sections[$last]['rules'])][] = $line;
         }
     }
 
-    $flush();
+    $total = 0;
+    $left = 0;
+    $out = $head;
+
+    foreach ($sections as $section) {
+        $kept = array_values(array_filter($section['rules'], $applies));
+        $total += count($section['rules']);
+        $left += count($section['rules']) - count($kept);
+
+        // A section whose every rule is left out goes, heading and all.
+        if ($kept !== []) {
+            array_push($out, ...$section['intro']);
+
+            foreach ($kept as $rule) {
+                array_push($out, ...$rule);
+            }
+        }
+    }
 
     if ($left === 0) {
         continue;
     }
 
-    // A section whose every rule is left out goes, heading and all.
-    $text = implode("\n", $kept)."\n";
-    $text = (string) preg_replace_callback('/^## [^\n]+\n(?:(?!## )[^\n]*\n)*/m', fn (array $section): string => preg_match('/^### /m', $section[0]) === 1 ? $section[0] : '', $text);
-    $text = rtrim($text)."\n\nRules limited to paths that no file of this change matches are left out: {$left} of {$total}.\n";
-
-    file_put_contents($file, $text);
+    file_put_contents($file, rtrim(implode("\n", $out))."\n\nRules limited to paths that no file of this change matches are left out: {$left} of {$total}.\n");
     fwrite(STDERR, "Team rules: {$left} of {$total} left out of ".basename($file).", as no changed file matches their paths.\n");
 }

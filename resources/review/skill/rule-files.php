@@ -100,7 +100,7 @@ $globs = function (string $text, string $kind) {
 
 require_once __DIR__.'/rule-glob.php';
 
-$matches = review_rule_glob_matches(...);
+$matches = 'review_rule_glob_matches';
 
 // The rules as the destination branch has them now, as REVIEW.md is read.
 $listed = $names($git(['ls-tree', '-r', '-z', '--name-only', $base, '--', '.ai/rules', '.claude/rules', '.github/instructions', '.cursor/rules']));

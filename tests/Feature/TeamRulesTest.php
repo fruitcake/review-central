@@ -54,6 +54,21 @@ it('leaves out the team\'s rules limited to paths no changed file matches, and k
         ->and($run->errorOutput())->toContain('Team rules: 2 of 4 left out');
 });
 
+it('keeps a rule whole when its own text has headings, and leaves out another', function () {
+    $rule = fn (ReviewRuleKind $kind, string $title, ?array $paths, string $body): ReviewRule => new ReviewRule(['kind' => $kind, 'title' => $title, 'paths' => $paths, 'body' => $body]);
+    ($this->put)('.review-instructions/review-rules.md', ReviewRules::markdown(new Collection([
+        $rule(ReviewRuleKind::Check, 'Payments check who may book', ['app/Payments/**'], "Every way into a payment checks the booking.\n\n## Exceptions\n\nThe kiosk books for a member who stands in front of it."),
+        $rule(ReviewRuleKind::Convention, 'Datatables may run raw SQL', ['app/DataTables/**'], 'They are read-only.'),
+    ])));
+
+    ($this->filter)();
+    $rules = File::get("{$this->dir}/.review-instructions/review-rules.md");
+
+    expect($rules)->toContain("## Exceptions\n\nThe kiosk books for a member who stands in front of it.")
+        ->and($rules)->not->toContain('Datatables may run raw SQL')
+        ->and($rules)->toContain('left out: 1 of 2');
+});
+
 it('keeps every rule when the change\'s files cannot be told', function () {
     $before = File::get("{$this->dir}/.review-instructions/review-rules.md");
 
