@@ -841,3 +841,33 @@ it('takes a scope the lock file or the registry settings put on a registry of th
 
     File::deleteDirectory($dir);
 });
+
+it('reads no private package through a file name with a newline, takes a bundled package from its bundler, and a quoted public registry as public', function () {
+    $dir = storage_path('framework/testing/search-guard-edges');
+    File::deleteDirectory($dir);
+    $guard = fn (string $in, string $query) => Process::path("{$dir}/{$in}")->input(json_encode(['tool_input' => ['query' => $query]]))
+        ->run(['php', '-n', resource_path('review/skill/search-guard.php')]);
+
+    // A private package with a file whose name holds a newline.
+    File::ensureDirectoryExists("{$dir}/php/vendor/acme/framework");
+    File::put("{$dir}/php/vendor/acme/framework/generated\nLedger.php", "<?php\n\nclass LedgerOnlyMarker\n{\n}\n");
+    File::put("{$dir}/php/composer.json", json_encode(['name' => 'acme/shop', 'require' => ['acme/framework' => '*@dev']]));
+    File::put("{$dir}/php/composer.lock", json_encode(['packages' => [['name' => 'acme/framework', 'version' => 'dev-main', 'dist' => ['type' => 'path', 'url' => '../framework']]]]));
+
+    // A public package that bundles another, and a scope pointed, in quotes, at the public registry.
+    File::ensureDirectoryExists("{$dir}/js");
+    File::put("{$dir}/js/package.json", json_encode(['name' => 'web', 'dependencies' => ['npm' => '^11.0.0', '@babel/core' => '^7.26.0']]));
+    File::put("{$dir}/js/package-lock.json", json_encode(['packages' => [
+        '' => ['name' => 'web'],
+        'node_modules/npm' => ['version' => '11.2.0', 'resolved' => 'https://registry.npmjs.org/npm/-/npm-11.2.0.tgz'],
+        'node_modules/npm/node_modules/semver' => ['version' => '7.7.1', 'inBundle' => true],
+        'node_modules/@babel/core' => ['version' => '7.26.0', 'resolved' => 'https://registry.npmjs.org/@babel/core/-/core-7.26.0.tgz'],
+    ]]));
+    File::put("{$dir}/js/.npmrc", "@babel:registry=\"https://registry.npmjs.org/\"\n");
+
+    expect($guard('php', 'LedgerOnlyMarker changelog')->exitCode())->toBe(2)
+        ->and($guard('js', 'semver changelog')->exitCode())->toBe(0)
+        ->and($guard('js', '@babel/core 7 changelog')->exitCode())->toBe(0);
+
+    File::deleteDirectory($dir);
+});

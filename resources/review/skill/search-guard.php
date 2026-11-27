@@ -112,11 +112,31 @@ foreach ([...((array) ($json('composer.lock')['packages'] ?? [])), ...((array) (
     }
 }
 
-foreach ((array) ($json('package-lock.json')['packages'] ?? []) as $path => $package) {
+$npm = (array) ($json('package-lock.json')['packages'] ?? []);
+
+foreach ($npm as $path => $package) {
     $name = strtolower((string) preg_replace('#^.*node_modules/#', '', (string) $path));
 
-    if ($name !== '' && is_array($package)) {
-        ($package['link'] ?? false) !== true && $publicRegistry((string) ($package['resolved'] ?? '')) ? $verified[$name] = true : $isPrivate($name);
+    if ($name === '' || ! is_array($package)) {
+        continue;
+    }
+
+    // A package bundled in another's tarball has no address of its own: it came from where
+    // the package that bundles it did.
+    $from = (string) $path;
+
+    while (($npm[$from]['inBundle'] ?? false) === true && str_contains($from, '/node_modules/')) {
+        $from = (string) preg_replace('#/node_modules/(?:@[^/]+/)?[^/]+$#', '', $from);
+    }
+
+    $source = is_array($npm[$from] ?? null) ? $npm[$from] : $package;
+
+    // Verified once is verified: a name the registry served at the top is public, also
+    // where a private package bundles a copy of it.
+    if (($source['link'] ?? false) !== true && $publicRegistry((string) ($source['resolved'] ?? ''))) {
+        $verified[$name] = true;
+    } elseif (($package['inBundle'] ?? false) !== true) {
+        $isPrivate($name);
     }
 }
 
@@ -136,6 +156,9 @@ foreach (['.npmrc', '.yarnrc.yml'] as $config) {
     preg_match_all('/^\s{2,}"?([\w.-]+)"?:\s*\n\s+npmRegistryServer:\s*"?([^"\s]+)/m', $text, $yarnScoped, PREG_SET_ORDER);
 
     foreach ([...$scoped, ...$yarnScoped] as [, $scope, $registry]) {
+        // As the file writes it, quoted or not.
+        $registry = trim($registry, "\"' ");
+
         if (preg_match('#^https://registry\.(npmjs\.org|yarnpkg\.com)/?#', $registry) !== 1) {
             $private[strtolower($scope)] = true;
 
@@ -173,22 +196,23 @@ foreach ($locks as $lock) {
 /** Whether grep finds the word in the public code, as a whole word in any case. */
 $inPublicCode = function (string $word) use ($locks, &$private): bool {
     // Not in a private package's own directory, where its code is the project's: by its
-    // path, so a public package with the same last name is still read.
-    $excluded = [];
+    // path, so a public package with the same last name is still read. The file names come
+    // back separated by NUL, so a name with a newline in it cannot slip past the filter.
+    $prefixes = [];
 
     foreach (array_keys($private) as $name) {
         if (str_contains($name, '/')) {
-            array_push($excluded, '-e', "vendor/{$name}/", '-e', "node_modules/{$name}/");
+            array_push($prefixes, "vendor/{$name}/", "node_modules/{$name}/");
         }
     }
 
     foreach ([...$locks, ...array_filter(['vendor', 'node_modules'], 'is_dir')] as $where) {
-        $grep = implode(' ', array_map('escapeshellarg', ['timeout', '20', 'grep', '-r', '-l', '-I', '-i', '-w', '-F', '-e', $word, $where]));
-        $filter = $excluded === [] || ! is_dir($where) ? '' : ' | grep -v -i -F '.implode(' ', array_map('escapeshellarg', $excluded));
-        $found = trim((string) shell_exec("{$grep} 2>/dev/null{$filter} | head -n 1"));
+        $found = (string) shell_exec(implode(' ', array_map('escapeshellarg', ['timeout', '20', 'grep', '-r', '-l', '-Z', '-I', '-i', '-w', '-F', '-e', $word, $where])).' 2>/dev/null');
 
-        if ($found !== '') {
-            return true;
+        foreach (explode("\0", $found) as $file) {
+            if ($file !== '' && array_filter($prefixes, fn (string $prefix): bool => stripos($file, $prefix) === 0) === []) {
+                return true;
+            }
         }
     }
 
