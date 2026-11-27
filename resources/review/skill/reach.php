@@ -899,23 +899,16 @@ $effectiveBody = function (string $class, string $method, int $depth = 0) use (&
 };
 
 /**
- * The bodies a call to a class's method can run: the class's own and each of its
- * subclasses' in app/, an inherited or a trait's body counted once, by where it is
- * written, with the classes that run it. From a class of the caller's own, for a
- * call on $this.
+ * The bodies a call to a method can run: for each class the call can be made on (the
+ * method's class, or the classes $this can be) and each of their subclasses in app/,
+ * the body that class runs, its own, a trait's or a parent's, counted once by where it
+ * is written, with the classes that run it.
  *
+ * @param  list<string>  $receivers
  * @return array<string, array{class: string, file: string, line: int, name: string, for: list<string>}>
  */
 $descendants = null;
-$implementationsOf = function (string $target, ?string $from = null) use (&$indexed, &$descendants, $effectiveBody): array {
-    [$class, $method] = explode('::', $target, 2);
-    // A call on $this runs this class's body or a subclass's, never a sibling's.
-    $class = $from ?? $class;
-
-    if (str_starts_with($method, '$') || str_starts_with($method, '__')) {
-        return [];
-    }
-
+$bodiesRun = function (array $receivers, string $method) use (&$indexed, &$descendants, $effectiveBody): array {
     if ($descendants === null) {
         $descendants = [];
 
@@ -928,12 +921,17 @@ $implementationsOf = function (string $target, ?string $from = null) use (&$inde
 
     $found = [];
 
-    foreach (array_unique([$class, ...($descendants[$class] ?? [])]) as $candidate) {
-        $body = $effectiveBody($candidate, $method);
+    foreach ($receivers as $receiver) {
+        foreach (array_unique([$receiver, ...($descendants[$receiver] ?? [])]) as $candidate) {
+            $body = $effectiveBody($candidate, $method);
 
-        if ($body !== null) {
-            $found["{$body['file']}:{$body['line']}"] ??= $body + ['for' => []];
-            $found["{$body['file']}:{$body['line']}"]['for'][] = $candidate;
+            if ($body !== null) {
+                $found["{$body['file']}:{$body['line']}"] ??= $body + ['for' => []];
+
+                if (! in_array($candidate, $found["{$body['file']}:{$body['line']}"]['for'], true)) {
+                    $found["{$body['file']}:{$body['line']}"]['for'][] = $candidate;
+                }
+            }
         }
     }
 
@@ -941,20 +939,37 @@ $implementationsOf = function (string $target, ?string $from = null) use (&$inde
 };
 
 /**
- * How often a method's body calls a method by name, not counting parent::, which runs
- * the parent's own; and how many of those are on $this, self:: or static::.
+ * How a method's body calls a method by name, in its code and not in a comment or a
+ * string: how often in all, how often on $this, self:: or static::, and how often
+ * through parent::, which runs the parent's own body.
  *
- * @return array{0: int, 1: int}|null
+ * @return array{all: int, this: int, parent: int}|null
  */
 $callSites = function (string $symbol, string $method) use (&$indexed, $bodyOf): ?array {
     [$class, $name] = explode('::', $symbol, 2);
     $file = $indexed['files'][$class] ?? null;
     $body = $file === null ? null : $bodyOf($file, $name);
+
+    if ($body === null) {
+        return null;
+    }
+
+    $code = '';
+
+    foreach (token_get_all("<?php\n".$body['text']) as $token) {
+        if (! is_array($token)) {
+            $code .= $token;
+        } elseif (! in_array($token[0], [T_OPEN_TAG, T_COMMENT, T_DOC_COMMENT, T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE, T_INLINE_HTML], true)) {
+            $code .= $token[1];
+        }
+    }
+
     $called = preg_quote($method, '/').'\s*\(';
 
-    return $body === null ? null : [
-        preg_match_all('/(?:->|(?<!parent)::)\s*'.$called.'/i', $body['text']),
-        preg_match_all('/(?:\$this\s*(?:\?->|->)|\b(?:self|static)::)\s*'.$called.'/i', $body['text']),
+    return [
+        'all' => preg_match_all('/(?:->|(?<!parent)::)\s*'.$called.'/i', $code),
+        'this' => preg_match_all('/(?:\$this\s*(?:\?->|->)|\b(?:self|static)::)\s*'.$called.'/i', $code),
+        'parent' => preg_match_all('/\bparent::\s*'.$called.'/i', $code),
     ];
 };
 
@@ -962,6 +977,7 @@ $callSites = function (string $symbol, string $method) use (&$indexed, $bodyOf):
 // land on more than one implementation, because the type they are made on is a union
 // (a factory returning one of two classes), a parent or an interface. Reading one of
 // them and taking the other to be alike is how a change breaks on the one not read.
+// Each body is followed with the classes that run it, as $this in it is one of those.
 $several = [];
 
 if ($indexed !== null) {
@@ -971,7 +987,7 @@ if ($indexed !== null) {
         $class = $fullClassOf($method['file']);
 
         if ($class !== null) {
-            $queue[] = ["{$class}::".strtolower($method['name']), 0, $key];
+            $queue[] = ["{$class}::".strtolower($method['name']), [$class], 0, $key];
         }
     }
 
@@ -979,28 +995,47 @@ if ($indexed !== null) {
     $reported = [];
 
     while ($queue !== [] && count($several) < IMPLEMENTATIONS_LISTED) {
-        [$source, $depth, $changedKey] = array_shift($queue);
+        [$source, $receivers, $depth, $changedKey] = array_shift($queue);
+        sort($receivers);
+        $visit = $source.'@'.implode(',', $receivers);
 
-        if (isset($seen[$source])) {
+        if (isset($seen[$visit])) {
             continue;
         }
 
-        $seen[$source] = true;
+        $seen[$visit] = true;
         $byMethod = [];
-
-        $sourceClass = explode('::', $source, 2)[0];
+        $sites = [];
 
         foreach (array_keys($indexed['calls'][$source] ?? []) as $target) {
             [$targetClass, $method] = explode('::', $target, 2);
-            [$sites, $onThis] = $callSites($source, $method) ?? [0, 0];
-            $own = $sites > 0 && $sites === $onThis && in_array($targetClass, $indexed['ancestors'][$sourceClass] ?? [], true);
-            $implementations = $implementationsOf($target, $own ? $sourceClass : null);
-            $byMethod[$method] = ($byMethod[$method] ?? []) + $implementations;
 
-            // On into the bodies that run, not an interface's declaration, which has none.
+            if (str_starts_with($method, '$')) {
+                continue;
+            }
+
+            $sites[$method] ??= $callSites($source, $method) ?? ['all' => 0, 'this' => 0, 'parent' => 0];
+            $how = $sites[$method];
+            $ownLine = fn (string $receiver): bool => $receiver === $targetClass || in_array($targetClass, $indexed['ancestors'][$receiver] ?? [], true);
+
+            if ($how['all'] === 0 && $how['parent'] > 0) {
+                // Only parent::: the parent's body runs, for the same $this, and no override does.
+                $body = $effectiveBody($targetClass, $method);
+                $bodies = $body === null ? [] : ["{$body['file']}:{$body['line']}" => $body + ['for' => $receivers]];
+            } elseif ($how['all'] > 0 && $how['all'] === $how['this'] && array_filter($receivers, $ownLine) === $receivers) {
+                // Only on $this: what the classes $this can be run, never a sibling's override.
+                $bodies = $bodiesRun($receivers, $method);
+            } else {
+                $bodies = $bodiesRun([$targetClass], $method);
+            }
+
+            $byMethod[$method] = ($byMethod[$method] ?? []) + $bodies;
+
+            // On into the bodies that run, with the classes that run them: an interface's
+            // declaration has none, and a magic method's runs like any other.
             if ($depth + 1 < IMPLEMENTATION_DEPTH) {
-                foreach ($implementations as $implementation) {
-                    $queue[] = ["{$implementation['class']}::{$method}", $depth + 1, $changedKey];
+                foreach ($bodies as $body) {
+                    $queue[] = ["{$body['class']}::{$method}", $body['for'], $depth + 1, $changedKey];
                 }
             }
         }
@@ -1008,7 +1043,8 @@ if ($indexed !== null) {
         foreach ($byMethod as $method => $implementations) {
             // The index tells calls by their method, not their place: only a method the source
             // calls once is one call that runs one of these, and not separate calls of one name.
-            if (($callSites($source, $method) ?? [0])[0] !== 1 || count($implementations) < 2 || count($implementations) > IMPLEMENTATIONS) {
+            // A magic method is no call that is written, and parent:: runs one body.
+            if (str_starts_with((string) $method, '__') || $sites[$method]['all'] !== 1 || count($implementations) < 2 || count($implementations) > IMPLEMENTATIONS) {
                 continue;
             }
 

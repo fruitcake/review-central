@@ -440,6 +440,70 @@ it('tells separate calls of one name, inherited bodies, interfaces and parent:: 
         ->not->toContain('calls `respond`');
 });
 
+it('follows each body with the classes that run it, magic methods included, and counts no call in a comment', function () {
+    $class = fn (string $name, string $body, string $extends = ''): string => "<?php\n\nclass {$name}{$extends}\n{\n{$body}}\n";
+    $method = fn (string $signature, string $code = ''): string => "    public function {$signature}\n    {\n".($code === '' ? '' : "        {$code}\n")."    }\n";
+    $files = [
+        'Gateway' => "<?php\n\ninterface Gateway\n{\n}\n",
+        'CardGateway' => $class('CardGateway', $method('charge($amount)').$method('settle($amount)')),
+        'CashGateway' => $class('CashGateway', $method('charge($amount)').$method('settle($amount)')),
+        'BaseStep' => $class('BaseStep', $method('run()')),
+        // A sibling override that charges: it never runs for the child's parent::run().
+        'SiblingStep' => $class('SiblingStep', $method('run()', 'Gateways::any()->charge(1);'), ' extends BaseStep'),
+        'ChildStep' => $class('ChildStep', $method('run()'), ' extends BaseStep'),
+        'Processor' => "<?php\n\ninterface Processor\n{\n    public function run();\n}\n",
+        // The processor's run is inherited, and $this in it is a CardRunner: OtherRunner's respond never runs.
+        'BaseRunner' => $class('BaseRunner', $method('run()', '$this->respond();').$method('respond()')),
+        'CardRunner' => $class('CardRunner', '', ' extends BaseRunner implements Processor'),
+        'OtherRunner' => $class('OtherRunner', $method('respond()'), ' extends BaseRunner'),
+        'Runner' => $class('Runner', $method('__invoke()', 'Gateways::any()->settle(1);')),
+        'PayDesk' => $class('PayDesk', $method('pay(Processor $processor, Runner $runner)')),
+        'Refunder' => $class('Refunder', $method('refund()')),
+    ];
+    ($this->git)('checkout', '-q', 'main');
+    foreach ($files as $name => $text) {
+        ($this->put)("app/Desk/{$name}.php", $text);
+    }
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Desk');
+    ($this->git)('checkout', '-q', 'feature');
+    ($this->git)('rebase', '-q', 'main');
+    ($this->put)('app/Desk/ChildStep.php', $class('ChildStep', $method('run()', 'parent::run();'), ' extends BaseStep'));
+    ($this->put)('app/Desk/PayDesk.php', $class('PayDesk', $method('pay(Processor $processor, Runner $runner)', "\$processor->run();\n        \$runner();")));
+    ($this->put)('app/Desk/Refunder.php', $class('Refunder', $method('refund()', "// \$gateway->charge(1) was the old way\n        Gateways::any()->charge(2);")));
+    ($this->git)('commit', '-qam', 'Desk changes');
+
+    $index = "{$this->dir}/.index";
+    File::ensureDirectoryExists($index);
+    File::put("{$index}/edges.tsv", implode("\n", [
+        "childstep::run\tbasestep::run",
+        "siblingstep::run\tcardgateway::charge",
+        "siblingstep::run\tcashgateway::charge",
+        "paydesk::pay\tprocessor::run",
+        "paydesk::pay\trunner::__invoke",
+        "baserunner::run\tbaserunner::respond",
+        "runner::__invoke\tcardgateway::settle",
+        "runner::__invoke\tcashgateway::settle",
+        "refunder::refund\tcardgateway::charge",
+        "refunder::refund\tcashgateway::charge",
+    ])."\n");
+    File::put("{$index}/classes.tsv", implode("\n", array_map(fn (string $name): string => strtolower($name)."\tapp/Desk/{$name}.php", array_keys($files)))."\n");
+    File::put("{$index}/ancestors.tsv", "siblingstep\tbasestep\nchildstep\tbasestep\ncardrunner\tbaserunner\ncardrunner\tprocessor\notherrunner\tbaserunner\n");
+
+    $reach = Process::path($this->dir)->env(['REACH_INDEX' => $index])
+        ->run(['php', realpath(__DIR__.'/../../resources/review/skill/reach.php'), 'main', 'HEAD'])->throw()->output();
+
+    expect($reach)
+        // parent::run() runs the parent's body, so the sibling's charge is not reached.
+        ->not->toContain('SiblingStep')
+        // $this in the inherited run is a CardRunner, which runs BaseRunner's respond only.
+        ->not->toContain('`respond`')
+        // Through __invoke into its body.
+        ->toContain('- `app/Desk/Runner.php::__invoke`, which the changed `pay` calls, calls `settle` on `CardGateway`')
+        // A call in a comment is no second call.
+        ->toContain('- `app/Desk/Refunder.php::refund`, which this change changes, calls `charge` on `CardGateway`');
+});
+
 it('takes a policy\'s methods, and a method a changed line guards, as checks', function () {
     ($this->put)('app/Policies/LessonPolicy.php', "<?php\n\nclass LessonPolicy\n{\n    public function book(\$user, Lesson \$lesson)\n    {\n        return true;\n    }\n}\n");
     ($this->put)('app/Http/Controllers/LessonController.php', <<<'PHP'
