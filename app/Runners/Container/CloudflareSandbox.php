@@ -149,6 +149,11 @@ class CloudflareSandbox extends Sandbox
                 ? ProviderKeys::proxied($environment, $warm['name'] ?? null)
                 : ['environment' => $environment, 'credentials' => []];
 
+            // A key for some paths only goes to a Worker that keeps it to them.
+            if (array_filter($keys['credentials'], fn (array $credential): bool => isset($credential['paths'])) !== [] && ! $this->keysByPath()) {
+                $keys['credentials'] = array_values(array_filter($keys['credentials'], fn (array $credential): bool => ! isset($credential['paths'])));
+            }
+
             $spec = [
                 'input' => $input,
                 'output' => $kept,
@@ -686,14 +691,35 @@ class CloudflareSandbox extends Sandbox
      */
     public function clonesItself(): bool
     {
+        return $this->deployedSince(self::CLONES_SINCE);
+    }
+
+    /** The first version of the Worker that sends a key with paths to those paths alone. */
+    public const KEYS_BY_PATH_SINCE = '2026-11-27.1';
+
+    /**
+     * Whether the Worker sends a key that names paths to those paths alone. One
+     * deployed before it could would send it to the whole host, so until it is
+     * deployed again such a key is left out.
+     */
+    public function keysByPath(): bool
+    {
+        return $this->deployedSince(self::KEYS_BY_PATH_SINCE);
+    }
+
+    /** Whether the deployed Worker is this version or newer. Asked of it, and remembered for ten minutes. */
+    protected function deployedSince(string $since): bool
+    {
         $url = (string) (self::local() ? config('review.cloudflare.local_url') : config('review.cloudflare.url'));
+        // An empty string for a Worker that says no version, which remember() keeps as it would not null.
+        $version = Cache::remember('review.cloudflare.version.'.md5($url), 600, function (): string {
+            $said = rescue(fn (): mixed => $this->client(10)->get('health')->json('version'), null, false);
 
-        return Cache::remember('review.cloudflare.clones.'.md5($url), 600, function (): bool {
-            $version = rescue(fn (): mixed => $this->client(10)->get('health')->json('version'), null, false);
-            $comparable = fn (string $version): string => str_replace('-', '.', $version);
-
-            return is_string($version) && version_compare($comparable($version), $comparable(self::CLONES_SINCE), '>=');
+            return is_string($said) ? $said : '';
         });
+        $comparable = fn (string $version): string => str_replace('-', '.', $version);
+
+        return $version !== '' && version_compare($comparable($version), $comparable($since), '>=');
     }
 
     protected function client(int $timeout): PendingRequest
