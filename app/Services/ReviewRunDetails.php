@@ -78,7 +78,7 @@ class ReviewRunDetails
                 'commit' => substr($sibling->commit, 0, 12),
                 'status' => $sibling->status,
                 'result' => $sibling->result,
-                'open_findings' => count(array_filter($sibling->findings ?? [], fn (mixed $finding): bool => is_array($finding) && in_array(strtolower((string) ($finding['status'] ?? 'new')), ['new', 'open'], true))),
+                'open_findings' => count(array_filter($sibling->findings ?? [], fn (array $finding): bool => in_array(strtolower((string) ($finding['status'] ?? 'new')), ['new', 'open'], true))),
                 'started_at' => $sibling->started_at->toIso8601String(),
             ])->values()->all(),
         ];
@@ -133,14 +133,14 @@ class ReviewRunDetails
     /**
      * What the team judged of the run's findings.
      *
-     * @return list<array<string, mixed>>
+     * @return array<int, array<string, mixed>>
      */
     protected function verdicts(ReviewRun $run): array
     {
         return FindingVerdict::query()->with('user')->where('review_run_id', $run->getKey())->get()
             ->map(fn (FindingVerdict $verdict): array => array_filter([
                 'finding' => $verdict->finding_id,
-                'verdict' => $verdict->verdict?->value,
+                'verdict' => $verdict->verdict->value,
                 'by' => $verdict->user?->name,
                 'reason' => $verdict->reason?->value,
                 'note' => $verdict->note,
