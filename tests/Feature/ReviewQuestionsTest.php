@@ -693,7 +693,11 @@ it('lets a search go with public words only, and refuses anything the session co
     File::put("{$dir}/app/Http/Controllers/UpsellController.php", "<?php\n\nclass UpsellController\n{\n    public function store()\n    {\n        return route('upsell').'?'.\$query;\n    }\n}\n");
     File::put("{$dir}/vendor/laravel/framework/src/RouteUrlGenerator.php", "<?php\n\nclass RouteUrlGenerator\n{\n    // the encoding of the query string of a route\n}\n");
     File::put("{$dir}/composer.json", json_encode(['name' => 'acme/shop', 'require' => ['laravel/framework' => '^12.70']]));
-    File::put("{$dir}/composer.lock", json_encode(['packages' => [['name' => 'laravel/framework', 'version' => 'v12.74.0']]]));
+    File::put("{$dir}/composer.lock", json_encode(['packages' => [
+        ['name' => 'laravel/framework', 'version' => 'v12.74.0', 'notification-url' => 'https://packagist.org/downloads/'],
+        // Installed from a path of the project's own: private, whatever it is called.
+        ['name' => 'acme/ledger-bridge', 'version' => 'dev-main', 'dist' => ['type' => 'path', 'url' => '../ledger-bridge']],
+    ]]));
 
     $result = Process::path($dir)->input(json_encode(['tool_name' => 'WebSearch', 'tool_input' => ['query' => $query]]))
         ->run(['php', '-n', resource_path('review/skill/search-guard.php')]);
@@ -710,7 +714,28 @@ it('lets a search go with public words only, and refuses anything the session co
     'the project\'s own name' => ['shop laravel upgrade', '`shop` is no name of an installed package or a dependency'],
     'code' => ['laravel route() $query encoding', 'characters a search for documentation does not need'],
     'a passage' => [str_repeat('laravel route encoding ', 12), 'a search is a few public words'],
+    'a package of the project\'s own' => ['acme/ledger-bridge changelog', '`acme/ledger-bridge` names a dependency of the project\'s own'],
+    'the vendor of a package of its own' => ['acme release notes', '`acme` names a dependency of the project\'s own'],
 ]);
+
+it('lets the name of a public dependency through where the project is named after it, and never a workspace package', function () {
+    $dir = storage_path('framework/testing/search-guard-names');
+    File::deleteDirectory($dir);
+    File::ensureDirectoryExists($dir);
+    File::put("{$dir}/composer.json", json_encode(['name' => 'laravel/laravel', 'require' => ['laravel/framework' => '^12.70']]));
+    File::put("{$dir}/composer.lock", json_encode(['packages' => [['name' => 'laravel/framework', 'version' => 'v12.74.0', 'notification-url' => 'https://packagist.org/downloads/']]]));
+    File::put("{$dir}/package.json", json_encode(['name' => 'web', 'dependencies' => ['nuxt' => '^4.1.0', '@acme/risk-engine' => 'workspace:*']]));
+    $guard = fn (string $query) => Process::path($dir)->input(json_encode(['tool_input' => ['query' => $query]]))
+        ->run(['php', '-n', resource_path('review/skill/search-guard.php')]);
+
+    expect($guard('laravel release notes')->exitCode())->toBe(0)
+        ->and($guard('nuxt 4 changelog')->exitCode())->toBe(0)
+        ->and($guard('@acme/risk-engine release notes')->exitCode())->toBe(2)
+        ->and($guard('acme release notes')->exitCode())->toBe(2)
+        ->and($guard('web nuxt upgrade')->exitCode())->toBe(2);
+
+    File::deleteDirectory($dir);
+});
 
 it('lets a search for a JavaScript framework\'s release notes go without Composer or node_modules', function () {
     $dir = storage_path('framework/testing/search-guard-nuxt');

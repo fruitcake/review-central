@@ -694,8 +694,11 @@ class CloudflareSandbox extends Sandbox
         return $this->deployedSince(self::CLONES_SINCE);
     }
 
-    /** The first version of the Worker that sends a key with paths to those paths alone. */
-    public const KEYS_BY_PATH_SINCE = '2026-11-27.1';
+    /**
+     * The first version of the Worker that sends a key with paths to those paths alone,
+     * a path ending in / as everything under it. 2026-11-27.1 matched exact paths only.
+     */
+    public const KEYS_BY_PATH_SINCE = '2026-11-27.2';
 
     /**
      * Whether the Worker sends a key that names paths to those paths alone. One

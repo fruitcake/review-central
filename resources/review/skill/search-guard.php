@@ -8,7 +8,10 @@
  *
  * - a name the repository's dependencies make public: a word in an installed
  *   package (vendor/, node_modules/), in a lock file, or a dependency's name in
- *   composer.json or package.json, and not the project's own name;
+ *   composer.json or package.json, and not the project's own name. Only a dependency
+ *   from a registry counts: one from a workspace, a path, a file or a repository of
+ *   the project's own (as the manifest's constraint or the lock file says) is
+ *   private, and its name and its vendor or scope are refused;
  * - a version: a number that an installed or required version starts with, such
  *   as 12.74 for 12.74.0 or 4 for ^4.1;
  * - one of the few words a search for documentation is made of, such as
@@ -56,9 +59,22 @@ if (preg_match('/^[A-Za-z0-9 .\/@_\-]+$/', $query) !== 1) {
 $json = fn (string $file): array => is_file($file) && ! is_link($file) ? (json_decode((string) file_get_contents($file), true) ?: []) : [];
 
 // The dependencies' names and the versions they ask for, and the project's own name, which is not public.
+// A dependency is public by where it comes from, not by being named: a version range from a registry,
+// and where a lock file says, a package the public registry served. One from a workspace, a path, a file
+// or a repository of the project's own is private: its name may be as confidential as the code.
 $dependencies = [];
 $versions = [];
 $own = [];
+$private = [];
+$declared = [];
+$fromRegistry = fn (string $constraint): bool => preg_match('/^\s*(workspace:|file:|link:|portal:|git[+:@]|github:|https?:|\.{0,2}\/|~\/)/i', $constraint) !== 1
+    && preg_match('/(^|[\s|,])(dev-|\*@dev|@dev)/i', $constraint) !== 1;
+$isPrivate = function (string $name) use (&$private): void {
+    $name = strtolower($name);
+    $private[$name] = true;
+    // Its vendor or scope too: `acme` of acme/risk-engine and @acme/risk-engine.
+    $private[ltrim((string) preg_split('/\//', $name)[0], '@')] = true;
+};
 
 foreach (['composer.json' => ['require', 'require-dev'], 'package.json' => ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']] as $file => $sections) {
     $manifest = $json($file);
@@ -69,12 +85,13 @@ foreach (['composer.json' => ['require', 'require-dev'], 'package.json' => ['dep
 
     foreach ($sections as $section) {
         foreach ((array) ($manifest[$section] ?? []) as $name => $constraint) {
-            $dependencies[strtolower((string) $name)] = true;
+            if (! $fromRegistry((string) $constraint)) {
+                $isPrivate((string) $name);
 
-            foreach (preg_split('/[\/@\-_.]+/', strtolower((string) $name)) ?: [] as $part) {
-                $dependencies[$part] = true;
+                continue;
             }
 
+            $declared[strtolower((string) $name)] = true;
             preg_match_all('/\d+(?:\.\d+)*/', (string) $constraint, $numbers);
             array_push($versions, ...$numbers[0]);
         }
@@ -83,15 +100,41 @@ foreach (['composer.json' => ['require', 'require-dev'], 'package.json' => ['dep
 
 $locks = array_values(array_filter(['composer.lock', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'], fn (string $file): bool => is_file($file) && ! is_link($file)));
 
+// What the lock files say of where each package came from: Packagist, or the npm registry.
+foreach ([...((array) ($json('composer.lock')['packages'] ?? [])), ...((array) ($json('composer.lock')['packages-dev'] ?? []))] as $package) {
+    if (is_array($package) && isset($package['name']) && ! str_contains((string) ($package['notification-url'] ?? ''), 'packagist.org')) {
+        $isPrivate((string) $package['name']);
+    }
+}
+
+foreach ((array) ($json('package-lock.json')['packages'] ?? []) as $path => $package) {
+    $name = preg_replace('#^.*node_modules/#', '', (string) $path);
+
+    if ($name !== '' && is_array($package) && (($package['link'] ?? false) === true || (isset($package['resolved']) && preg_match('#^https://registry\.(npmjs\.org|yarnpkg\.com)/#', (string) $package['resolved']) !== 1))) {
+        $isPrivate($name);
+    }
+}
+
+foreach (array_keys(array_diff_key($declared, $private)) as $name) {
+    $dependencies[$name] = true;
+
+    foreach (preg_split('/[\/@\-_.]+/', $name) ?: [] as $part) {
+        $dependencies[$part] = true;
+    }
+}
+
 foreach ($locks as $lock) {
     preg_match_all('/version"?\s*:?\s*"?v?(\d+(?:\.\d+)*)/', (string) file_get_contents($lock), $numbers);
     array_push($versions, ...$numbers[1]);
 }
 
 /** Whether grep finds the word in the public code, as a whole word in any case. */
-$inPublicCode = function (string $word) use ($locks): bool {
+$inPublicCode = function (string $word) use ($locks, &$private): bool {
+    // Not in a private package's own directory, where its code is the project's.
+    $excluded = array_map(fn (string $name): string => '--exclude-dir='.basename($name), array_keys(array_filter($private, fn (bool $yes, string $name): bool => str_contains($name, '/'), ARRAY_FILTER_USE_BOTH)));
+
     foreach ([...$locks, ...array_filter(['vendor', 'node_modules'], 'is_dir')] as $where) {
-        exec(implode(' ', array_map('escapeshellarg', ['timeout', '20', 'grep', '-r', '-q', '-I', '-i', '-w', '-F', '-e', $word, $where])).' > /dev/null 2>&1', $output, $status);
+        exec(implode(' ', array_map('escapeshellarg', ['timeout', '20', 'grep', '-r', '-q', '-I', '-i', '-w', '-F', ...(is_dir($where) ? $excluded : []), '-e', $word, $where])).' > /dev/null 2>&1', $output, $status);
 
         if ($status === 0) {
             return true;
@@ -119,10 +162,21 @@ foreach (preg_split('/\s+/', trim($query)) ?: [] as $word) {
         continue;
     }
 
-    // A name: each part public, and none the project's own.
+    // A private dependency's name, or its vendor or scope, never goes out.
+    if (isset($private[ltrim($word, '@')]) || isset($private[$word])) {
+        $refuse("`{$word}` names a dependency of the project's own, not a public package.");
+    }
+
+    // A name: each part public. A public dependency's name is public, also where the
+    // project's own name has it too (laravel/laravel and laravel/framework); any other
+    // part of the project's own name is not.
     foreach (array_unique([$word, ...preg_split('/[\/@\-_.]+/', $word)]) as $part) {
-        if ($part === '' || in_array($part, SEARCH_WORDS, true) || isset($dependencies[$part]) && ! isset($own[$part])) {
+        if ($part === '' || in_array($part, SEARCH_WORDS, true) || isset($dependencies[$part])) {
             continue;
+        }
+
+        if (isset($private[$part])) {
+            $refuse("`{$part}` names a dependency of the project's own, not a public package.");
         }
 
         if (isset($own[$part]) || ! $inPublicCode($part)) {
