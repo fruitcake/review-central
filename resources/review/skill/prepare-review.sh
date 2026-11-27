@@ -208,6 +208,11 @@ if [ -n "$DEST_BRANCH" ]; then
   git merge-base "$DEST" HEAD > /dev/null 2>&1 \
     || git fetch --unshallow origin "+refs/heads/${DEST_BRANCH}:refs/remotes/${DEST}" \
     || echo "Could not deepen the clone; the review works from what it has."
+  # The team's rules limited to paths that no changed file matches are left out,
+  # as REPOSITORY RULES only names the rule files that apply (team-rules.php).
+  if [ -d .review-instructions ] && command -v php > /dev/null 2>&1; then
+    php .review/skill/team-rules.php .review-instructions "$DEST" HEAD || true
+  fi
 else
   echo "No destination branch known; the agent resolves it itself."
 fi

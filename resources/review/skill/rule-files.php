@@ -98,40 +98,9 @@ $globs = function (string $text, string $kind) {
     return $items === [] ? ($kind === 'cursor' ? false : null) : $items;
 };
 
-/** A glob as the agent tools read it: ** across folders, * and ? within one. */
-$matches = function (string $glob, string $path): bool {
-    // Only a ./ or / prefix: the dot of .github/ belongs to the folder.
-    $glob = (string) preg_replace('#^(?:\./|/)+#', '', $glob);
-    $pattern = '';
+require_once __DIR__.'/rule-glob.php';
 
-    for ($i = 0, $length = strlen($glob); $i < $length; $i++) {
-        $char = $glob[$i];
-
-        if ($char === '*' && ($glob[$i + 1] ?? '') === '*') {
-            $i++;
-
-            // "**/" matches no folder as well as any number of them.
-            if (($glob[$i + 1] ?? '') === '/') {
-                $i++;
-                $pattern .= '(?:.*/)?';
-            } else {
-                $pattern .= '.*';
-            }
-        } elseif ($char === '*') {
-            $pattern .= '[^/]*';
-        } elseif ($char === '?') {
-            $pattern .= '[^/]';
-        } elseif ($char === '{' && ($close = strpos($glob, '}', $i)) !== false) {
-            $pattern .= '(?:'.implode('|', array_map(fn (string $part): string => preg_quote($part, '#'), explode(',', substr($glob, $i + 1, $close - $i - 1)))).')';
-            $i = $close;
-        } else {
-            $pattern .= preg_quote($char, '#');
-        }
-    }
-
-    // A folder names everything under it.
-    return preg_match('#^'.$pattern.'(?:/.*)?$#', $path) === 1;
-};
+$matches = 'review_rule_glob_matches';
 
 // The rules as the destination branch has them now, as REVIEW.md is read.
 $listed = $names($git(['ls-tree', '-r', '-z', '--name-only', $base, '--', '.ai/rules', '.claude/rules', '.github/instructions', '.cursor/rules']));
