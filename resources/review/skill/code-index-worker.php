@@ -466,15 +466,15 @@ final class EloquentRelations implements MethodReturnTypeProvider, PropertyTypeP
 }
 
 /**
- * The user someone is signed in as, as Larastan reads it from config/auth.php:
- * auth()->user(), Auth::user() and $request->user() are the default guard's
- * model. With a guard named, as auth('member')->user() or $request->user('api'),
- * which guard it is the index cannot follow, so it is any guard's model: a path
- * too many rather than one missing.
+ * The user someone is signed in as: auth()->user(), Auth::user(),
+ * $request->user() and a guard's user(), as one of the models config/auth.php's
+ * providers name. Which guard a call has, a guard's name or middleware such as
+ * auth:member decides, and the index follows neither: with more than one user
+ * model it is any of them, a path too many rather than one missing.
  */
 final class SignedInUser implements MethodReturnTypeProvider
 {
-    /** The auth manager, which forwards user() to the default guard, and what DefaultGuard makes auth() without a guard. */
+    /** The auth manager, which forwards user() to the current guard, and what DefaultGuard makes auth() without a guard. */
     private const MANAGERS = ['illuminate\contracts\auth\factory', 'illuminate\auth\authmanager', DefaultGuard::CLASS_NAME];
 
     private const GUARD = 'illuminate\contracts\auth\guard';
@@ -485,7 +485,7 @@ final class SignedInUser implements MethodReturnTypeProvider
     private const FACADES = ['illuminate\support\facades\auth', 'auth'];
 
     /**
-     * @param  array{default: list<string>, all: list<string>}  $models
+     * @param  list<string>  $models
      */
     public function __construct(private readonly array $models) {}
 
@@ -497,7 +497,6 @@ final class SignedInUser implements MethodReturnTypeProvider
     public function getReturnType(ReturnTypeProviderContext $context): ?Type
     {
         $invocation = $context->invocation;
-        $named = $invocation->arguments !== [];
 
         foreach ($invocation->receiverType?->atomicTypes ?? [] as $atomic) {
             $class = match (true) {
@@ -513,16 +512,14 @@ final class SignedInUser implements MethodReturnTypeProvider
             $name = strtolower(ltrim($class, '\\'));
             $ancestors = array_map(fn (string $ancestor): string => strtolower(ltrim($ancestor, '\\')), $context->codebase->getClassAncestors($class));
 
-            $models = match (true) {
-                $invocation->kind === InvocationKind::StaticMethod => in_array($name, self::FACADES, true) ? $this->models['default'] : null,
-                in_array($name, self::MANAGERS, true) => $this->models['default'],
-                $name === self::REQUEST || in_array(self::REQUEST, $ancestors, true) => $named ? $this->models['all'] : $this->models['default'],
-                $name === self::GUARD || in_array(self::GUARD, $ancestors, true) => $this->models['all'],
-                default => null,
+            $signedIn = match (true) {
+                $invocation->kind === InvocationKind::StaticMethod => in_array($name, self::FACADES, true),
+                default => in_array($name, self::MANAGERS, true) || in_array($name, [self::REQUEST, self::GUARD], true)
+                    || in_array(self::REQUEST, $ancestors, true) || in_array(self::GUARD, $ancestors, true),
             };
 
-            if ($models !== null) {
-                return $this->user($context->codebase, $models);
+            if ($signedIn) {
+                return $this->user($context->codebase, $this->models);
             }
         }
 
@@ -545,8 +542,7 @@ final class SignedInUser implements MethodReturnTypeProvider
 /**
  * auth() without a guard: the manager, whose user() is the default guard's. The
  * manager declares no user(), so a call to it would reach no provider; given as
- * the manager or the session guard, which does, it reaches SignedInUser as the
- * default guard.
+ * the manager or the session guard, which does, it reaches SignedInUser.
  * With a guard named, auth('member') keeps the guard Laravel's stub gives it.
  */
 final class DefaultGuard implements FunctionReturnTypeProvider

@@ -74,45 +74,35 @@ function code_index_models(string $directory): array
 }
 
 /**
- * The models config/auth.php signs users in as: the default guard's, and every
- * guard's. A guard's model is its provider's 'model', also as env('AUTH_MODEL',
- * User::class). Without the file, or without a model in it, App\Models\User where
- * the application has one.
+ * The models config/auth.php can sign users in as: every user provider's model,
+ * as App\Models\User::class or as a string, also as env()'s default. Which guard a
+ * request uses, middleware such as auth:member can choose, so the user can be any
+ * of them. Without the file, or without a model in it, App\Models\User where the
+ * application has one.
  *
- * @return array{default: list<string>, all: list<string>}
+ * @return list<string>
  */
 function code_index_auth_models(string $root): array
 {
     $file = "{$root}/config/auth.php";
-    $fallback = is_file("{$root}/app/Models/User.php") ? ['App\\Models\\User'] : [];
     $source = is_file($file) ? (string) preg_replace('#/\*.*?\*/|//[^\n]*#s', '', (string) file_get_contents($file)) : '';
     [$namespace, $uses] = code_index_imports($source);
     $models = [];
 
-    // 'users' => ['driver' => 'eloquent', 'model' => App\Models\User::class]
-    if (preg_match_all('/[\'"]([\w.\-]+)[\'"]\s*=>\s*\[[^\[\]]*?[\'"]model[\'"]\s*=>\s*(?:env\s*\([^,]+,\s*)?(\\\\?[\w\\\\]+)::class/', $source, $providers, PREG_SET_ORDER) > 0) {
-        foreach ($providers as $provider) {
-            $models[$provider[1]] = code_index_resolve($provider[2], $namespace, $uses, '');
+    // 'model' => App\Models\User::class, 'App\Models\User', or either as env('AUTH_MODEL', ...)'s default.
+    if (preg_match_all('/[\'"]model[\'"]\s*=>\s*(?:env\s*\([^,]+,\s*)?(?:(\\\\?[\w\\\\]+)::class|([\'"])\\\\{0,2}([\w\\\\]+)\2)/', $source, $found, PREG_SET_ORDER) > 0) {
+        foreach ($found as $model) {
+            $models[] = ($model[1] ?? '') !== ''
+                ? code_index_resolve($model[1], $namespace, $uses, '')
+                : (string) preg_replace('/\\\\+/', '\\', $model[3]);
         }
     }
 
-    $guards = [];
-
-    if (preg_match_all('/[\'"]([\w.\-]+)[\'"]\s*=>\s*\[[^\[\]]*?[\'"]provider[\'"]\s*=>\s*[\'"]([\w.\-]+)[\'"]/', $source, $found, PREG_SET_ORDER) > 0) {
-        foreach ($found as $guard) {
-            if (isset($models[$guard[2]])) {
-                $guards[$guard[1]] = $models[$guard[2]];
-            }
-        }
+    if ($models === [] && is_file("{$root}/app/Models/User.php")) {
+        return ['App\\Models\\User'];
     }
 
-    $default = preg_match('/[\'"]defaults[\'"]\s*=>\s*\[[^\]]*?[\'"]guard[\'"]\s*=>\s*(?:env\s*\([^,]+,\s*)?[\'"]([\w.\-]+)[\'"]/', $source, $match) === 1 ? $match[1] : 'web';
-    $all = array_values(array_unique(array_merge(array_values($guards), array_values($models))));
-
-    return [
-        'default' => isset($guards[$default]) ? [$guards[$default]] : ($all !== [] ? $all : $fallback),
-        'all' => $all !== [] ? $all : $fallback,
-    ];
+    return array_values(array_unique($models));
 }
 
 /** The class or trait a file declares, in full. */
