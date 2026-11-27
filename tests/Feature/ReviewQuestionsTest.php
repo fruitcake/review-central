@@ -637,3 +637,55 @@ it('installs the rest of vendor/ for a repository that commits part of it', func
 
     File::deleteDirectory($dir);
 });
+
+it('follows no symlink the pull request commits under vendor/, such as vendor/bin to the reviewer\'s CLI', function () {
+    $dir = storage_path('framework/testing/question-vendor-link');
+    File::deleteDirectory($dir);
+    File::ensureDirectoryExists("{$dir}/work/pkg");
+    File::ensureDirectoryExists("{$dir}/work/vendor/own");
+    File::ensureDirectoryExists("{$dir}/home/.local/bin");
+    File::put("{$dir}/home/.local/bin/claude", "#!/bin/sh\necho real\n");
+    File::put("{$dir}/work/vendor/own/Patch.php", '<?php');
+    symlink("{$dir}/home/.local/bin", "{$dir}/work/vendor/bin");
+    File::put("{$dir}/work/pkg/composer.json", json_encode(['name' => 'evil/pkg', 'version' => '1.0.0', 'bin' => ['claude']]));
+    File::put("{$dir}/work/pkg/claude", "#!/bin/sh\necho stolen\n");
+    File::put("{$dir}/work/composer.json", json_encode([
+        'repositories' => [['type' => 'path', 'url' => 'pkg', 'options' => ['symlink' => false]], ['packagist.org' => false]],
+        'require' => ['evil/pkg' => '1.0.0'],
+    ]));
+    Process::path("{$dir}/work")->run(['sh', '-c', 'git init -q && git add -A && git -c user.name=t -c user.email=t@example.com commit -qm vendor'])->throw();
+    $skill = realpath(__DIR__.'/../../resources/review/skill');
+
+    Process::path("{$dir}/work")->env(['HOME' => "{$dir}/home", 'COMPOSER_HOME' => "{$dir}/composer"])
+        ->timeout(120)->run(['sh', '-c', ". {$skill}/reviewer-env.sh; reviewer_vendor"])->throw();
+
+    expect(File::get("{$dir}/home/.local/bin/claude"))->toBe("#!/bin/sh\necho real\n")
+        ->and(is_link("{$dir}/work/vendor/bin"))->toBeFalse()
+        ->and(File::exists("{$dir}/work/vendor/evil/pkg/claude"))->toBeTrue();
+
+    File::deleteDirectory($dir);
+});
+
+it('answers nothing when Claude Code changed while vendor/ was installed', function () {
+    $dir = storage_path('framework/testing/review-work/answer-swap');
+    File::deleteDirectory($dir);
+    File::ensureDirectoryExists("{$dir}/home/.local/bin");
+    File::ensureDirectoryExists("{$dir}/bin");
+    File::put("{$dir}/home/.local/bin/claude", "#!/bin/sh\n[ \"\$1\" = \"--version\" ] && echo '2.0.0 (Claude Code)'\n");
+    chmod("{$dir}/home/.local/bin/claude", 0755);
+    File::put("{$dir}/composer.json", '{}');
+    // A Composer that replaces the CLI, however it got there.
+    File::put("{$dir}/bin/composer", "#!/bin/sh\nprintf '#!/bin/sh\\necho stolen\\n' > \"{$dir}/home/.local/bin/claude\"\n");
+    chmod("{$dir}/bin/composer", 0755);
+    Process::path($dir)->run(['git', 'init', '-q'])->throw();
+
+    $result = Process::path($dir)
+        ->env(['HOME' => "{$dir}/home", 'PATH' => "{$dir}/bin:".getenv('PATH'), 'REVIEW_QUESTION' => 'Why?'])
+        ->run(['sh', resource_path('review/skill/answer-question.sh')]);
+
+    expect($result->successful())->toBeFalse()
+        ->and($result->output())->toContain('Claude Code changed while vendor/ was installed')
+        ->and($result->output())->not->toContain('stolen');
+
+    File::deleteDirectory($dir);
+});

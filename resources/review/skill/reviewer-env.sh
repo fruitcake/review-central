@@ -209,8 +209,10 @@ reviewer_php() {
 # install leaves the step to read without it. Run in the checkout.
 reviewer_vendor() {
   [ -f composer.json ] || return 0
-  # A vendor/ that is a symlink is the pull request's, and could point anywhere.
+  # A symlink at or under vendor/ is the pull request's, and could lead anywhere,
+  # such as vendor/bin to the reviewer's CLI: every one goes before Composer writes.
   [ -L vendor ] && rm -f vendor
+  [ -d vendor ] && find vendor -type l -delete
   if [ -n "$(git ls-files vendor 2> /dev/null | head -n 1)" ]; then
     echo "This repository commits files under vendor/; installing the rest."
   elif [ -d vendor ]; then
@@ -303,6 +305,7 @@ reviewer_code_index() {
   # Without vendor/ a model is known by its base class's name only; with it, by its types.
   if [ -f composer.lock ] && [ ! -d vendor ]; then
     [ -L vendor ] && rm -f vendor
+    [ -d vendor ] && find vendor -type l -delete
     # Where the step says, never where composer.json says: see prepare-review.sh.
     COMPOSER_VENDOR_DIR=vendor COMPOSER_BIN_DIR=vendor/bin timeout 600 composer install --no-interaction --quiet --no-progress --no-scripts --no-plugins --no-autoloader --ignore-platform-reqs >&2 \
       || echo "Code index: composer install failed; indexing without vendor/." >&2
