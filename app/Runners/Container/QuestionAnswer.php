@@ -18,7 +18,7 @@ use Throwable;
  * alone, and nothing is posted.
  *
  * The branch is cloned and the reviewer runs once in the sandbox a review runs in,
- * with the AI provider's key and nothing else. Its home is a copy of the session
+ * with the AI provider's key and nothing else, and vendor/ as the review has it. Its home is a copy of the session
  * the last review of the branch ended in: the answer is no part of the review, and
  * a review may be using the home it was copied from.
  */
@@ -35,6 +35,7 @@ class QuestionAnswer
         protected ReviewQuestions $questions,
         protected Sandboxes $sandboxes,
         protected RunLog $log,
+        protected ComposerCache $composerCache,
     ) {}
 
     public function give(ReviewQuestion $question): void
@@ -93,6 +94,8 @@ class QuestionAnswer
                 timeout: (int) config('review.container.question_timeout'),
                 home: $home,
                 output: $log === null ? null : $log->write(...),
+                // vendor/ as the review has it: the packages' code is where many answers are.
+                composerCache: $this->composerCache->directory($repository),
             );
             $log?->flush();
 

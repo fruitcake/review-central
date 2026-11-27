@@ -200,6 +200,37 @@ reviewer_php() {
   php -r 'exit(PHP_MAJOR_VERSION >= 8 ? 0 : 1);' 2> /dev/null && command -v php
 }
 
+# vendor/ for a step that reads the code but is no review, such as answering a
+# question: the framework's and the packages' code is where many answers are. From
+# what the review keeps, never writing it: the destination branch's vendor/ the
+# Worker brought (REVIEW_VENDOR_BASE), or the archive of this lock in the worker's
+# Composer cache; then Composer installs what this lock changes, without the
+# packages' scripts or plugins, so no code of the pull request runs. A failed
+# install leaves the step to read without it. Run in the checkout.
+reviewer_vendor() {
+  [ -f composer.json ] || return 0
+  # A symlink at or under vendor/ is the pull request's, and could lead anywhere,
+  # such as vendor/bin to the reviewer's CLI: every one goes before Composer writes.
+  [ -L vendor ] && rm -f vendor
+  [ -d vendor ] && find vendor -type l -delete
+  if [ -n "$(git ls-files vendor 2> /dev/null | head -n 1)" ]; then
+    echo "This repository commits files under vendor/; installing the rest."
+  elif [ -d vendor ]; then
+    echo "vendor/ is there already; Composer brings it in line with this lock."
+  elif [ -n "${REVIEW_VENDOR_BASE:-}" ] && [ -f "$REVIEW_VENDOR_BASE" ] && tar -xf "$REVIEW_VENDOR_BASE" vendor 2> /dev/null; then
+    echo "vendor/ of the destination branch unpacked; Composer installs what this branch changes."
+  elif [ -n "${COMPOSER_CACHE_DIR:-}" ] && [ -f composer.lock ]; then
+    _tar="$COMPOSER_CACHE_DIR/vendor-nodev2-$(cat composer.json composer.lock | sha256sum | cut -c1-32).tar"
+    [ -f "$_tar" ] && tar -xf "$_tar" vendor 2> /dev/null && echo "vendor/ unpacked from the cache for this composer.lock."
+  fi
+  command -v composer > /dev/null 2>&1 || { echo "No Composer here, so vendor/ is not installed."; return 0; }
+  # Where the step says, never where composer.json says: see prepare-review.sh.
+  COMPOSER_VENDOR_DIR=vendor COMPOSER_BIN_DIR=vendor/bin composer install --no-interaction --no-progress --prefer-dist --no-dev --no-scripts --no-plugins --ignore-platform-reqs --quiet \
+    || echo "composer install failed, so vendor/ is incomplete."
+  unset COMPOSER_AUTH
+  return 0
+}
+
 # How far a Laravel change reaches (reach.php): the entry points that reach a
 # check it adds or changes, and those that reach the same class's writes without
 # it. Only for the laravel stack, whose entry points it knows. Nothing otherwise.
@@ -277,7 +308,10 @@ reviewer_code_index() {
   _tools=$(reviewer_mago "$_php") || { echo "Code index: Mago could not be installed; REACH goes by name." >&2; return 0; }
   # Without vendor/ a model is known by its base class's name only; with it, by its types.
   if [ -f composer.lock ] && [ ! -d vendor ]; then
-    timeout 600 composer install --no-interaction --quiet --no-progress --no-scripts --no-plugins --no-autoloader --ignore-platform-reqs >&2 \
+    [ -L vendor ] && rm -f vendor
+    [ -d vendor ] && find vendor -type l -delete
+    # Where the step says, never where composer.json says: see prepare-review.sh.
+    COMPOSER_VENDOR_DIR=vendor COMPOSER_BIN_DIR=vendor/bin timeout 600 composer install --no-interaction --quiet --no-progress --no-scripts --no-plugins --no-autoloader --ignore-platform-reqs >&2 \
       || echo "Code index: composer install failed; indexing without vendor/." >&2
   fi
   _dir=$(mktemp -d)

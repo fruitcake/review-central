@@ -37,6 +37,16 @@ if [ -z "${REVIEW_QUESTION:-}" ]; then
   exit 1
 fi
 
+# The packages' code, as the review had it: many answers are in vendor/. The CLI
+# that then runs with the key has to be the one it was before the install.
+echo "##[phase] vendor"
+_cli_sum=$(sha256sum "$(readlink -f "$CLAUDE")" 2> /dev/null | cut -c1-64)
+reviewer_vendor
+if [ "$(sha256sum "$(readlink -f "$CLAUDE")" 2> /dev/null | cut -c1-64)" != "$_cli_sum" ]; then
+  echo "Claude Code changed while vendor/ was installed; the question is not answered."
+  exit 1
+fi
+
 SESSION=""
 [ -s "$HOME/.review-session" ] && SESSION=$(head -n 1 "$HOME/.review-session" | tr -cd 'A-Za-z0-9-')
 
