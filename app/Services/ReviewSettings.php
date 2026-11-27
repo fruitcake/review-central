@@ -85,6 +85,7 @@ class ReviewSettings
         'floor_guard' => 'REVIEW_FLOOR_GUARD',
         'reach' => 'REVIEW_REACH',
         'code_index' => 'REVIEW_CODE_INDEX',
+        'question_web_search' => 'REVIEW_QUESTION_WEB_SEARCH',
     ];
 
     /**
