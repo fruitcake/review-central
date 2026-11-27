@@ -37,13 +37,13 @@ it('replaces each key by a placeholder for its host, its gateway\'s where it has
         ]);
 });
 
-it('gives the OpenAI key to the ChatGPT backend for the Codex model list only, and not through a gateway', function () {
+it('gives the OpenAI key to the ChatGPT backend\'s API only, and not through a gateway', function () {
     $direct = ProviderKeys::proxied(['OPENAI_API_KEY' => 'sk-proj-SECRETSECRETSECRET']);
     $placeholder = $direct['environment']['OPENAI_API_KEY'];
 
     expect($direct['credentials'])->toBe([
         ['host' => 'api.openai.com', 'placeholder' => $placeholder, 'value' => 'sk-proj-SECRETSECRETSECRET'],
-        ['host' => 'chatgpt.com', 'placeholder' => $placeholder, 'value' => 'sk-proj-SECRETSECRETSECRET', 'paths' => ['/backend-api/codex/models']],
+        ['host' => 'chatgpt.com', 'placeholder' => $placeholder, 'value' => 'sk-proj-SECRETSECRETSECRET', 'paths' => ['/backend-api/']],
     ]);
 
     $gateway = ProviderKeys::proxied(['OPENAI_API_KEY' => 'sk-proj-SECRETSECRETSECRET', 'OPENAI_BASE_URL' => 'https://gateway.example.com/v1']);

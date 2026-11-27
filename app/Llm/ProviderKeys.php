@@ -31,15 +31,16 @@ final class ProviderKeys
     ];
 
     /**
-     * Other addresses a key goes to, each only on a GET of exactly these paths: the
-     * Codex CLI reads its list of models from the ChatGPT backend with the API key,
-     * and chatgpt.com is a site as much as an API, so it gets the key for that alone.
+     * Other addresses a key goes to, each only under these paths (one ending in / is
+     * everything under it): the Codex CLI reads from the ChatGPT backend with the
+     * API key, such as its list of models, and chatgpt.com is a site as much as an
+     * API, so it gets the key for its backend's API alone.
      *
      * @var array<string, array<string, list<string>>>
      */
     public const PATHS = [
-        'OPENAI_API_KEY' => ['chatgpt.com' => ['/backend-api/codex/models']],
-        'CODEX_API_KEY' => ['chatgpt.com' => ['/backend-api/codex/models']],
+        'OPENAI_API_KEY' => ['chatgpt.com' => ['/backend-api/']],
+        'CODEX_API_KEY' => ['chatgpt.com' => ['/backend-api/']],
     ];
 
     /**

@@ -322,8 +322,9 @@ const CLONE_SECONDS = 600;
 
 /**
  * A key, the host it is for, and what the sandbox has in its place. With paths,
- * the key goes only on a GET of exactly one of them: a host such as chatgpt.com
- * is a site as much as an API, and gets a key for the one address a CLI reads.
+ * the key goes only to those: a path ending in / is everything under it, any
+ * other that path exactly. A host such as chatgpt.com is a site as much as an
+ * API, and gets a key for the part of it a CLI uses.
  */
 interface Credential {
   host: string;
@@ -617,10 +618,10 @@ export class KeyProxy extends WorkerEntrypoint<Env, KeyProxyProps> {
       return new Response(`Only https://${host} is reached this way.`, { status: 403 });
     }
 
-    // The keys this request may carry: those for the whole host, and those for its path on a GET.
+    // The keys this request may carry: those for the whole host, and those for its path.
     const real = new Map(
       keys
-        .filter(([, , paths]) => paths === null || (request.method === "GET" && paths.includes(url.pathname)))
+        .filter(([, , paths]) => paths === null || paths.some((path) => (path.endsWith("/") ? url.pathname.startsWith(path) : url.pathname === path)))
         .map(([placeholder, value]) => [placeholder, value] as [string, string]),
     );
     const swap = (value: string): string => {
@@ -1729,7 +1730,7 @@ function readSpec(body: unknown): RunSpec | string {
             credential.paths.some((path: unknown) => typeof path !== "string" || !/^\/[A-Za-z0-9._~\/-]{1,200}$/.test(path) || path.includes("..")))),
     )
   ) {
-    return "credentials name a host, a placeholder and a key each, and at most eight exact paths.";
+    return "credentials name a host, a placeholder and a key each, and at most eight paths.";
   }
 
   const keep = Array.isArray(spec.keep) ? spec.keep : [];
