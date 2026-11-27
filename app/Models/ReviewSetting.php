@@ -21,7 +21,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $claude_model
  * @property ReviewEffort|null $claude_effort
  * @property string|null $claude_advisor
- * @property string|null $claude_subagent_model the model Claude's subagents run on, which lets it start them; none or null for none
  * @property string|null $claude_max_budget Dollars, or "none" for no cap.
  * @property string|null $codex_model
  * @property ReviewEffort|null $codex_effort
