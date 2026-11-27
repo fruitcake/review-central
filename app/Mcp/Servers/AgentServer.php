@@ -14,6 +14,7 @@ use App\Mcp\Tools\RequestReviewTool;
 use App\Mcp\Tools\ReviewerAnswerTool;
 use App\Mcp\Tools\ReviewInstructionsTool;
 use App\Mcp\Tools\ReviewRulesTool;
+use App\Mcp\Tools\ReviewRunTool;
 use App\Mcp\Tools\SettleFindingsTool;
 use App\Mcp\Tools\TicketAttachmentTool;
 use App\Mcp\Tools\TicketTool;
@@ -62,5 +63,6 @@ class AgentServer extends Server
         AddReviewRuleTool::class,
         UpdateOpenFindingsTool::class,
         CheckReviewRulesTool::class,
+        ReviewRunTool::class,
     ];
 }

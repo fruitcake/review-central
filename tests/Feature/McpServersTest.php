@@ -22,6 +22,7 @@ use App\Mcp\Tools\RequestReviewTool;
 use App\Mcp\Tools\ReviewerAnswerTool;
 use App\Mcp\Tools\ReviewInstructionsTool;
 use App\Mcp\Tools\ReviewRulesTool;
+use App\Mcp\Tools\ReviewRunTool;
 use App\Mcp\Tools\SettleFindingsTool;
 use App\Mcp\Tools\TicketAttachmentTool;
 use App\Mcp\Tools\TicketTool;
@@ -38,6 +39,7 @@ use App\Models\ReviewRule;
 use App\Models\ReviewRun;
 use App\Models\TicketSource;
 use App\Models\User;
+use App\Runners\Container\RunLog;
 use App\Services\FindingSettlement;
 use App\Services\PlatformSettings;
 use App\Services\PullRequestFeedback;
@@ -51,6 +53,7 @@ use Filament\Facades\Filament;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\URL;
@@ -973,4 +976,55 @@ it('checks the repository\'s rule files for its rules only for an admin', functi
         ->tool(CheckReviewRulesTool::class, ['repository' => 'acme/shop'])
         ->assertOk()
         ->assertStructuredContentPaths(['archived' => [], 'note' => 'No rule of this repository alone is on, so there is nothing to check.']);
+});
+
+it('shows an admin a run as it went: its setup, findings, verdicts, the repository\'s settings and the lines of its log asked for', function () {
+    config(['review.container.log.directory' => storage_path('framework/testing/run-logs')]);
+    $this->run->forceFill(['build_number' => 41, 'agent' => 'claude-code', 'model' => 'claude-opus-5-5', 'effort' => 'high', 'cost' => 2.5])->save();
+    $log = app(RunLog::class)->path($this->repository->id, 41);
+    File::ensureDirectoryExists(dirname($log));
+    File::put($log, "08:39:30  ── reviewer ──\n08:39:44      -> Bash jq '.findings' review-context.json ✅\n08:41:40  The review is not converging.\n08:41:55      -> Bash git diff a..b\n");
+    FindingVerdict::query()->create(['review_run_id' => $this->run->id, 'user_id' => $this->admin->id, 'finding_id' => 'F2', 'verdict' => FindingVerdictKind::Valid]);
+
+    // Not for a member: the log quotes the repository's code.
+    AgentServer::actingAs($this->member)
+        ->tool(ReviewRunTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570])
+        ->assertHasErrors();
+
+    AgentServer::actingAs($this->admin)
+        ->tool(ReviewRunTool::class, ['repository' => 'acme/shop', 'pull_request_id' => 570, 'log_match' => '-> bash'])
+        ->assertOk()
+        ->assertStructuredContentPaths([
+            'run.run' => $this->run->uuid,
+            'run.model' => 'claude-opus-5-5',
+            'run.findings.1.id' => 'F2',
+            'verdicts.0.finding' => 'F2',
+            'log.lines' => ["08:39:44      -> Bash jq '.findings' review-context.json ✅", '08:41:55      -> Bash git diff a..b'],
+            'runs.0.run' => $this->run->uuid,
+        ])
+        ->assertStructuredContentPath('settings.fail_on', ReviewSettings::failOn($this->repository));
+
+    // By the address of its page, without the log.
+    AgentServer::actingAs($this->admin)
+        ->tool(ReviewRunTool::class, ['repository' => 'acme/shop', 'run' => "https://review.example/app/acme/review-runs/{$this->run->uuid}", 'log_lines' => 0])
+        ->assertOk()
+        ->assertStructuredContentPath('run.run', $this->run->uuid)
+        ->assertStructuredContentPath('log.note', 'Left out: ask for log_lines to have it.');
+
+    // Without a run, pull request or branch it names none.
+    AgentServer::actingAs($this->admin)
+        ->tool(ReviewRunTool::class, ['repository' => 'acme/shop'])
+        ->assertHasErrors();
+
+    // A security review of a branch is told apart from a trial.
+    $security = ReviewRun::query()->create([
+        'tenant_id' => $this->tenant->id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
+        'branch' => 'main', 'commit' => str_repeat('c', 40), 'kind' => 'security', 'custom' => true, 'status' => ReviewRun::STATUS_FINISHED, 'started_at' => now(),
+    ]);
+
+    AgentServer::actingAs($this->admin)
+        ->tool(ReviewRunTool::class, ['repository' => 'acme/shop', 'run' => $security->uuid, 'log_lines' => 0])
+        ->assertStructuredContentPath('run.kind', 'security');
+
+    File::deleteDirectory(storage_path('framework/testing/run-logs'));
 });
