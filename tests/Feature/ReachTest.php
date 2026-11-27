@@ -517,6 +517,140 @@ it('follows each body with the classes that run it, magic methods included, and 
         ->toContain('- `app/Desk/Refunder.php::refund`, which this change changes, calls `charge` on `CardGateway`');
 });
 
+it('names, with the code index, what the change\'s guards rely on: the writers of what a check reads, the calls a lock holds and the counter a success clears', function () {
+    ($this->git)('checkout', '-q', 'main');
+    ($this->put)('app/Models/Payment.php', "<?php\n\nnamespace App\\Models;\n\nclass Payment\n{\n    public const PIN = 'pin';\n    public const ONLINE = 'online';\n}\n");
+    ($this->put)('app/Services/Till.php', "<?php\n\nnamespace App\\Services;\n\nuse App\\Models\\Payment;\n\nclass Till\n{\n    public function book(\$reference)\n    {\n        \$payment = new Payment;\n        \$payment->reference = \$reference;\n        \$payment->save();\n    }\n}\n");
+    ($this->put)('app/Http/Controllers/TerminalController.php', "<?php\n\nnamespace App\\Http\\Controllers;\n\nuse App\\Services\\Till;\n\nclass TerminalController\n{\n    public function paid(Till \$till)\n    {\n        \$till->book(request('transaction'));\n    }\n}\n");
+    ($this->put)('app/Http/Controllers/OnlineController.php', "<?php\n\nnamespace App\\Http\\Controllers;\n\nclass OnlineController\n{\n    public function pay(\$order)\n    {\n    }\n\n    public function login(\$key)\n    {\n    }\n}\n");
+    // Reads the column into an array it returns: no writer.
+    ($this->put)('app/Http/Resources/PaymentResource.php', "<?php\n\nnamespace App\\Http\\Resources;\n\nuse Illuminate\\Support\\Collection;\n\nclass PaymentResource\n{\n    public function toArray(\$payment)\n    {\n        return ['reference' => \$payment->reference];\n    }\n\n    public function toCollection(\$payment)\n    {\n        return Collection::make(['reference' => \$payment->reference]);\n    }\n}\n");
+    // Writes in other shapes: static:: on the model, a fully qualified name without an import,
+    // inside a wrapper's arguments, made and saved; and one that only reads an element.
+    ($this->put)('app/Models/Payment.php', "<?php\n\nnamespace App\\Models;\n\nclass Payment\n{\n    public const PIN = 'pin';\n    public const ONLINE = 'online';\n\n    public static function copyFrom(\$other)\n    {\n        return static::create(['reference' => \$other->reference]);\n    }\n}\n");
+    ($this->put)('app/Services/Shapes.php', <<<'PHP'
+        <?php
+
+        namespace App\Services;
+
+        class Shapes
+        {
+            public function qualified($reference)
+            {
+                \App\Models\Payment::create(['reference' => $reference]);
+            }
+
+            public function wrapped($reference)
+            {
+                return new Receipt(\App\Models\Payment::create(['reference' => $reference]));
+            }
+
+            public function madeAndSaved($reference)
+            {
+                $copy = \App\Models\Payment::make(['reference' => $reference]);
+                $copy->save();
+            }
+
+            public function onlyTheAmount($payment, $target)
+            {
+                $attributes = ['reference' => $payment->reference, 'amount' => 1];
+                $target->update(['amount' => $attributes['amount']]);
+            }
+        }
+        PHP);
+    // Writes the column through an array of attributes it holds first.
+    ($this->put)('app/Services/Import.php', "<?php\n\nnamespace App\\Services;\n\nuse App\\Models\\Payment;\n\nclass Import\n{\n    public function row(\$line)\n    {\n        \$attributes = ['type' => Payment::PIN, 'reference' => \$line[3]];\n\n        return Payment::create(\$attributes);\n    }\n}\n");
+    // A lock whose lifetime the change edits on a line of its own.
+    ($this->put)('app/Services/Refunds.php', "<?php\n\nnamespace App\\Services;\n\nuse Acme\\Sdk\\Client;\nuse Illuminate\\Support\\Facades\\Cache;\n\nclass Refunds\n{\n    public function refund(\$order)\n    {\n        Cache::lock(\n            'refund:'.\$order,\n            300\n        )->block(5, fn () => (new Client)->refund(\$order));\n    }\n}\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Payments');
+    ($this->git)('checkout', '-q', 'feature');
+    ($this->git)('rebase', '-q', 'main');
+    ($this->put)('app/Http/Controllers/OnlineController.php', <<<'PHP'
+        <?php
+
+        namespace App\Http\Controllers;
+
+        use App\Models\Payment;
+        use Acme\Sdk\Client;
+        use Illuminate\Support\Facades\Cache;
+        use Illuminate\Support\Facades\RateLimiter;
+
+        class OnlineController
+        {
+            public function pay($order)
+            {
+                $lock = Cache::lock('pay:'.$order, 30);
+                $lock->block(5);
+                $booked = Payment::where('type', Payment::ONLINE)
+                    ->where('reference', $order)
+                    ->exists();
+                (new Client)->verify($order);
+            }
+
+            public function login($key)
+            {
+                RateLimiter::hit('login:'.request()->ip());
+                RateLimiter::clear(
+                    'login:'.request()->ip()
+                );
+                RateLimiter::clear(hash('sha256', strtolower(request()->input('email'))));
+            }
+        }
+        PHP);
+    ($this->put)('app/Services/Refunds.php', str_replace('            300', '            30', File::get("{$this->dir}/app/Services/Refunds.php")));
+    ($this->git)('commit', '-qam', 'Pay once, verified');
+
+    $index = "{$this->dir}/.index";
+    File::ensureDirectoryExists($index);
+    File::put("{$index}/edges.tsv", implode("\n", [
+        "app\\http\\controllers\\onlinecontroller::pay\tapp\\models\\payment::\$reference",
+        "app\\http\\controllers\\onlinecontroller::pay\tacme\\sdk\\client::verify",
+        "app\\services\\till::book\tapp\\models\\payment::\$reference",
+        "app\\http\\resources\\paymentresource::toarray\tapp\\models\\payment::\$reference",
+        "app\\http\\resources\\paymentresource::tocollection\tapp\\models\\payment::\$reference",
+        "app\\services\\import::row\tapp\\models\\payment::\$reference",
+        "app\\models\\payment::copyfrom\tapp\\models\\payment::\$reference",
+        "app\\services\\shapes::qualified\tapp\\models\\payment::\$reference",
+        "app\\services\\shapes::wrapped\tapp\\models\\payment::\$reference",
+        "app\\services\\shapes::madeandsaved\tapp\\models\\payment::\$reference",
+        "app\\services\\shapes::onlytheamount\tapp\\models\\payment::\$reference",
+        "app\\services\\refunds::refund\tacme\\sdk\\client::refund",
+        "app\\http\\controllers\\terminalcontroller::paid\tapp\\services\\till::book",
+    ])."\n");
+    File::put("{$index}/classes.tsv", implode("\n", [
+        "app\\models\\payment\tapp/Models/Payment.php", "app\\services\\till\tapp/Services/Till.php",
+        "app\\http\\controllers\\terminalcontroller\tapp/Http/Controllers/TerminalController.php", "app\\http\\controllers\\onlinecontroller\tapp/Http/Controllers/OnlineController.php",
+        "app\\http\\resources\\paymentresource\tapp/Http/Resources/PaymentResource.php", "app\\services\\refunds\tapp/Services/Refunds.php",
+        "app\\services\\import\tapp/Services/Import.php", "app\\services\\shapes\tapp/Services/Shapes.php",
+    ])."\n");
+    File::put("{$index}/ancestors.tsv", '');
+
+    $reach = Process::path($this->dir)->env(['REACH_INDEX' => $index])
+        ->run(['php', realpath(__DIR__.'/../../resources/review/skill/reach.php'), 'main', 'HEAD'])->throw()->output();
+
+    expect($reach)
+        ->toContain("What the change's guards rely on outside them:")
+        // The check counts one type of row; another writer of the column writes others.
+        ->toContain('- `app/Http/Controllers/OnlineController.php::pay` checks `Payment` rows by `reference` (line 16), counting only those with `type` = `Payment::ONLINE`. These write `reference` on `Payment`: `app/Services/Till.php::book` (line 12), called from `app/Http/Controllers/TerminalController.php::paid`;')
+        ->not->toContain('PaymentResource')
+        ->toContain('`app/Models/Payment.php::copyFrom` (line 12)')
+        ->toContain('`app/Services/Shapes.php::qualified` (line 9)')
+        ->toContain('`app/Services/Shapes.php::wrapped` (line 14)')
+        ->toContain('`app/Services/Shapes.php::madeAndSaved` (line 19)')
+        // An element read from an array is not the array written.
+        ->not->toContain('onlyTheAmount')
+        // Through the attributes it holds first.
+        ->toContain('`app/Services/Import.php::row` (line 13)')
+        // A key normalized in nested calls.
+        ->toContain('clears `hash(\'sha256\', strtolower(request()->input(\'email\')))`')
+        ->toContain('takes lock \'pay:\' for 30 s (line 14), and the method also makes calls that leave the application: `OnlineController::pay` calls `acme\sdk`.')
+        // A lifetime changed on a line of its own.
+        ->toContain('- `app/Services/Refunds.php::refund` takes lock \'refund:\' for 30 s (line 12)')
+        ->toContain('- `app/Http/Controllers/OnlineController.php::login` clears `\'login:\'.request()->ip()` (line 25), and failures are counted in `\'login:\'.request()->ip()` (line 24).')
+        ->not->toContain('`type` on `Payment`');
+});
+
 it('takes a policy\'s methods, and a method a changed line guards, as checks', function () {
     ($this->put)('app/Policies/LessonPolicy.php', "<?php\n\nclass LessonPolicy\n{\n    public function book(\$user, Lesson \$lesson)\n    {\n        return true;\n    }\n}\n");
     ($this->put)('app/Http/Controllers/LessonController.php', <<<'PHP'
