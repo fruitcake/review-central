@@ -100,18 +100,60 @@ foreach (['composer.json' => ['require', 'require-dev'], 'package.json' => ['dep
 
 $locks = array_values(array_filter(['composer.lock', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'], fn (string $file): bool => is_file($file) && ! is_link($file)));
 
-// What the lock files say of where each package came from: Packagist, or the npm registry.
+// What the lock files say of where each package came from: Packagist, or the npm registry. Only a
+// package a lock file shows from there is verified public; a declared range alone says no more
+// than that some registry serves it, which may be a private one.
+$verified = [];
+$publicRegistry = fn (string $url): bool => preg_match('#^https://registry\.(npmjs\.org|yarnpkg\.com)/#', $url) === 1;
+
 foreach ([...((array) ($json('composer.lock')['packages'] ?? [])), ...((array) ($json('composer.lock')['packages-dev'] ?? []))] as $package) {
-    if (is_array($package) && isset($package['name']) && ! str_contains((string) ($package['notification-url'] ?? ''), 'packagist.org')) {
-        $isPrivate((string) $package['name']);
+    if (is_array($package) && isset($package['name'])) {
+        str_contains((string) ($package['notification-url'] ?? ''), 'packagist.org') ? $verified[strtolower((string) $package['name'])] = true : $isPrivate((string) $package['name']);
     }
 }
 
 foreach ((array) ($json('package-lock.json')['packages'] ?? []) as $path => $package) {
-    $name = preg_replace('#^.*node_modules/#', '', (string) $path);
+    $name = strtolower((string) preg_replace('#^.*node_modules/#', '', (string) $path));
 
-    if ($name !== '' && is_array($package) && (($package['link'] ?? false) === true || (isset($package['resolved']) && preg_match('#^https://registry\.(npmjs\.org|yarnpkg\.com)/#', (string) $package['resolved']) !== 1))) {
-        $isPrivate($name);
+    if ($name !== '' && is_array($package)) {
+        ($package['link'] ?? false) !== true && $publicRegistry((string) ($package['resolved'] ?? '')) ? $verified[$name] = true : $isPrivate($name);
+    }
+}
+
+// yarn.lock: a block per package, its names in the first line and where it came from in `resolved`.
+if (is_file('yarn.lock') && ! is_link('yarn.lock')) {
+    foreach (preg_split('/\n\s*\n/', (string) file_get_contents('yarn.lock')) ?: [] as $block) {
+        if (preg_match('/^"?(@?[^@\s"]+)@/m', $block, $named) === 1 && preg_match('/^\s*resolved:?\s+"?([^"\s]+)/m', $block, $resolved) === 1) {
+            $publicRegistry($resolved[1]) ? $verified[strtolower($named[1])] = true : $isPrivate($named[1]);
+        }
+    }
+}
+
+// A scope the project sends to a registry of its own (.npmrc, .yarnrc.yml) is private, all of it.
+foreach (['.npmrc', '.yarnrc.yml'] as $config) {
+    $text = is_file($config) && ! is_link($config) ? (string) file_get_contents($config) : '';
+    preg_match_all('/^\s*@([\w.-]+):registry\s*=\s*(\S+)/m', $text, $scoped, PREG_SET_ORDER);
+    preg_match_all('/^\s{2,}"?([\w.-]+)"?:\s*\n\s+npmRegistryServer:\s*"?([^"\s]+)/m', $text, $yarnScoped, PREG_SET_ORDER);
+
+    foreach ([...$scoped, ...$yarnScoped] as [, $scope, $registry]) {
+        if (preg_match('#^https://registry\.(npmjs\.org|yarnpkg\.com)/?#', $registry) !== 1) {
+            $private[strtolower($scope)] = true;
+
+            foreach (array_keys($declared) as $name) {
+                if (str_starts_with($name, '@'.strtolower($scope).'/')) {
+                    $isPrivate($name);
+                }
+            }
+        }
+    }
+}
+
+// The parts of the names a lock file shows public, which may also be in the project's own name.
+$verifiedParts = [];
+
+foreach (array_keys(array_diff_key($verified, $private)) as $name) {
+    foreach (preg_split('/[\/@\-_.]+/', $name) ?: [] as $part) {
+        $verifiedParts[$part] = true;
     }
 }
 
@@ -130,13 +172,22 @@ foreach ($locks as $lock) {
 
 /** Whether grep finds the word in the public code, as a whole word in any case. */
 $inPublicCode = function (string $word) use ($locks, &$private): bool {
-    // Not in a private package's own directory, where its code is the project's.
-    $excluded = array_map(fn (string $name): string => '--exclude-dir='.basename($name), array_keys(array_filter($private, fn (bool $yes, string $name): bool => str_contains($name, '/'), ARRAY_FILTER_USE_BOTH)));
+    // Not in a private package's own directory, where its code is the project's: by its
+    // path, so a public package with the same last name is still read.
+    $excluded = [];
+
+    foreach (array_keys($private) as $name) {
+        if (str_contains($name, '/')) {
+            array_push($excluded, '-e', "vendor/{$name}/", '-e', "node_modules/{$name}/");
+        }
+    }
 
     foreach ([...$locks, ...array_filter(['vendor', 'node_modules'], 'is_dir')] as $where) {
-        exec(implode(' ', array_map('escapeshellarg', ['timeout', '20', 'grep', '-r', '-q', '-I', '-i', '-w', '-F', ...(is_dir($where) ? $excluded : []), '-e', $word, $where])).' > /dev/null 2>&1', $output, $status);
+        $grep = implode(' ', array_map('escapeshellarg', ['timeout', '20', 'grep', '-r', '-l', '-I', '-i', '-w', '-F', '-e', $word, $where]));
+        $filter = $excluded === [] || ! is_dir($where) ? '' : ' | grep -v -i -F '.implode(' ', array_map('escapeshellarg', $excluded));
+        $found = trim((string) shell_exec("{$grep} 2>/dev/null{$filter} | head -n 1"));
 
-        if ($status === 0) {
+        if ($found !== '') {
             return true;
         }
     }
@@ -168,10 +219,11 @@ foreach (preg_split('/\s+/', trim($query)) ?: [] as $word) {
     }
 
     // A name: each part public. A public dependency's name is public, also where the
-    // project's own name has it too (laravel/laravel and laravel/framework); any other
-    // part of the project's own name is not.
+    // project's own name has it too (laravel/laravel and laravel/framework) when a lock
+    // file shows it from the public registry; any other part of the project's own name is not.
     foreach (array_unique([$word, ...preg_split('/[\/@\-_.]+/', $word)]) as $part) {
-        if ($part === '' || in_array($part, SEARCH_WORDS, true) || isset($dependencies[$part])) {
+        // A dependency's name, unless it is also the project's own and no lock file shows it public.
+        if ($part === '' || in_array($part, SEARCH_WORDS, true) || (isset($dependencies[$part]) && (! isset($own[$part]) || isset($verifiedParts[$part])))) {
             continue;
         }
 

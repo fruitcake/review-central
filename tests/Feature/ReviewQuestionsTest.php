@@ -803,3 +803,41 @@ it('answers nothing when Claude Code changed while vendor/ was installed', funct
 
     File::deleteDirectory($dir);
 });
+
+it('takes a scope the lock file or the registry settings put on a registry of the project\'s own as private, and reads a public package beside a private one of the same name', function () {
+    $dir = storage_path('framework/testing/search-guard-registry');
+    File::deleteDirectory($dir);
+    File::ensureDirectoryExists("{$dir}/yarn");
+    File::ensureDirectoryExists("{$dir}/npm");
+    $guard = fn (string $in, string $query) => Process::path("{$dir}/{$in}")->input(json_encode(['tool_input' => ['query' => $query]]))
+        ->run(['php', '-n', resource_path('review/skill/search-guard.php')]);
+
+    // A semver range from a private registry, which yarn.lock shows.
+    File::put("{$dir}/yarn/package.json", json_encode(['name' => '@acme/web', 'dependencies' => ['@acme/risk-engine' => '^1.0.0', 'nuxt' => '^4.1.0']]));
+    File::put("{$dir}/yarn/yarn.lock", "\"@acme/risk-engine@^1.0.0\":\n  version \"1.2.0\"\n  resolved \"https://npm.acme.internal/@acme/risk-engine/-/risk-engine-1.2.0.tgz\"\n\nnuxt@^4.1.0:\n  version \"4.1.2\"\n  resolved \"https://registry.yarnpkg.com/nuxt/-/nuxt-4.1.2.tgz\"\n");
+    // A scope the registry settings send elsewhere.
+    File::put("{$dir}/npm/package.json", json_encode(['name' => 'shop', 'dependencies' => ['@acme/ui' => '^2.0.0']]));
+    File::put("{$dir}/npm/.npmrc", "@acme:registry=https://npm.acme.internal/\n");
+
+    expect($guard('yarn', 'acme release notes')->exitCode())->toBe(2)
+        ->and($guard('yarn', '@acme/risk-engine changelog')->exitCode())->toBe(2)
+        ->and($guard('yarn', 'nuxt 4 changelog')->exitCode())->toBe(0)
+        ->and($guard('npm', '@acme/ui changelog')->exitCode())->toBe(2)
+        ->and($guard('npm', 'acme upgrade')->exitCode())->toBe(2);
+
+    // A private package and a public one with the same last name: the public one is read.
+    File::ensureDirectoryExists("{$dir}/php/vendor/acme/framework");
+    File::ensureDirectoryExists("{$dir}/php/vendor/laravel/framework/src");
+    File::put("{$dir}/php/vendor/acme/framework/Ledger.php", "<?php\n\nclass AcmeLedger\n{\n}\n");
+    File::put("{$dir}/php/vendor/laravel/framework/src/RouteUrlGenerator.php", "<?php\n\nclass RouteUrlGenerator\n{\n}\n");
+    File::put("{$dir}/php/composer.json", json_encode(['name' => 'acme/shop', 'require' => ['laravel/framework' => '^12.70', 'acme/framework' => '*@dev']]));
+    File::put("{$dir}/php/composer.lock", json_encode(['packages' => [
+        ['name' => 'laravel/framework', 'version' => 'v12.74.0', 'notification-url' => 'https://packagist.org/downloads/'],
+        ['name' => 'acme/framework', 'version' => 'dev-main', 'dist' => ['type' => 'path', 'url' => '../framework']],
+    ]]));
+
+    expect($guard('php', 'laravel RouteUrlGenerator')->exitCode())->toBe(0)
+        ->and($guard('php', 'AcmeLedger changelog')->exitCode())->toBe(2);
+
+    File::deleteDirectory($dir);
+});
