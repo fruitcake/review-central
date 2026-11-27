@@ -55,7 +55,7 @@ PROMPT=$(mktemp)
 {
   cat "$HERE/question-prompt.md"
   if [ "${REVIEW_QUESTION_WEB_SEARCH:-false}" = "true" ]; then
-    printf '\n%s\n' "- You may search the web for public documentation, such as a package's release notes or changelog, where the repository cannot answer. Search with public names and versions only, never with code, names, paths or anything else from this repository or the pull request, and say which source an answer rests on."
+    printf '\n%s\n' "- You may search the web for public documentation, such as a package's release notes or changelog, where the repository cannot answer. Search with public names and versions only, never with code, names, paths or anything else from this repository, the pull request or a ticket, and say which source an answer rests on. Each search is checked first, and one with a word that is not public is refused."
   fi
   printf '\nThe question:\n\n'
   printf '%s\n' "$REVIEW_QUESTION"

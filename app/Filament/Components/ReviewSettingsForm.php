@@ -152,7 +152,7 @@ class ReviewSettingsForm
                 ->label(__('Questions may search the web'))
                 ->options(self::onOff())
                 ->placeholder(self::onOffPlaceholder($defaults?->question_web_search, __('Off')))
-                ->helperText(__('When someone asks the reviewer a question, it may search the web for public documentation such as release notes and changelogs. Each search is checked before it goes out, and one with a name that is in the repository and in no installed package is refused. It never opens a page itself, and the review itself never searches.')),
+                ->helperText(__('When someone asks the reviewer a question, it may search the web for public documentation such as release notes and changelogs. Each search is checked before it goes out: it may only use names of the repository\'s dependencies, their versions and words such as release or changelog, so nothing from the code, the pull request or a ticket. It never opens a page itself, and the review itself never searches.')),
             Select::make('verify')
                 ->label(__('Second check'))
                 ->options(self::onOff())

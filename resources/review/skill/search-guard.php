@@ -2,19 +2,37 @@
 
 /**
  * Claude Code's PreToolUse hook for WebSearch, where an answer to a question may
- * search the web: lets a search go only when every name in it is public. A name
- * the repository uses that no installed package does (a class, a method, a path of
- * the repository's own) may be private, and the search would carry it to the
- * search provider, so the search is refused and the reviewer told why.
+ * search the web: lets a search go only when it is made of public words, so that
+ * nothing the session read (the code, the pull request, a ticket) reaches the search
+ * provider. Every word of the query has to be one of these:
+ *
+ * - a name the repository's dependencies make public: a word in an installed
+ *   package (vendor/, node_modules/), in a lock file, or a dependency's name in
+ *   composer.json or package.json, and not the project's own name;
+ * - a version: a number that an installed or required version starts with, such
+ *   as 12.74 for 12.74.0 or 4 for ^4.1;
+ * - one of the few words a search for documentation is made of, such as
+ *   changelog, release or upgrade.
+ *
+ * Anything else, a number that is no version included, and the search is refused
+ * with the reason, which Claude Code hands the reviewer.
  *
  *   php -n search-guard.php < hook input     (in the checkout)
  *
- * Exits 0 to let the search go, 2 to refuse it with the reason on stderr, which
- * Claude Code hands the reviewer. Anything it cannot tell refuses: answer-question.sh
- * runs it as `... || exit 2`, so a guard that fails to run refuses too.
+ * Exits 0 to let the search go and 2 to refuse it. answer-question.sh runs it as
+ * `... || exit 2`, so a guard that fails to run refuses too.
  */
+const SEARCH_WORDS = [
+    'a', 'an', 'and', 'or', 'not', 'no', 'the', 'of', 'in', 'on', 'to', 'for', 'from', 'with', 'without', 'by', 'at', 'as',
+    'is', 'are', 'was', 'does', 'do', 'did', 'how', 'what', 'when', 'why', 'which', 'vs', 'versus', 'between', 'since', 'after', 'before',
+    'release', 'releases', 'released', 'notes', 'changelog', 'changes', 'change', 'changed', 'upgrade', 'upgrading', 'guide',
+    'migration', 'migrate', 'breaking', 'deprecated', 'deprecation', 'removed', 'new', 'version', 'versions', 'major', 'minor', 'patch',
+    'docs', 'documentation', 'issue', 'issues', 'bug', 'fix', 'fixed', 'regression', 'security', 'advisory', 'cve',
+    'behaviour', 'behavior', 'default', 'support', 'supported', 'github', 'php', 'javascript', 'typescript', 'node', 'npm', 'composer', 'packagist',
+];
+
 $refuse = function (string $reason): never {
-    fwrite(STDERR, "This search was not sent: {$reason} Search with public names and versions only, such as a package, a framework class or a release, and nothing that is this repository's own.\n");
+    fwrite(STDERR, "This search was not sent: {$reason} A search may only use public names of the repository's dependencies, their versions, and words such as release, changelog or upgrade: nothing from the code, the pull request or a ticket.\n");
     exit(2);
 };
 
@@ -29,55 +47,87 @@ if (strlen($query) > 200) {
     $refuse('a search is a few public words, not a passage.');
 }
 
-if (preg_match('/[$;{}<>`]|->|::|=>/', $query) === 1) {
-    $refuse('it holds code.');
+// Words, scoped and slashed package names, versions; nothing else.
+if (preg_match('/^[A-Za-z0-9 .\/@_\-]+$/', $query) !== 1) {
+    $refuse('it holds characters a search for documentation does not need.');
 }
 
-/** Whether git or grep finds the word, as a whole word in any case; null when it could not look. */
-$finds = function (array $command): ?bool {
-    exec(implode(' ', array_map('escapeshellarg', $command)).' > /dev/null 2>&1', $output, $status);
+/** A JSON file of the checkout, when it is one. */
+$json = fn (string $file): array => is_file($file) && ! is_link($file) ? (json_decode((string) file_get_contents($file), true) ?: []) : [];
 
-    return match ($status) {
-        0 => true,
-        1 => false,
-        default => null,
-    };
-};
+// The dependencies' names and the versions they ask for, and the project's own name, which is not public.
+$dependencies = [];
+$versions = [];
+$own = [];
 
-if ($finds(['git', 'rev-parse', '--git-dir']) !== true) {
-    $refuse('the repository could not be read to check it.');
-}
+foreach (['composer.json' => ['require', 'require-dev'], 'package.json' => ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']] as $file => $sections) {
+    $manifest = $json($file);
 
-// Every word and every dotted, slashed or namespaced name, and their parts.
-preg_match_all('/[A-Za-z_][\w]*(?:[\\\\\/.\-][A-Za-z_][\w]*)*/', $query, $found);
-$names = [];
+    foreach (preg_split('/[\/@\-_.\s]+/', strtolower((string) ($manifest['name'] ?? ''))) ?: [] as $part) {
+        $own[$part] = true;
+    }
 
-foreach ($found[0] as $name) {
-    foreach ([$name, ...preg_split('/[\\\\\/.\-]+/', $name)] as $part) {
-        if (strlen($part) >= 4) {
-            $names[strtolower($part)] = $part;
+    foreach ($sections as $section) {
+        foreach ((array) ($manifest[$section] ?? []) as $name => $constraint) {
+            $dependencies[strtolower((string) $name)] = true;
+
+            foreach (preg_split('/[\/@\-_.]+/', strtolower((string) $name)) ?: [] as $part) {
+                $dependencies[$part] = true;
+            }
+
+            preg_match_all('/\d+(?:\.\d+)*/', (string) $constraint, $numbers);
+            array_push($versions, ...$numbers[0]);
         }
     }
 }
 
-foreach ($names as $name) {
-    // A name of the repository's own: in its tracked files, outside what it installs.
-    $own = $finds(['git', 'grep', '-q', '-I', '-i', '-w', '-F', '-e', $name, '--', '.', ':!vendor', ':!node_modules']);
+$locks = array_values(array_filter(['composer.lock', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'], fn (string $file): bool => is_file($file) && ! is_link($file)));
 
-    if ($own === null) {
-        $refuse('the repository could not be searched to check it.');
+foreach ($locks as $lock) {
+    preg_match_all('/version"?\s*:?\s*"?v?(\d+(?:\.\d+)*)/', (string) file_get_contents($lock), $numbers);
+    array_push($versions, ...$numbers[1]);
+}
+
+/** Whether grep finds the word in the public code, as a whole word in any case. */
+$inPublicCode = function (string $word) use ($locks): bool {
+    foreach ([...$locks, ...array_filter(['vendor', 'node_modules'], 'is_dir')] as $where) {
+        exec(implode(' ', array_map('escapeshellarg', ['timeout', '20', 'grep', '-r', '-q', '-I', '-i', '-w', '-F', '-e', $word, $where])).' > /dev/null 2>&1', $output, $status);
+
+        if ($status === 0) {
+            return true;
+        }
     }
 
-    if (! $own) {
+    return false;
+};
+
+foreach (preg_split('/\s+/', trim($query)) ?: [] as $word) {
+    $word = strtolower(trim($word, '.'));
+
+    if ($word === '' || in_array($word, SEARCH_WORDS, true)) {
         continue;
     }
 
-    // Public when an installed package or the lock file names it too.
-    $public = $finds(['grep', '-q', '-i', '-w', '-F', '-e', $name, 'composer.lock'])
-        || (is_dir('vendor') && $finds(['timeout', '20', 'grep', '-r', '-q', '-I', '-i', '-w', '-F', '-e', $name, 'vendor']));
+    // A version: a number an installed or required version starts with.
+    if (preg_match('/^v?(\d+(?:\.\d+)*)$/', $word, $number) === 1) {
+        $isVersion = array_filter($versions, fn (string $version): bool => $version === $number[1] || str_starts_with($version, $number[1].'.')) !== [];
 
-    if (! $public) {
-        $refuse("`{$name}` is in this repository and in no installed package, so it may be private.");
+        if (! $isVersion) {
+            $refuse("`{$word}` is a number that no installed or required version starts with.");
+        }
+
+        continue;
+    }
+
+    // A name: each part public, and none the project's own.
+    foreach (array_unique([$word, ...preg_split('/[\/@\-_.]+/', $word)]) as $part) {
+        if ($part === '' || in_array($part, SEARCH_WORDS, true) || isset($dependencies[$part]) && ! isset($own[$part])) {
+            continue;
+        }
+
+        if (isset($own[$part]) || ! $inPublicCode($part)) {
+            $refuse("`{$part}` is no name of an installed package or a dependency.");
+        }
     }
 }
 
