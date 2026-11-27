@@ -33,6 +33,8 @@
           "evidence": {"type": "string"},
           "suggestion": {"type": "string"},
           "prompt": {"type": "string"},
+          "follows_up": {"type": "string", "pattern": "^F[0-9]+$", "description": "On a follow-up: the earlier finding whose fix introduced this defect; see parts/follow-up.md."},
+          "raised_by": {"type": "string", "description": "On a follow-up: the person whose comment raised this defect, which you confirmed in the code; see parts/follow-up.md."},
           "reply": {"type": "string"}
         }
       }

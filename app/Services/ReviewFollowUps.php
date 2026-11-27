@@ -13,7 +13,10 @@ use App\Models\ReviewRun;
  * every finding with another push.
  *
  * - Once the review says it is not converging, only a new HIGH or CRITICAL is
- *   kept; the rest go under Open questions, a line each, for a person.
+ *   kept; the rest go under Open questions, a line each, for a person. Kept as
+ *   well: a defect in the fix of an earlier finding (`follows_up` names it),
+ *   which the review's own advice led to, and one a person raised on the pull
+ *   request that the review confirmed (`raised_by`).
  * - From the third follow-up on, a new finding below HIGH no longer holds the
  *   merge. It is still reported, and stays that way in the rounds after.
  * - After the team's most rounds, five unless set, nothing new is recorded at
@@ -93,7 +96,11 @@ class ReviewFollowUps
             // One called open without an id cannot be told apart, and is left standing.
             $new = ($finding['status'] ?? 'new') === 'new' || ($id !== '' && ! array_key_exists($id, $known));
 
-            if ($new && ($over || (! $high && $notConverging))) {
+            // Owed whatever the round: the review's advice caused it, or a person found it first.
+            $owed = (is_string($finding['follows_up'] ?? null) && array_key_exists($finding['follows_up'], $known))
+                || (is_string($finding['raised_by'] ?? null) && trim($finding['raised_by']) !== '');
+
+            if ($new && ($over || (! $high && ! $owed && $notConverging))) {
                 $set[] = '- '.(is_string($finding['title'] ?? null) ? $finding['title'] : ($id ?: 'A finding'))
                     .(filled($finding['path'] ?? null) ? " (`{$finding['path']}".(filled($finding['line'] ?? null) ? ":{$finding['line']}" : '').'`)' : '')
                     .': '.strtolower((string) ($finding['severity'] ?? '')).', set aside because '
