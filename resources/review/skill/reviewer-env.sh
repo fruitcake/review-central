@@ -215,14 +215,25 @@ reviewer_reach() {
   echo "##[phase] reach" >&2
   # By name first: in a second or two it says whether the change touches a check at all,
   # and most do not; only then is the code index worth its time.
-  _reach=$("$_php" "$HERE/reach.php" "origin/$_destination" "${BITBUCKET_COMMIT:-HEAD}" 2>/dev/null) || _reach=""
+  _reach=$("$_php" "$HERE/reach.php" "origin/$_destination" "${BITBUCKET_COMMIT:-HEAD}" 2>/dev/null) || {
+    echo "Reach: reach.php failed (exit $?); the reviewer gets no REACH." >&2
+    _reach=""
+  }
   if [ -n "$_reach" ] && [ "${REVIEW_CODE_INDEX:-false}" = "true" ]; then
     _index=$(reviewer_code_index "$_php")
     [ -n "$_index" ] && _reach=$(REACH_INDEX="$_index" "$_php" "$HERE/reach.php" "origin/$_destination" "${BITBUCKET_COMMIT:-HEAD}" 2>/dev/null || printf '%s' "$_reach")
   elif [ "${REVIEW_CODE_INDEX:-false}" = "true" ]; then
     echo "Code index: not built, as the change touches no check." >&2
   fi
-  [ -n "$_reach" ] && printf '%s\n' "$_reach"
+  # What the reviewer is given, in the run's log too: whether a path was there to
+  # see is the first question when a review misses one.
+  if [ -n "$_reach" ]; then
+    echo "Reach: $(printf '%s\n' "$_reach" | grep -c '^- `') check(s), $(printf '%s\n' "$_reach" | grep -c '^  - `') way(s) in listed; as the reviewer gets it:" >&2
+    printf '%s\n' "$_reach" | sed 's/^/  | /' >&2
+    printf '%s\n' "$_reach"
+  else
+    echo "Reach: the change adds or changes no check, so the reviewer gets no REACH." >&2
+  fi
   return 0
 }
 
