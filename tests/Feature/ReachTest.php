@@ -322,7 +322,7 @@ it('builds the code index only for a change to PHP in app/, and goes by name whe
 
     expect($byName->output())->toContain('by method name')
         // The log has what the reviewer got, line for line.
-        ->and($byName->errorOutput())->toContain('Reach: 1 check(s), 1 way(s) in listed, 0 call(s) with more than one implementation; as the reviewer gets it:')
+        ->and($byName->errorOutput())->toContain('Reach: 1 check(s), 1 way(s) in listed, 0 call(s) with more than one implementation, 0 thing(s) the guards rely on; as the reviewer gets it:')
         ->and($byName->errorOutput())->toContain('  |   - `app/Http/Controllers/PaymentController.php::pay`, through `createParticipant`')
         ->and(File::exists("{$this->dir}/curl-called"))->toBeTrue();
 });

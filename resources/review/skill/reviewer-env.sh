@@ -257,8 +257,14 @@ reviewer_reach() {
   # What the reviewer is given, in the run's log too: whether a path was there to
   # see is the first question when a review misses one.
   if [ -n "$_reach" ]; then
-    _several=$(printf '%s\n' "$_reach" | sed -n '/^Calls that can land on more than one implementation/,$p' | grep -c '^- `')
-    echo "Reach: $(printf '%s\n' "$_reach" | sed '/^Calls that can land on more than one implementation/,$d' | grep -c '^- `') check(s), $(printf '%s\n' "$_reach" | grep -c '^  - `') way(s) in listed, ${_several} call(s) with more than one implementation; as the reviewer gets it:" >&2
+    # Each section's items by its heading: the checks come first, then the calls with
+    # more than one implementation, then what the guards rely on.
+    _count() { printf '%s\n' "$_reach" | awk -v section="$1" '
+      /^Calls that can land on more than one implementation/ { current = "several"; next }
+      /^What the change.s guards rely on/ { current = "guards"; next }
+      /^- `/ && (current == section || (section == "checks" && current == "")) { n++ }
+      END { print n + 0 }'; }
+    echo "Reach: $(_count checks) check(s), $(printf '%s\n' "$_reach" | grep -c '^  - `') way(s) in listed, $(_count several) call(s) with more than one implementation, $(_count guards) thing(s) the guards rely on; as the reviewer gets it:" >&2
     printf '%s\n' "$_reach" | sed 's/^/  | /' >&2
     printf '%s\n' "$_reach"
   else
