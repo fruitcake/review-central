@@ -133,3 +133,40 @@ it('knows a local scope by the name it is called with, prefixed or marked as one
 it('reads nothing where there is no app directory', function () {
     expect(code_index_models("{$this->dir}/missing"))->toBe(['scopes' => [], 'marked' => [], 'relations' => []]);
 });
+
+it('reads which model each guard signs users in as, and which is the default', function () {
+    mkdir("{$this->dir}/config");
+    file_put_contents("{$this->dir}/config/auth.php", <<<'PHP'
+        <?php
+
+        use App\Models\Member;
+
+        return [
+            'defaults' => ['guard' => env('AUTH_GUARD', 'member'), 'passwords' => 'users'],
+            'guards' => [
+                'web' => ['driver' => 'session', 'provider' => 'users'],
+                'member' => ['driver' => 'session', 'provider' => 'members'],
+                // 'admin' => ['driver' => 'session', 'provider' => 'admins'],
+            ],
+            'providers' => [
+                'users' => ['driver' => 'eloquent', 'model' => env('AUTH_MODEL', App\Models\User::class)],
+                'members' => ['driver' => 'custom', 'model' => Member::class],
+                /* 'admins' => ['driver' => 'eloquent', 'model' => App\Models\Admin::class], */
+            ],
+        ];
+        PHP);
+
+    expect(code_index_auth_models($this->dir))->toBe([
+        'default' => ['App\Models\Member'],
+        'all' => ['App\Models\User', 'App\Models\Member'],
+    ]);
+});
+
+it('takes App\Models\User where the application has no auth configuration, and nothing where it has neither', function () {
+    expect(code_index_auth_models($this->dir))->toBe(['default' => [], 'all' => []]);
+
+    mkdir("{$this->dir}/app/Models", 0777, true);
+    file_put_contents("{$this->dir}/app/Models/User.php", "<?php\n\nnamespace App\\Models;\n\nclass User\n{\n}\n");
+
+    expect(code_index_auth_models($this->dir))->toBe(['default' => ['App\Models\User'], 'all' => ['App\Models\User']]);
+});
