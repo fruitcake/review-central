@@ -282,7 +282,7 @@ it('gives no reach when the team turned it off', function () {
         ->and($reach(['REVIEW_REACH' => 'false']))->toBe('');
 });
 
-it('builds the code index only for a change that touches a check, and goes by name when it cannot', function () {
+it('builds the code index only for a change to PHP in app/, and goes by name when it cannot', function () {
     ($this->git)('update-ref', 'refs/remotes/origin/main', 'main');
     File::put("{$this->dir}/review-context.json", json_encode(['settings' => ['stack' => ['laravel']], 'pull_request' => ['destination_branch' => 'main']]));
     // A curl that leaves a mark, and fails the download.
@@ -294,17 +294,26 @@ it('builds the code index only for a change that touches a check, and goes by na
         ->env(['REVIEW_CODE_INDEX' => 'true', 'HOME' => "{$this->dir}/home", 'PATH' => "{$this->dir}/bin:".getenv('PATH')])
         ->run(['sh', '-c', ". {$skill}/reviewer-env.sh; HERE={$skill}; reviewer_reach"])->throw();
 
-    // No check changed: nothing is installed or built.
-    ($this->put)('app/Services/PaymentService.php', str_replace('$lesson->createParticipant($member);', "\$lesson->createParticipant(\$member);\n        logger('paid');", File::get("{$this->dir}/app/Services/PaymentService.php")));
-    ($this->git)('commit', '-qam', 'Log payments');
+    // No PHP in app/ changed: nothing is installed or built.
+    ($this->put)('README.md', "Lessons\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Readme');
     $quiet = $reach();
 
     expect($quiet->output())->toBe('')
-        ->and($quiet->errorOutput())->toContain('Code index: not built, as the change touches no check.')
+        ->and($quiet->errorOutput())->toContain('Code index: not built, as the change touches no PHP in app/.')
         // Its own phase in the run's log, on stderr: stdout is the prompt.
         ->and($quiet->errorOutput())->toContain('##[phase] reach')
-        ->and($quiet->errorOutput())->toContain('Reach: the change adds or changes no check, so the reviewer gets no REACH.')
+        ->and($quiet->errorOutput())->toContain('Reach: nothing to say about this change, so the reviewer gets no REACH.')
         ->and(File::exists("{$this->dir}/curl-called"))->toBeFalse();
+
+    // PHP in app/ changed without a check: the index is wanted for the calls with more than one implementation.
+    ($this->put)('app/Services/PaymentService.php', str_replace('$lesson->createParticipant($member);', "\$lesson->createParticipant(\$member);\n        logger('paid');", File::get("{$this->dir}/app/Services/PaymentService.php")));
+    ($this->git)('commit', '-qam', 'Log payments');
+
+    expect($reach()->output())->toBe('')
+        ->and(File::exists("{$this->dir}/curl-called"))->toBeTrue();
+    File::delete("{$this->dir}/curl-called");
 
     // A check changed, and Mago cannot be had: the reach by name.
     ($this->put)('app/Models/Lesson.php', str_replace('return null;', "return \$this->invited(\$member) ? null : 'Not invited';", File::get("{$this->dir}/app/Models/Lesson.php")));
@@ -313,9 +322,199 @@ it('builds the code index only for a change that touches a check, and goes by na
 
     expect($byName->output())->toContain('by method name')
         // The log has what the reviewer got, line for line.
-        ->and($byName->errorOutput())->toContain('Reach: 1 check(s), 1 way(s) in listed; as the reviewer gets it:')
+        ->and($byName->errorOutput())->toContain('Reach: 1 check(s), 1 way(s) in listed, 0 call(s) with more than one implementation; as the reviewer gets it:')
         ->and($byName->errorOutput())->toContain('  |   - `app/Http/Controllers/PaymentController.php::pay`, through `createParticipant`')
         ->and(File::exists("{$this->dir}/curl-called"))->toBeTrue();
+});
+
+it('names, with the code index, the calls of a changed method that can land on more than one implementation', function () {
+    // The gateways are there before the change.
+    ($this->git)('checkout', '-q', 'main');
+    ($this->put)('app/Payments/Gateway.php', "<?php\n\ninterface Gateway\n{\n    public function refund(\$amount);\n}\n");
+    foreach (['Card', 'Cash'] as $kind) {
+        ($this->put)("app/Payments/{$kind}Gateway.php", "<?php\n\nclass {$kind}Gateway implements Gateway\n{\n    public static function init()\n    {\n        return new self;\n    }\n\n    public function charge(\$amount)\n    {\n    }\n\n    public function refund(\$amount)\n    {\n    }\n}\n");
+    }
+    ($this->put)('app/Payments/Receipt.php', "<?php\n\nclass Receipt\n{\n    public function print()\n    {\n    }\n}\n");
+    ($this->put)('app/Payments/Ledger.php', "<?php\n\nclass Ledger\n{\n    public function book(\$gateway)\n    {\n        \$gateway->refund(1);\n    }\n}\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Gateways');
+    ($this->git)('checkout', '-q', 'feature');
+    ($this->git)('rebase', '-q', 'main');
+    // The change charges through a factory that returns one gateway or the other, and books through a helper.
+    ($this->put)('app/Services/PaymentService.php', str_replace('$lesson->createParticipant($member);', "\$lesson->createParticipant(\$member);\n        Gateways::for(\$member)->charge(10);\n        (new Receipt)->print();\n        (new Ledger)->book(null);", File::get("{$this->dir}/app/Services/PaymentService.php")));
+    ($this->git)('commit', '-qam', 'Charge');
+
+    $index = "{$this->dir}/.index";
+    File::ensureDirectoryExists($index);
+    File::put("{$index}/edges.tsv", implode("\n", [
+        "paymentservice::pay\tlesson::createparticipant",
+        "paymentservice::pay\tcardgateway::charge",
+        "paymentservice::pay\tcashgateway::charge",
+        "paymentservice::pay\treceipt::print",
+        "paymentservice::pay\tledger::book",
+        "paymentservice::pay\tpaymentservice::\$table",
+        "ledger::book\tgateway::refund",
+    ])."\n");
+    File::put("{$index}/classes.tsv", implode("\n", [
+        "lesson\tapp/Models/Lesson.php", "paymentservice\tapp/Services/PaymentService.php",
+        "gateway\tapp/Payments/Gateway.php", "cardgateway\tapp/Payments/CardGateway.php",
+        "cashgateway\tapp/Payments/CashGateway.php", "receipt\tapp/Payments/Receipt.php", "ledger\tapp/Payments/Ledger.php",
+    ])."\n");
+    File::put("{$index}/ancestors.tsv", "cardgateway\tgateway\ncashgateway\tgateway\n");
+
+    $reach = Process::path($this->dir)->env(['REACH_INDEX' => $index])
+        ->run(['php', realpath(__DIR__.'/../../resources/review/skill/reach.php'), 'main', 'HEAD'])->throw()->output();
+
+    expect($reach)
+        ->toContain('REACH:')
+        // No check changed, so nothing about checks.
+        ->not->toContain('For each check this change adds or changes')
+        ->toContain('- `app/Services/PaymentService.php::pay`, which this change changes, calls `charge` on `CardGateway` (`app/Payments/CardGateway.php:10`) or `CashGateway` (`app/Payments/CashGateway.php:10`).')
+        // A call one step on, through an interface: the implementations, not the declaration without a body.
+        ->toContain('- `app/Payments/Ledger.php::book`, which the changed `pay` calls, calls `refund` on `CardGateway` (`app/Payments/CardGateway.php:14`) or `CashGateway` (`app/Payments/CashGateway.php:14`).')
+        ->not->toContain('`print`')
+        ->not->toContain('createParticipant');
+});
+
+it('tells separate calls of one name, inherited bodies, interfaces and parent:: apart', function () {
+    ($this->git)('checkout', '-q', 'main');
+    ($this->put)('app/Payments/Gateway.php', "<?php\n\ninterface Gateway\n{\n    public function refund(\$amount);\n}\n");
+    // Card runs the refund it inherits from a parent outside the interface; cash has its own.
+    ($this->put)('app/Payments/BaseGateway.php', "<?php\n\nclass BaseGateway\n{\n    public function refund(\$amount)\n    {\n    }\n}\n");
+    ($this->put)('app/Payments/CardGateway.php', "<?php\n\nclass CardGateway extends BaseGateway implements Gateway\n{\n    public function charge(\$amount)\n    {\n    }\n}\n");
+    ($this->put)('app/Payments/CashGateway.php', "<?php\n\nclass CashGateway implements Gateway\n{\n    public function charge(\$amount)\n    {\n    }\n\n    public function refund(\$amount)\n    {\n    }\n}\n");
+    ($this->put)('app/Payments/Processor.php', "<?php\n\ninterface Processor\n{\n    public function run();\n}\n");
+    ($this->put)('app/Payments/QueueProcessor.php', "<?php\n\nclass QueueProcessor implements Processor\n{\n    public function run()\n    {\n        Gateways::any()->charge(1);\n    }\n}\n");
+    ($this->put)('app/Payments/Step.php', "<?php\n\nclass Step\n{\n    public function run(Step \$next)\n    {\n    }\n}\n");
+    ($this->put)('app/Payments/LastStep.php', "<?php\n\nclass LastStep extends Step\n{\n    public function run(Step \$next)\n    {\n    }\n}\n");
+    ($this->put)('app/Payments/OnlyParentStep.php', "<?php\n\nclass OnlyParentStep extends Step\n{\n    public function run(Step \$next)\n    {\n    }\n}\n");
+    // A sibling's override never runs for $this.
+    ($this->put)('app/Payments/BaseReport.php', "<?php\n\nclass BaseReport\n{\n    public function respond()\n    {\n    }\n}\n");
+    ($this->put)('app/Payments/DayReport.php', "<?php\n\nclass DayReport extends BaseReport\n{\n    public function show()\n    {\n    }\n}\n");
+    ($this->put)('app/Payments/WeekReport.php', "<?php\n\nclass WeekReport extends BaseReport\n{\n    public function respond()\n    {\n    }\n}\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Payments');
+    ($this->git)('checkout', '-q', 'feature');
+    ($this->git)('rebase', '-q', 'main');
+
+    // The change: two separate charges, a refund through the interface, a processor
+    // through its interface, and two overrides, one of which calls only parent::run().
+    ($this->put)('app/Services/PaymentService.php', str_replace('$lesson->createParticipant($member);', "\$lesson->createParticipant(\$member);\n        \$card->charge(1);\n        \$cash->charge(2);\n        \$gateway->refund(3);\n        \$processor->run();", File::get("{$this->dir}/app/Services/PaymentService.php")));
+    ($this->put)('app/Payments/LastStep.php', "<?php\n\nclass LastStep extends Step\n{\n    public function run(Step \$next)\n    {\n        parent::run(\$next);\n        \$next->run(\$this);\n    }\n}\n");
+    ($this->put)('app/Payments/OnlyParentStep.php', "<?php\n\nclass OnlyParentStep extends Step\n{\n    public function run(Step \$next)\n    {\n        parent::run(\$next);\n    }\n}\n");
+    ($this->put)('app/Payments/DayReport.php', "<?php\n\nclass DayReport extends BaseReport\n{\n    public function show()\n    {\n        return \$this->respond();\n    }\n}\n");
+    ($this->git)('commit', '-qam', 'Pay');
+
+    $index = "{$this->dir}/.index";
+    File::ensureDirectoryExists($index);
+    File::put("{$index}/edges.tsv", implode("\n", [
+        "paymentservice::pay\tcardgateway::charge",
+        "paymentservice::pay\tcashgateway::charge",
+        "paymentservice::pay\tgateway::refund",
+        "paymentservice::pay\tprocessor::run",
+        "queueprocessor::run\tcardgateway::charge",
+        "queueprocessor::run\tcashgateway::charge",
+        "laststep::run\tstep::run",
+        "onlyparentstep::run\tstep::run",
+        "dayreport::show\tbasereport::respond",
+    ])."\n");
+    File::put("{$index}/classes.tsv", implode("\n", array_map(
+        fn (string $class): string => strtolower($class)."\tapp/Payments/{$class}.php",
+        ['Gateway', 'BaseGateway', 'CardGateway', 'CashGateway', 'Processor', 'QueueProcessor', 'Step', 'LastStep', 'OnlyParentStep', 'BaseReport', 'DayReport', 'WeekReport'],
+    ))."\npaymentservice\tapp/Services/PaymentService.php\n");
+    File::put("{$index}/ancestors.tsv", "cardgateway\tbasegateway\ncardgateway\tgateway\ncashgateway\tgateway\nqueueprocessor\tprocessor\nlaststep\tstep\nonlyparentstep\tstep\ndayreport\tbasereport\nweekreport\tbasereport\n");
+
+    $reach = Process::path($this->dir)->env(['REACH_INDEX' => $index])
+        ->run(['php', realpath(__DIR__.'/../../resources/review/skill/reach.php'), 'main', 'HEAD'])->throw()->output();
+
+    expect($reach)
+        // Two calls of one name are not one call that can run either.
+        ->not->toContain('PaymentService.php::pay`, which this change changes, calls `charge`')
+        // The body a class inherits counts, from a parent outside the interface.
+        ->toContain('calls `refund` on `BaseGateway` (`app/Payments/BaseGateway.php:5`, as `CardGateway`) or `CashGateway` (`app/Payments/CashGateway.php:9`).')
+        // Through an interface on into the body that runs.
+        ->toContain('- `app/Payments/QueueProcessor.php::run`, which the changed `pay` calls, calls `charge` on `CardGateway`')
+        // A call on another object of the parent's type is no parent:: call; parent:: alone is.
+        ->toContain('- `app/Payments/LastStep.php::run`, which this change changes, calls `run` on `LastStep` (`app/Payments/LastStep.php:5`) or `OnlyParentStep` (`app/Payments/OnlyParentStep.php:5`) or `Step` (`app/Payments/Step.php:5`).')
+        ->not->toContain('OnlyParentStep.php::run`, which this change changes')
+        ->not->toContain('calls `respond`');
+});
+
+it('follows each body with the classes that run it, magic methods included, and counts no call in a comment', function () {
+    $class = fn (string $name, string $body, string $extends = ''): string => "<?php\n\nclass {$name}{$extends}\n{\n{$body}}\n";
+    $method = fn (string $signature, string $code = ''): string => "    public function {$signature}\n    {\n".($code === '' ? '' : "        {$code}\n")."    }\n";
+    $files = [
+        'Gateway' => "<?php\n\ninterface Gateway\n{\n}\n",
+        'CardGateway' => $class('CardGateway', $method('charge($amount)').$method('settle($amount)')),
+        'CashGateway' => $class('CashGateway', $method('charge($amount)').$method('settle($amount)')),
+        'BaseStep' => $class('BaseStep', $method('run()')),
+        // A sibling override that charges: it never runs for the child's parent::run().
+        'SiblingStep' => $class('SiblingStep', $method('run()', 'Gateways::any()->charge(1);'), ' extends BaseStep'),
+        'ChildStep' => $class('ChildStep', $method('run()'), ' extends BaseStep'),
+        'Processor' => "<?php\n\ninterface Processor\n{\n    public function run();\n}\n",
+        // The processor's run is inherited, and $this in it is a CardRunner: OtherRunner's respond never runs.
+        'BaseRunner' => $class('BaseRunner', $method('run()', '$this->respond();').$method('respond()')),
+        'CardRunner' => $class('CardRunner', '', ' extends BaseRunner implements Processor'),
+        'OtherRunner' => $class('OtherRunner', $method('respond()'), ' extends BaseRunner'),
+        'Runner' => $class('Runner', $method('__invoke()', 'Gateways::any()->settle(1);')),
+        'PayDesk' => $class('PayDesk', $method('pay(Processor $processor, Runner $runner)')),
+        // Two interfaces, one call: both runners share the base's run, each with its own reply.
+        'Sender' => "<?php\n\ninterface Sender\n{\n    public function run();\n}\n",
+        'Mailer' => "<?php\n\ninterface Mailer\n{\n    public function run();\n}\n",
+        'BaseSender' => $class('BaseSender', $method('run()', '$this->reply();')),
+        'MailSender' => $class('MailSender', $method('reply()'), ' extends BaseSender implements Sender'),
+        'TextSender' => $class('TextSender', $method('reply()'), ' extends BaseSender implements Mailer'),
+        'Outbox' => $class('Outbox', $method('send($sender)')),
+        'Refunder' => $class('Refunder', $method('refund()')),
+    ];
+    ($this->git)('checkout', '-q', 'main');
+    foreach ($files as $name => $text) {
+        ($this->put)("app/Desk/{$name}.php", $text);
+    }
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Desk');
+    ($this->git)('checkout', '-q', 'feature');
+    ($this->git)('rebase', '-q', 'main');
+    ($this->put)('app/Desk/ChildStep.php', $class('ChildStep', $method('run()', 'parent::run();'), ' extends BaseStep'));
+    ($this->put)('app/Desk/PayDesk.php', $class('PayDesk', $method('pay(Processor $processor, Runner $runner)', "\$processor->run();\n        \$runner();")));
+    ($this->put)('app/Desk/Outbox.php', $class('Outbox', $method('send($sender)', '$sender->run();')));
+    ($this->put)('app/Desk/Refunder.php', $class('Refunder', $method('refund()', "// \$gateway->charge(1) was the old way\n        Gateways::any()->charge(2);")));
+    ($this->git)('commit', '-qam', 'Desk changes');
+
+    $index = "{$this->dir}/.index";
+    File::ensureDirectoryExists($index);
+    File::put("{$index}/edges.tsv", implode("\n", [
+        "childstep::run\tbasestep::run",
+        "siblingstep::run\tcardgateway::charge",
+        "siblingstep::run\tcashgateway::charge",
+        "paydesk::pay\tprocessor::run",
+        "paydesk::pay\trunner::__invoke",
+        "baserunner::run\tbaserunner::respond",
+        "runner::__invoke\tcardgateway::settle",
+        "runner::__invoke\tcashgateway::settle",
+        "outbox::send\tsender::run",
+        "outbox::send\tmailer::run",
+        "basesender::run\tbasesender::reply",
+        "refunder::refund\tcardgateway::charge",
+        "refunder::refund\tcashgateway::charge",
+    ])."\n");
+    File::put("{$index}/classes.tsv", implode("\n", array_map(fn (string $name): string => strtolower($name)."\tapp/Desk/{$name}.php", array_keys($files)))."\n");
+    File::put("{$index}/ancestors.tsv", "siblingstep\tbasestep\nchildstep\tbasestep\ncardrunner\tbaserunner\ncardrunner\tprocessor\notherrunner\tbaserunner\nmailsender\tbasesender\nmailsender\tsender\ntextsender\tbasesender\ntextsender\tmailer\n");
+
+    $reach = Process::path($this->dir)->env(['REACH_INDEX' => $index])
+        ->run(['php', realpath(__DIR__.'/../../resources/review/skill/reach.php'), 'main', 'HEAD'])->throw()->output();
+
+    expect($reach)
+        // parent::run() runs the parent's body, so the sibling's charge is not reached.
+        ->not->toContain('SiblingStep')
+        // $this in the inherited run is a CardRunner, which runs BaseRunner's respond only.
+        ->not->toContain('`respond`')
+        // Through __invoke into its body.
+        ->toContain('- `app/Desk/Runner.php::__invoke`, which the changed `pay` calls, calls `settle` on `CardGateway`')
+        // A body two targets of one call share runs for the classes of both.
+        ->toContain('- `app/Desk/BaseSender.php::run`, which the changed `send` calls, calls `reply` on `MailSender` (`app/Desk/MailSender.php:5`) or `TextSender` (`app/Desk/TextSender.php:5`).')
+        // A call in a comment is no second call.
+        ->toContain('- `app/Desk/Refunder.php::refund`, which this change changes, calls `charge` on `CardGateway`');
 });
 
 it('takes a policy\'s methods, and a method a changed line guards, as checks', function () {
@@ -513,7 +712,8 @@ it('names, with the code index, the ways in that add to the models a changed che
         // The parent's update runs the form for this class only, and the form is no way in itself.
         ->toContain('- `app/Http/Controllers/GroupController.php::update`, through `handleForm`, with `AllowedMember::create()` at `app/Http/Controllers/GroupController.php:11`')
         ->not->toContain('InvoiceController')
-        ->not->toContain('CrudController.php::update')
+        ->not->toContain('CrudController.php::update`, through')
+        ->not->toContain('CrudController.php::update`, with')
         ->not->toContain('GroupController.php::handleForm`,')
         ->not->toContain('JoinController.php::store`, with');
 });
