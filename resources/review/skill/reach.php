@@ -856,15 +856,61 @@ if (strlen($text) > BUDGET) {
 }
 
 /**
- * The methods of a class and of its subclasses in app/ that a call to the class's
- * method can run, with where each is written. A declaration without a body (an
- * interface's, an abstract one) runs nothing of its own.
+ * The body a class runs for a method: its own, else one of the traits it uses, else
+ * its nearest parent's, in app/. A declaration without a body (an interface's, an
+ * abstract one) runs nothing of its own.
  *
- * @return array<string, array{class: string, file: string, line: int, name: string}>
+ * @return array{class: string, file: string, line: int, name: string}|null
+ */
+$effectiveBody = function (string $class, string $method, int $depth = 0) use (&$indexed, &$effectiveBody, $functions): ?array {
+    $file = $indexed['files'][$class] ?? null;
+
+    if ($file === null || ! str_starts_with($file, 'app/') || $depth > 8) {
+        return null;
+    }
+
+    foreach ($functions($file) as $function) {
+        if (strtolower($function['name']) === $method) {
+            return ['class' => $class, 'file' => $file, 'line' => $function['start'], 'name' => $function['name']];
+        }
+    }
+
+    // The traits the class body uses, then the parents, nearest first.
+    $source = (string) @file_get_contents($file);
+    [$namespace, $uses] = code_index_imports($source);
+    preg_match_all('/^\s*use\s+([\w\\\\,\s]+);/m', substr($source, (int) strpos($source, '{')), $traits);
+    $from = [];
+
+    foreach (preg_split('/\s*,\s*/', implode(',', $traits[1])) ?: [] as $trait) {
+        if (trim($trait) !== '') {
+            $from[] = strtolower(code_index_resolve(trim($trait), $namespace, $uses, ''));
+        }
+    }
+
+    foreach ([...$from, ...($indexed['ancestors'][$class] ?? [])] as $declarer) {
+        $found = $effectiveBody($declarer, $method, $depth + 1);
+
+        if ($found !== null) {
+            return $found;
+        }
+    }
+
+    return null;
+};
+
+/**
+ * The bodies a call to a class's method can run: the class's own and each of its
+ * subclasses' in app/, an inherited or a trait's body counted once, by where it is
+ * written, with the classes that run it. From a class of the caller's own, for a
+ * call on $this.
+ *
+ * @return array<string, array{class: string, file: string, line: int, name: string, for: list<string>}>
  */
 $descendants = null;
-$implementationsOf = function (string $target) use (&$indexed, &$descendants, $functions): array {
+$implementationsOf = function (string $target, ?string $from = null) use (&$indexed, &$descendants, $effectiveBody): array {
     [$class, $method] = explode('::', $target, 2);
+    // A call on $this runs this class's body or a subclass's, never a sibling's.
+    $class = $from ?? $class;
 
     if (str_starts_with($method, '$') || str_starts_with($method, '__')) {
         return [];
@@ -882,23 +928,34 @@ $implementationsOf = function (string $target) use (&$indexed, &$descendants, $f
 
     $found = [];
 
-    foreach ([$class, ...($descendants[$class] ?? [])] as $candidate) {
-        $file = $indexed['files'][$candidate] ?? null;
+    foreach (array_unique([$class, ...($descendants[$class] ?? [])]) as $candidate) {
+        $body = $effectiveBody($candidate, $method);
 
-        if ($file === null || ! str_starts_with($file, 'app/')) {
-            continue;
-        }
-
-        foreach ($functions($file) as $function) {
-            if (strtolower($function['name']) === $method) {
-                $found[$candidate] = ['class' => $candidate, 'file' => $file, 'line' => $function['start'], 'name' => $function['name']];
-
-                break;
-            }
+        if ($body !== null) {
+            $found["{$body['file']}:{$body['line']}"] ??= $body + ['for' => []];
+            $found["{$body['file']}:{$body['line']}"]['for'][] = $candidate;
         }
     }
 
     return $found;
+};
+
+/**
+ * How often a method's body calls a method by name, not counting parent::, which runs
+ * the parent's own; and how many of those are on $this, self:: or static::.
+ *
+ * @return array{0: int, 1: int}|null
+ */
+$callSites = function (string $symbol, string $method) use (&$indexed, $bodyOf): ?array {
+    [$class, $name] = explode('::', $symbol, 2);
+    $file = $indexed['files'][$class] ?? null;
+    $body = $file === null ? null : $bodyOf($file, $name);
+    $called = preg_quote($method, '/').'\s*\(';
+
+    return $body === null ? null : [
+        preg_match_all('/(?:->|(?<!parent)::)\s*'.$called.'/i', $body['text']),
+        preg_match_all('/(?:\$this\s*(?:\?->|->)|\b(?:self|static)::)\s*'.$called.'/i', $body['text']),
+    ];
 };
 
 // With the index: the calls from the changed methods, and from what they call, that can
@@ -914,7 +971,7 @@ if ($indexed !== null) {
         $class = $fullClassOf($method['file']);
 
         if ($class !== null) {
-            $queue[] = ["{$class}::".strtolower($method['name']), 0, $key, null];
+            $queue[] = ["{$class}::".strtolower($method['name']), 0, $key];
         }
     }
 
@@ -922,60 +979,62 @@ if ($indexed !== null) {
     $reported = [];
 
     while ($queue !== [] && count($several) < IMPLEMENTATIONS_LISTED) {
-        [$source, $depth, $changedKey, $written] = array_shift($queue);
+        [$source, $depth, $changedKey] = array_shift($queue);
 
         if (isset($seen[$source])) {
             continue;
         }
 
         $seen[$source] = true;
-        [$sourceClass, $sourceMethod] = explode('::', $source, 2);
         $byMethod = [];
 
+        $sourceClass = explode('::', $source, 2)[0];
+
         foreach (array_keys($indexed['calls'][$source] ?? []) as $target) {
-            [$targetClass, $targetMethod] = explode('::', $target, 2);
+            [$targetClass, $method] = explode('::', $target, 2);
+            [$sites, $onThis] = $callSites($source, $method) ?? [0, 0];
+            $own = $sites > 0 && $sites === $onThis && in_array($targetClass, $indexed['ancestors'][$sourceClass] ?? [], true);
+            $implementations = $implementationsOf($target, $own ? $sourceClass : null);
+            $byMethod[$method] = ($byMethod[$method] ?? []) + $implementations;
 
-            // parent::method() runs the parent's own, not every subclass's.
-            if ($targetMethod === $sourceMethod && in_array($targetClass, $indexed['ancestors'][$sourceClass] ?? [], true)) {
-                continue;
-            }
-
-            $byMethod[$targetMethod] = ($byMethod[$targetMethod] ?? []) + $implementationsOf($target);
-
-            if ($depth + 1 < IMPLEMENTATION_DEPTH && ! str_starts_with($targetMethod, '$') && str_starts_with($indexed['files'][$targetClass] ?? '', 'app/')) {
-                $queue[] = [$target, $depth + 1, $changedKey, $target];
+            // On into the bodies that run, not an interface's declaration, which has none.
+            if ($depth + 1 < IMPLEMENTATION_DEPTH) {
+                foreach ($implementations as $implementation) {
+                    $queue[] = ["{$implementation['class']}::{$method}", $depth + 1, $changedKey];
+                }
             }
         }
 
-        foreach ($byMethod as $implementations) {
-            if (count($implementations) < 2 || count($implementations) > IMPLEMENTATIONS) {
+        foreach ($byMethod as $method => $implementations) {
+            // The index tells calls by their method, not their place: only a method the source
+            // calls once is one call that runs one of these, and not separate calls of one name.
+            if (($callSites($source, $method) ?? [0])[0] !== 1 || count($implementations) < 2 || count($implementations) > IMPLEMENTATIONS) {
                 continue;
             }
 
             ksort($implementations);
-            $same = implode('|', array_keys($implementations)).'::'.reset($implementations)['name'];
+            $name = reset($implementations)['name'];
+            $same = implode('|', array_keys($implementations)).'::'.$name;
 
             if (isset($reported[$same]) || count($several) >= IMPLEMENTATIONS_LISTED) {
                 continue;
             }
 
             $reported[$same] = true;
-            $where = implode(' or ', array_map(fn (array $one): string => "`{$writtenClass($one['class'])}` (`{$one['file']}:{$one['line']}`)", $implementations));
-            $name = reset($implementations)['name'];
-            $caller = $written === null ? "`{$changedKey}`, which this change changes," : (function () use ($written, $indexed, $functions, $changed, $changedKey): string {
-                [$class, $method] = explode('::', $written, 2);
+            $where = implode(' or ', array_map(function (array $one) use ($writtenClass): string {
+                $for = array_diff($one['for'], [$one['class']]);
+
+                return "`{$writtenClass($one['class'])}` (`{$one['file']}:{$one['line']}`".($for === [] || in_array($one['class'], $one['for'], true) ? '' : ', as `'.implode('`, `', array_map($writtenClass, $for)).'`').')';
+            }, $implementations));
+
+            if ($depth === 0) {
+                $caller = "`{$changedKey}`, which this change changes,";
+            } else {
+                [$class, $own] = explode('::', $source, 2);
                 $file = $indexed['files'][$class];
+                $caller = "`{$file}::".($bodyOf($file, $own)['name'] ?? $own)."`, which the changed `{$changed[$changedKey]['name']}` calls,";
+            }
 
-                foreach ($functions($file) as $function) {
-                    if (strtolower($function['name']) === $method) {
-                        $method = $function['name'];
-
-                        break;
-                    }
-                }
-
-                return "`{$file}::{$method}`, which the changed `".$changed[$changedKey]['name'].'` calls,';
-            })();
             $several[] = "- {$caller} calls `{$name}` on {$where}.";
         }
     }

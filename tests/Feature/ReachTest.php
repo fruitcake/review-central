@@ -376,6 +376,70 @@ it('names, with the code index, the calls of a changed method that can land on m
         ->not->toContain('createParticipant');
 });
 
+it('tells separate calls of one name, inherited bodies, interfaces and parent:: apart', function () {
+    ($this->git)('checkout', '-q', 'main');
+    ($this->put)('app/Payments/Gateway.php', "<?php\n\ninterface Gateway\n{\n    public function refund(\$amount);\n}\n");
+    // Card runs the refund it inherits from a parent outside the interface; cash has its own.
+    ($this->put)('app/Payments/BaseGateway.php', "<?php\n\nclass BaseGateway\n{\n    public function refund(\$amount)\n    {\n    }\n}\n");
+    ($this->put)('app/Payments/CardGateway.php', "<?php\n\nclass CardGateway extends BaseGateway implements Gateway\n{\n    public function charge(\$amount)\n    {\n    }\n}\n");
+    ($this->put)('app/Payments/CashGateway.php', "<?php\n\nclass CashGateway implements Gateway\n{\n    public function charge(\$amount)\n    {\n    }\n\n    public function refund(\$amount)\n    {\n    }\n}\n");
+    ($this->put)('app/Payments/Processor.php', "<?php\n\ninterface Processor\n{\n    public function run();\n}\n");
+    ($this->put)('app/Payments/QueueProcessor.php', "<?php\n\nclass QueueProcessor implements Processor\n{\n    public function run()\n    {\n        Gateways::any()->charge(1);\n    }\n}\n");
+    ($this->put)('app/Payments/Step.php', "<?php\n\nclass Step\n{\n    public function run(Step \$next)\n    {\n    }\n}\n");
+    ($this->put)('app/Payments/LastStep.php', "<?php\n\nclass LastStep extends Step\n{\n    public function run(Step \$next)\n    {\n    }\n}\n");
+    ($this->put)('app/Payments/OnlyParentStep.php', "<?php\n\nclass OnlyParentStep extends Step\n{\n    public function run(Step \$next)\n    {\n    }\n}\n");
+    // A sibling's override never runs for $this.
+    ($this->put)('app/Payments/BaseReport.php', "<?php\n\nclass BaseReport\n{\n    public function respond()\n    {\n    }\n}\n");
+    ($this->put)('app/Payments/DayReport.php', "<?php\n\nclass DayReport extends BaseReport\n{\n    public function show()\n    {\n    }\n}\n");
+    ($this->put)('app/Payments/WeekReport.php', "<?php\n\nclass WeekReport extends BaseReport\n{\n    public function respond()\n    {\n    }\n}\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Payments');
+    ($this->git)('checkout', '-q', 'feature');
+    ($this->git)('rebase', '-q', 'main');
+
+    // The change: two separate charges, a refund through the interface, a processor
+    // through its interface, and two overrides, one of which calls only parent::run().
+    ($this->put)('app/Services/PaymentService.php', str_replace('$lesson->createParticipant($member);', "\$lesson->createParticipant(\$member);\n        \$card->charge(1);\n        \$cash->charge(2);\n        \$gateway->refund(3);\n        \$processor->run();", File::get("{$this->dir}/app/Services/PaymentService.php")));
+    ($this->put)('app/Payments/LastStep.php', "<?php\n\nclass LastStep extends Step\n{\n    public function run(Step \$next)\n    {\n        parent::run(\$next);\n        \$next->run(\$this);\n    }\n}\n");
+    ($this->put)('app/Payments/OnlyParentStep.php', "<?php\n\nclass OnlyParentStep extends Step\n{\n    public function run(Step \$next)\n    {\n        parent::run(\$next);\n    }\n}\n");
+    ($this->put)('app/Payments/DayReport.php', "<?php\n\nclass DayReport extends BaseReport\n{\n    public function show()\n    {\n        return \$this->respond();\n    }\n}\n");
+    ($this->git)('commit', '-qam', 'Pay');
+
+    $index = "{$this->dir}/.index";
+    File::ensureDirectoryExists($index);
+    File::put("{$index}/edges.tsv", implode("\n", [
+        "paymentservice::pay\tcardgateway::charge",
+        "paymentservice::pay\tcashgateway::charge",
+        "paymentservice::pay\tgateway::refund",
+        "paymentservice::pay\tprocessor::run",
+        "queueprocessor::run\tcardgateway::charge",
+        "queueprocessor::run\tcashgateway::charge",
+        "laststep::run\tstep::run",
+        "onlyparentstep::run\tstep::run",
+        "dayreport::show\tbasereport::respond",
+    ])."\n");
+    File::put("{$index}/classes.tsv", implode("\n", array_map(
+        fn (string $class): string => strtolower($class)."\tapp/Payments/{$class}.php",
+        ['Gateway', 'BaseGateway', 'CardGateway', 'CashGateway', 'Processor', 'QueueProcessor', 'Step', 'LastStep', 'OnlyParentStep', 'BaseReport', 'DayReport', 'WeekReport'],
+    ))."\npaymentservice\tapp/Services/PaymentService.php\n");
+    File::put("{$index}/ancestors.tsv", "cardgateway\tbasegateway\ncardgateway\tgateway\ncashgateway\tgateway\nqueueprocessor\tprocessor\nlaststep\tstep\nonlyparentstep\tstep\ndayreport\tbasereport\nweekreport\tbasereport\n");
+
+    $reach = Process::path($this->dir)->env(['REACH_INDEX' => $index])
+        ->run(['php', realpath(__DIR__.'/../../resources/review/skill/reach.php'), 'main', 'HEAD'])->throw()->output();
+
+    expect($reach)
+        // Two calls of one name are not one call that can run either.
+        ->not->toContain('PaymentService.php::pay`, which this change changes, calls `charge`')
+        // The body a class inherits counts, from a parent outside the interface.
+        ->toContain('calls `refund` on `BaseGateway` (`app/Payments/BaseGateway.php:5`, as `CardGateway`) or `CashGateway` (`app/Payments/CashGateway.php:9`).')
+        // Through an interface on into the body that runs.
+        ->toContain('- `app/Payments/QueueProcessor.php::run`, which the changed `pay` calls, calls `charge` on `CardGateway`')
+        // A call on another object of the parent's type is no parent:: call; parent:: alone is.
+        ->toContain('- `app/Payments/LastStep.php::run`, which this change changes, calls `run` on `LastStep` (`app/Payments/LastStep.php:5`) or `OnlyParentStep` (`app/Payments/OnlyParentStep.php:5`) or `Step` (`app/Payments/Step.php:5`).')
+        ->not->toContain('OnlyParentStep.php::run`, which this change changes')
+        ->not->toContain('calls `respond`');
+});
+
 it('takes a policy\'s methods, and a method a changed line guards, as checks', function () {
     ($this->put)('app/Policies/LessonPolicy.php', "<?php\n\nclass LessonPolicy\n{\n    public function book(\$user, Lesson \$lesson)\n    {\n        return true;\n    }\n}\n");
     ($this->put)('app/Http/Controllers/LessonController.php', <<<'PHP'
