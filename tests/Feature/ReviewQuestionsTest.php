@@ -591,6 +591,53 @@ it('gives the question vendor/ from what the review keeps, installing without th
     File::deleteDirectory($dir);
 });
 
+it('installs no binary where the pull request\'s composer.json points, such as over the reviewer\'s CLI', function () {
+    $dir = storage_path('framework/testing/question-bin-dir');
+    File::deleteDirectory($dir);
+    // A package with a binary named claude, and a project that puts binaries and
+    // packages beside the reviewer's CLI.
+    File::ensureDirectoryExists("{$dir}/work/pkg");
+    File::ensureDirectoryExists("{$dir}/home/.local/bin");
+    File::put("{$dir}/work/pkg/composer.json", json_encode(['name' => 'evil/pkg', 'version' => '1.0.0', 'bin' => ['claude']]));
+    File::put("{$dir}/work/pkg/claude", "#!/bin/sh\necho stolen\n");
+    File::put("{$dir}/work/composer.json", json_encode([
+        'repositories' => [['type' => 'path', 'url' => 'pkg', 'options' => ['symlink' => false]], ['packagist.org' => false]],
+        'require' => ['evil/pkg' => '1.0.0'],
+        'config' => ['bin-dir' => "{$dir}/home/.local/bin", 'vendor-dir' => "{$dir}/home/.local/vendor"],
+    ]));
+    Process::path("{$dir}/work")->run(['git', 'init', '-q'])->throw();
+    $skill = realpath(__DIR__.'/../../resources/review/skill');
+
+    Process::path("{$dir}/work")->env(['HOME' => "{$dir}/home", 'COMPOSER_HOME' => "{$dir}/composer"])
+        ->timeout(120)->run(['sh', '-c', ". {$skill}/reviewer-env.sh; reviewer_vendor"])->throw();
+
+    expect(File::exists("{$dir}/home/.local/bin/claude"))->toBeFalse()
+        ->and(File::exists("{$dir}/home/.local/vendor"))->toBeFalse()
+        ->and(File::exists("{$dir}/work/vendor/evil/pkg/claude"))->toBeTrue();
+
+    File::deleteDirectory($dir);
+});
+
+it('installs the rest of vendor/ for a repository that commits part of it', function () {
+    $dir = storage_path('framework/testing/question-committed-vendor');
+    File::deleteDirectory($dir);
+    File::ensureDirectoryExists("{$dir}/work/vendor/own");
+    File::ensureDirectoryExists("{$dir}/bin");
+    File::put("{$dir}/work/vendor/own/Patch.php", '<?php');
+    File::put("{$dir}/work/composer.json", '{}');
+    File::put("{$dir}/bin/composer", "#!/bin/sh\necho \"composer \$*\" > \"{$dir}/composer-called\"\n");
+    chmod("{$dir}/bin/composer", 0755);
+    Process::path("{$dir}/work")->run(['sh', '-c', 'git init -q && git add -A && git -c user.name=t -c user.email=t@example.com commit -qm vendor'])->throw();
+    $skill = realpath(__DIR__.'/../../resources/review/skill');
+
+    Process::path("{$dir}/work")->env(['PATH' => "{$dir}/bin:".getenv('PATH')])
+        ->run(['sh', '-c', ". {$skill}/reviewer-env.sh; reviewer_vendor"])->throw();
+
+    expect(File::get("{$dir}/composer-called"))->toContain('install');
+
+    File::deleteDirectory($dir);
+});
+
 it('lets an answer search the web, and never fetch a page, only where the team allows it', function (bool $allowed) {
     $dir = storage_path('framework/testing/review-work/answer-search');
     File::deleteDirectory($dir);

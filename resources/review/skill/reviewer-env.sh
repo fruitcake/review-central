@@ -209,9 +209,12 @@ reviewer_php() {
 # install leaves the step to read without it. Run in the checkout.
 reviewer_vendor() {
   [ -f composer.json ] || return 0
-  [ -d vendor ] && [ ! -L vendor ] && return 0
+  # A vendor/ that is a symlink is the pull request's, and could point anywhere.
+  [ -L vendor ] && rm -f vendor
   if [ -n "$(git ls-files vendor 2> /dev/null | head -n 1)" ]; then
     echo "This repository commits files under vendor/; installing the rest."
+  elif [ -d vendor ]; then
+    echo "vendor/ is there already; Composer brings it in line with this lock."
   elif [ -n "${REVIEW_VENDOR_BASE:-}" ] && [ -f "$REVIEW_VENDOR_BASE" ] && tar -xf "$REVIEW_VENDOR_BASE" vendor 2> /dev/null; then
     echo "vendor/ of the destination branch unpacked; Composer installs what this branch changes."
   elif [ -n "${COMPOSER_CACHE_DIR:-}" ] && [ -f composer.lock ]; then
@@ -219,7 +222,8 @@ reviewer_vendor() {
     [ -f "$_tar" ] && tar -xf "$_tar" vendor 2> /dev/null && echo "vendor/ unpacked from the cache for this composer.lock."
   fi
   command -v composer > /dev/null 2>&1 || { echo "No Composer here, so vendor/ is not installed."; return 0; }
-  composer install --no-interaction --no-progress --prefer-dist --no-dev --no-scripts --no-plugins --ignore-platform-reqs --quiet \
+  # Where the step says, never where composer.json says: see prepare-review.sh.
+  COMPOSER_VENDOR_DIR=vendor COMPOSER_BIN_DIR=vendor/bin composer install --no-interaction --no-progress --prefer-dist --no-dev --no-scripts --no-plugins --ignore-platform-reqs --quiet \
     || echo "composer install failed, so vendor/ is incomplete."
   unset COMPOSER_AUTH
   return 0
@@ -298,7 +302,9 @@ reviewer_code_index() {
   _tools=$(reviewer_mago "$_php") || { echo "Code index: Mago could not be installed; REACH goes by name." >&2; return 0; }
   # Without vendor/ a model is known by its base class's name only; with it, by its types.
   if [ -f composer.lock ] && [ ! -d vendor ]; then
-    timeout 600 composer install --no-interaction --quiet --no-progress --no-scripts --no-plugins --no-autoloader --ignore-platform-reqs >&2 \
+    [ -L vendor ] && rm -f vendor
+    # Where the step says, never where composer.json says: see prepare-review.sh.
+    COMPOSER_VENDOR_DIR=vendor COMPOSER_BIN_DIR=vendor/bin timeout 600 composer install --no-interaction --quiet --no-progress --no-scripts --no-plugins --no-autoloader --ignore-platform-reqs >&2 \
       || echo "Code index: composer install failed; indexing without vendor/." >&2
   fi
   _dir=$(mktemp -d)
