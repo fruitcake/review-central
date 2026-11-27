@@ -567,6 +567,11 @@ final class ReachRouteReader
     {
         $controller = ltrim((string) ($attributes['controller'] ?? $context['controller']), "\0");
 
+        // The older form: ['uses' => 'Controller@method', 'as' => 'name'].
+        if (is_array($action) && is_string($action['uses'] ?? null)) {
+            return $this->action($action['uses'], $context, $attributes);
+        }
+
         if (is_array($action) && isset($action[0], $action[1]) && is_string($action[0]) && is_string($action[1])) {
             return strtolower($this->className($action[0], $context, $attributes).'::'.$action[1]);
         }

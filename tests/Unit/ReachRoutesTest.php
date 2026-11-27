@@ -76,6 +76,7 @@ it('reads the routes the files bootstrap/app.php loads, with their groups\' midd
         Route::group(['namespace' => 'App\Http\Controllers\Admin', 'prefix' => 'admin', 'middleware' => 'auth'], function () {
             Route::get('reports', 'ReportController@index');
             Route::get('stats', 'StatsController');
+            Route::get('exports', ['uses' => 'ReportController@export', 'as' => 'reports.export']);
             Route::get('quotes', '\App\Http\Controllers\Sign\QuoteController@create');
         });
 
@@ -92,6 +93,7 @@ it('reads the routes the files bootstrap/app.php loads, with their groups\' midd
         'POST /groups/{group}/close app\http\controllers\groupcontroller::close' => ['web', 'App\Http\Middleware\AuthenticateClub', 'can:manage'],
         'GET|HEAD /admin/reports app\http\controllers\admin\reportcontroller::index' => ['web', 'auth'],
         'GET|HEAD /admin/stats app\http\controllers\admin\statscontroller::__invoke' => ['web', 'auth'],
+        'GET|HEAD /admin/exports app\http\controllers\admin\reportcontroller::export' => ['web', 'auth'],
         'GET|HEAD /admin/quotes app\http\controllers\sign\quotecontroller::create' => ['web', 'auth'],
         'GET|HEAD /health app\http\controllers\healthcontroller::__invoke' => ['web'],
         'POST /api/lessons/{lesson}/book app\http\controllers\api\lessoncontroller::book' => ['api', 'auth:sanctum'],
