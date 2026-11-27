@@ -37,6 +37,20 @@ it('replaces each key by a placeholder for its host, its gateway\'s where it has
         ]);
 });
 
+it('gives the OpenAI key to the ChatGPT backend for the Codex model list only, and not through a gateway', function () {
+    $direct = ProviderKeys::proxied(['OPENAI_API_KEY' => 'sk-proj-SECRETSECRETSECRET']);
+    $placeholder = $direct['environment']['OPENAI_API_KEY'];
+
+    expect($direct['credentials'])->toBe([
+        ['host' => 'api.openai.com', 'placeholder' => $placeholder, 'value' => 'sk-proj-SECRETSECRETSECRET'],
+        ['host' => 'chatgpt.com', 'placeholder' => $placeholder, 'value' => 'sk-proj-SECRETSECRETSECRET', 'paths' => ['/backend-api/codex/models']],
+    ]);
+
+    $gateway = ProviderKeys::proxied(['OPENAI_API_KEY' => 'sk-proj-SECRETSECRETSECRET', 'OPENAI_BASE_URL' => 'https://gateway.example.com/v1']);
+
+    expect(array_column($gateway['credentials'], 'host'))->toBe(['gateway.example.com']);
+});
+
 it('refuses a key for a gateway over plain HTTP rather than hand it to the sandbox', function () {
     expect(fn () => ProviderKeys::proxied(['ANTHROPIC_API_KEY' => 'sk-ant-one-123456', 'ANTHROPIC_BASE_URL' => 'http://gateway.internal']))
         ->toThrow(RuntimeException::class, 'a key goes to a gateway over HTTPS only');

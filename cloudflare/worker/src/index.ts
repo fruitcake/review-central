@@ -40,7 +40,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
  * after one is told apart. tests/Feature/CloudflareWorkerVersionTest.php fails
  * on a change that leaves it as it was.
  */
-const WORKER_VERSION = "2026-11-26.4";
+const WORKER_VERSION = "2026-11-27.1";
 
 interface Env {
   REVIEW_SANDBOX: DurableObjectNamespace<ReviewSandbox>;
@@ -320,17 +320,22 @@ const GIT_NAME = /^(?!-)(?!.*\.\.)[^\s\x00-\x1f:^~?*\[\\]{1,1024}$/;
 /** Seconds the clone may take, as one git command on review-central's worker. */
 const CLONE_SECONDS = 600;
 
-/** A key, the host it is for, and what the sandbox has in its place. */
+/**
+ * A key, the host it is for, and what the sandbox has in its place. With paths,
+ * the key goes only on a GET of exactly one of them: a host such as chatgpt.com
+ * is a site as much as an API, and gets a key for the one address a CLI reads.
+ */
 interface Credential {
   host: string;
   placeholder: string;
   value: string;
+  paths?: string[];
 }
 
 /** What KeyProxy is started with, for one host. */
 interface KeyProxyProps {
   host: string;
-  keys: Array<[placeholder: string, value: string]>;
+  keys: Array<[placeholder: string, value: string, paths: string[] | null]>;
 }
 
 /** The headers a provider reads its key from, lower case: the placeholder is swapped in these alone. */
@@ -612,7 +617,12 @@ export class KeyProxy extends WorkerEntrypoint<Env, KeyProxyProps> {
       return new Response(`Only https://${host} is reached this way.`, { status: 403 });
     }
 
-    const real = new Map(keys);
+    // The keys this request may carry: those for the whole host, and those for its path on a GET.
+    const real = new Map(
+      keys
+        .filter(([, , paths]) => paths === null || (request.method === "GET" && paths.includes(url.pathname)))
+        .map(([placeholder, value]) => [placeholder, value] as [string, string]),
+    );
     const swap = (value: string): string => {
       const bearer = /^Bearer (\S+)$/i.exec(value);
 
@@ -1013,10 +1023,10 @@ export class ReviewSandbox extends DurableObject<Env> {
       await container.interceptOutboundHttps(url.hostname, exports.GitGateway({ props: { host: url.hostname, path: url.pathname, authorization: clone.authorization } }));
     }
 
-    const hosts = new Map<string, Array<[string, string]>>();
+    const hosts = new Map<string, Array<[string, string, string[] | null]>>();
 
     for (const credential of credentials) {
-      hosts.set(credential.host, [...(hosts.get(credential.host) ?? []), [credential.placeholder, credential.value]]);
+      hosts.set(credential.host, [...(hosts.get(credential.host) ?? []), [credential.placeholder, credential.value, credential.paths ?? null]]);
     }
 
     for (const [host, keys] of hosts) {
@@ -1711,10 +1721,15 @@ function readSpec(body: unknown): RunSpec | string {
         typeof credential.placeholder !== "string" ||
         !/^[A-Za-z0-9_-]{24,200}$/.test(credential.placeholder) ||
         typeof credential.value !== "string" ||
-        credential.value === "",
+        credential.value === "" ||
+        (credential.paths !== undefined &&
+          (!Array.isArray(credential.paths) ||
+            credential.paths.length === 0 ||
+            credential.paths.length > 8 ||
+            credential.paths.some((path: unknown) => typeof path !== "string" || !/^\/[A-Za-z0-9._~\/-]{1,200}$/.test(path) || path.includes("..")))),
     )
   ) {
-    return "credentials name a host, a placeholder and a key each.";
+    return "credentials name a host, a placeholder and a key each, and at most eight exact paths.";
   }
 
   const keep = Array.isArray(spec.keep) ? spec.keep : [];
@@ -1825,7 +1840,7 @@ function readClone(value: unknown, credentials: Credential[]): CloneSpec | null 
 
 /** A hash of the keys and the repository's credential a run brings, for a warm sandbox to compare with what it was started with. */
 async function credentialsHash(spec: RunSpec): Promise<string> {
-  const given = JSON.stringify([spec.credentials.map((credential) => [credential.host, credential.placeholder, credential.value]), spec.clone?.authorization ?? null]);
+  const given = JSON.stringify([spec.credentials.map((credential) => [credential.host, credential.placeholder, credential.value, credential.paths ?? null]), spec.clone?.authorization ?? null]);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(given));
 
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");

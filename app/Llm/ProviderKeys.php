@@ -31,6 +31,18 @@ final class ProviderKeys
     ];
 
     /**
+     * Other addresses a key goes to, each only on a GET of exactly these paths: the
+     * Codex CLI reads its list of models from the ChatGPT backend with the API key,
+     * and chatgpt.com is a site as much as an API, so it gets the key for that alone.
+     *
+     * @var array<string, array<string, list<string>>>
+     */
+    public const PATHS = [
+        'OPENAI_API_KEY' => ['chatgpt.com' => ['/backend-api/codex/models']],
+        'CODEX_API_KEY' => ['chatgpt.com' => ['/backend-api/codex/models']],
+    ];
+
+    /**
      * The variable that sends a key elsewhere, through a gateway, instead.
      *
      * @var array<string, string>
@@ -49,7 +61,7 @@ final class ProviderKeys
      *
      * @param  array<string, string>  $environment
      * @param  string|null  $stableFor  the name of a warm sandbox, whose placeholders stay the same for the same keys
-     * @return array{environment: array<string, string>, credentials: list<array{host: string, placeholder: string, value: string}>}
+     * @return array{environment: array<string, string>, credentials: list<array{host: string, placeholder: string, value: string, paths?: list<string>}>}
      *
      * @throws RuntimeException
      */
@@ -83,6 +95,13 @@ final class ProviderKeys
             $placeholder = self::placeholder($value, $stableFor);
             $environment[$variable] = $placeholder;
             $credentials[] = ['host' => $host, 'placeholder' => $placeholder, 'value' => $value];
+
+            // Not where the key goes through a gateway: there it is the gateway's to send on.
+            if ($base === '') {
+                foreach (self::PATHS[$variable] ?? [] as $other => $paths) {
+                    $credentials[] = ['host' => $other, 'placeholder' => $placeholder, 'value' => $value, 'paths' => $paths];
+                }
+            }
         }
 
         return ['environment' => $environment, 'credentials' => $credentials];
