@@ -524,7 +524,9 @@ it('names, with the code index, what the change\'s guards rely on: the writers o
     ($this->put)('app/Http/Controllers/TerminalController.php', "<?php\n\nnamespace App\\Http\\Controllers;\n\nuse App\\Services\\Till;\n\nclass TerminalController\n{\n    public function paid(Till \$till)\n    {\n        \$till->book(request('transaction'));\n    }\n}\n");
     ($this->put)('app/Http/Controllers/OnlineController.php', "<?php\n\nnamespace App\\Http\\Controllers;\n\nclass OnlineController\n{\n    public function pay(\$order)\n    {\n    }\n\n    public function login(\$key)\n    {\n    }\n}\n");
     // Reads the column into an array it returns: no writer.
-    ($this->put)('app/Http/Resources/PaymentResource.php', "<?php\n\nnamespace App\\Http\\Resources;\n\nclass PaymentResource\n{\n    public function toArray(\$payment)\n    {\n        return ['reference' => \$payment->reference];\n    }\n}\n");
+    ($this->put)('app/Http/Resources/PaymentResource.php', "<?php\n\nnamespace App\\Http\\Resources;\n\nuse Illuminate\\Support\\Collection;\n\nclass PaymentResource\n{\n    public function toArray(\$payment)\n    {\n        return ['reference' => \$payment->reference];\n    }\n\n    public function toCollection(\$payment)\n    {\n        return Collection::make(['reference' => \$payment->reference]);\n    }\n}\n");
+    // Writes the column through an array of attributes it holds first.
+    ($this->put)('app/Services/Import.php', "<?php\n\nnamespace App\\Services;\n\nuse App\\Models\\Payment;\n\nclass Import\n{\n    public function row(\$line)\n    {\n        \$attributes = ['type' => Payment::PIN, 'reference' => \$line[3]];\n\n        return Payment::create(\$attributes);\n    }\n}\n");
     // A lock whose lifetime the change edits on a line of its own.
     ($this->put)('app/Services/Refunds.php', "<?php\n\nnamespace App\\Services;\n\nuse Acme\\Sdk\\Client;\nuse Illuminate\\Support\\Facades\\Cache;\n\nclass Refunds\n{\n    public function refund(\$order)\n    {\n        Cache::lock(\n            'refund:'.\$order,\n            300\n        )->block(5, fn () => (new Client)->refund(\$order));\n    }\n}\n");
     ($this->git)('add', '-A');
@@ -559,6 +561,7 @@ it('names, with the code index, what the change\'s guards rely on: the writers o
                 RateLimiter::clear(
                     'login:'.request()->ip()
                 );
+                RateLimiter::clear(hash('sha256', strtolower(request()->input('email'))));
             }
         }
         PHP);
@@ -572,6 +575,8 @@ it('names, with the code index, what the change\'s guards rely on: the writers o
         "app\\http\\controllers\\onlinecontroller::pay\tacme\\sdk\\client::verify",
         "app\\services\\till::book\tapp\\models\\payment::\$reference",
         "app\\http\\resources\\paymentresource::toarray\tapp\\models\\payment::\$reference",
+        "app\\http\\resources\\paymentresource::tocollection\tapp\\models\\payment::\$reference",
+        "app\\services\\import::row\tapp\\models\\payment::\$reference",
         "app\\services\\refunds::refund\tacme\\sdk\\client::refund",
         "app\\http\\controllers\\terminalcontroller::paid\tapp\\services\\till::book",
     ])."\n");
@@ -579,6 +584,7 @@ it('names, with the code index, what the change\'s guards rely on: the writers o
         "app\\models\\payment\tapp/Models/Payment.php", "app\\services\\till\tapp/Services/Till.php",
         "app\\http\\controllers\\terminalcontroller\tapp/Http/Controllers/TerminalController.php", "app\\http\\controllers\\onlinecontroller\tapp/Http/Controllers/OnlineController.php",
         "app\\http\\resources\\paymentresource\tapp/Http/Resources/PaymentResource.php", "app\\services\\refunds\tapp/Services/Refunds.php",
+        "app\\services\\import\tapp/Services/Import.php",
     ])."\n");
     File::put("{$index}/ancestors.tsv", '');
 
@@ -588,8 +594,12 @@ it('names, with the code index, what the change\'s guards rely on: the writers o
     expect($reach)
         ->toContain("What the change's guards rely on outside them:")
         // The check counts one type of row; another writer of the column writes others.
-        ->toContain('- `app/Http/Controllers/OnlineController.php::pay` checks `Payment` rows by `reference` (line 16), counting only those with `type` = `Payment::ONLINE`. These write `reference` on `Payment`: `app/Services/Till.php::book` (line 12), called from `app/Http/Controllers/TerminalController.php::paid`.')
+        ->toContain('- `app/Http/Controllers/OnlineController.php::pay` checks `Payment` rows by `reference` (line 16), counting only those with `type` = `Payment::ONLINE`. These write `reference` on `Payment`: `app/Services/Till.php::book` (line 12), called from `app/Http/Controllers/TerminalController.php::paid`;')
         ->not->toContain('PaymentResource')
+        // Through the attributes it holds first.
+        ->toContain('`app/Services/Import.php::row` (line 13)')
+        // A key normalized in nested calls.
+        ->toContain('clears `hash(\'sha256\', strtolower(request()->input(\'email\')))`')
         ->toContain('takes lock \'pay:\' for 30 s (line 14), and the method also makes calls that leave the application: `OnlineController::pay` calls `acme\sdk`.')
         // A lifetime changed on a line of its own.
         ->toContain('- `app/Services/Refunds.php::refund` takes lock \'refund:\' for 30 s (line 12)')

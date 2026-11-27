@@ -1088,6 +1088,41 @@ if ($indexed !== null) {
 // reads rows by a column relies on every writer of that column; a lock with a lifetime
 // on the calls it holds returning in time; a counter a success clears on the client not
 // choosing which. Each is a place where a guard that reads right is still not enough.
+/**
+ * Where a method's body writes a column of a model: by assignment to the property, or
+ * as a key of what a persisting call or a new instance is given, written there or held
+ * in a local array that is. A static call or a `new` counts only on the model itself;
+ * a call on an instance or a relation counts, as the index already ties the method to
+ * the model. An array returned, or passed to anything else, is only read.
+ */
+$writesColumn = function (string $body, string $source, string $ownClass, string $model, string $column): ?int {
+    $quoted = preg_quote($column, '/');
+
+    if (preg_match('/->\s*'.$quoted.'\s*=(?![=>])/', $body, $assigned, PREG_OFFSET_CAPTURE) === 1) {
+        return $assigned[0][1];
+    }
+
+    [$namespace, $uses] = code_index_imports($source);
+    $holds = fn (string $arguments): bool => preg_match('/[\'"]'.$quoted.'[\'"]\s*=>/', $arguments) === 1
+        || (preg_match_all('/\$(\w+)/', $arguments, $variables) > 0 && array_filter($variables[1], fn (string $variable): bool => preg_match('/\$'.$variable.'\s*=\s*\[[^;]*?[\'"]'.$quoted.'[\'"]\s*=>|\$'.$variable.'\s*\[\s*[\'"]'.$quoted.'[\'"]\s*\]\s*=(?!=)/s', $body) === 1) !== []);
+
+    preg_match_all('/(?:->|\b([A-Z]\w*)::)(?:create|forceCreate|createQuietly|update|updateQuietly|insert|insertOrIgnore|upsert|fill|forceFill|firstOrCreate|firstOrNew|updateOrCreate|updateOrInsert)\s*(\((?:[^()]++|(?2))*\))|\bnew\s+([A-Z]\w*)\s*(\((?:[^()]++|(?4))*\))/s', $body, $calls, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
+
+    foreach ($calls as $call) {
+        $class = ($call[1][0] ?? '') !== '' ? $call[1][0] : (($call[3][0] ?? '') !== '' ? $call[3][0] : null);
+
+        if ($class !== null && strtolower(code_index_resolve($class, $namespace, $uses, $ownClass)) !== $model) {
+            continue;
+        }
+
+        if ($holds(($call[2][0] ?? '') !== '' ? $call[2][0] : ($call[4][0] ?? ''))) {
+            return $call[0][1];
+        }
+    }
+
+    return null;
+};
+
 $guards = [];
 
 if ($indexed !== null) {
@@ -1157,19 +1192,14 @@ if ($indexed !== null) {
                     $writerFile = $indexed['files'][$writerClass] ?? null;
                     $writerBody = $writerFile === null ? null : $bodyOf($writerFile, $writerMethod);
 
-                    // Read or written: the index says it is touched, the source says it is written,
-                    // by assignment or as a key of what a persisting call or a new model is given;
-                    // an array returned or passed anywhere else is only read.
-                    $quoted = preg_quote($column, '/');
-                    $writes = '/->\s*'.$quoted.'\s*=(?![=>])'
-                        .'|(?:->|::)(?:create|forceCreate|createQuietly|update|updateQuietly|insert|insertOrIgnore|upsert|fill|forceFill|make|firstOrCreate|firstOrNew|updateOrCreate|updateOrInsert)\s*\((?:[^;]*?,\s*)?\[[^;]*?[\'"]'.$quoted.'[\'"]\s*=>'
-                        .'|new\s+[A-Z]\w*\s*\(\s*\[[^;]*?[\'"]'.$quoted.'[\'"]\s*=>/s';
+                    // Read or written: the index says it is touched, the source says it is written.
+                    $writeAt = $writerBody === null ? null : $writesColumn($writerBody['text'], (string) @file_get_contents((string) $writerFile), $writerClass, $model, $column);
 
-                    if ($writerBody === null || preg_match($writes, $writerBody['text'], $write, PREG_OFFSET_CAPTURE) !== 1) {
+                    if ($writeAt === null) {
                         continue;
                     }
 
-                    $at = $writerBody['start'] + substr_count(substr($writerBody['text'], 0, $write[0][1]), "\n");
+                    $at = $writerBody['start'] + substr_count(substr($writerBody['text'], 0, $writeAt), "\n");
                     $callers = array_slice(array_map(function (string $caller) use (&$indexed, $bodyOf): string {
                         if (str_starts_with($caller, 'file:')) {
                             return '`'.substr($caller, 5).'`';
@@ -1255,9 +1285,9 @@ if ($indexed !== null) {
         }
 
         // 3. A counter a success clears, beside the ones failures are counted in.
-        if (preg_match_all('/(RateLimiter::clear|Cache::forget)\s*\(((?:[^();]|\((?:[^()]|\([^()]*\))*\))*)\)\s*;/s', $bodyText, $clears, PREG_OFFSET_CAPTURE | PREG_SET_ORDER) > 0) {
+        if (preg_match_all('/(RateLimiter::clear|Cache::forget)\s*(\((?:[^()]++|(?2))*\))\s*;/s', $bodyText, $clears, PREG_OFFSET_CAPTURE | PREG_SET_ORDER) > 0) {
             // The key: the first argument, nested calls in it included.
-            preg_match_all('/RateLimiter::(?:hit|attempt|tooManyAttempts)\s*\(((?:[^(),]|\((?:[^()]|\([^()]*\))*\))*)/', $source, $hits, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
+            preg_match_all('/RateLimiter::(?:hit|attempt|tooManyAttempts)\s*\(((?:[^(),]++|(\((?:[^()]++|(?2))*\)))*)/s', $source, $hits, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
 
             foreach ($clears as $clear) {
                 if (! $touched($lineAt($clear[0][1]), $lineAt($clear[0][1] + strlen($clear[0][0]))) || $hits === []) {
@@ -1265,7 +1295,7 @@ if ($indexed !== null) {
                 }
 
                 $counted = array_unique(array_map(fn (array $hit): string => '`'.trim($hit[1][0]).'` (line '.(1 + substr_count(substr($source, 0, $hit[0][1]), "\n")).')', $hits));
-                $guards[] = "- `{$key}` clears `".preg_replace('/\s+/', ' ', trim($clear[2][0]))."` (line {$lineAt($clear[0][1])}), and failures are counted in ".implode(', ', array_slice($counted, 0, 4)).'. Which counter does a success clear, and can a client that holds one valid credential make it the one its failures were counted in?';
+                $guards[] = "- `{$key}` clears `".preg_replace('/\s+/', ' ', trim(substr($clear[2][0], 1, -1)))."` (line {$lineAt($clear[0][1])}), and failures are counted in ".implode(', ', array_slice($counted, 0, 4)).'. Which counter does a success clear, and can a client that holds one valid credential make it the one its failures were counted in?';
             }
         }
     }
