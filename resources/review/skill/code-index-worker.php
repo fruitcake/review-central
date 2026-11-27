@@ -25,6 +25,8 @@ declare(strict_types=1);
 use Mago\Sdk\Analyzer\AfterAnalysisContext;
 use Mago\Sdk\Analyzer\AfterAnalysisHook;
 use Mago\Sdk\Analyzer\Codebase;
+use Mago\Sdk\Analyzer\FunctionReturnTypeProvider;
+use Mago\Sdk\Analyzer\FunctionTarget;
 use Mago\Sdk\Analyzer\InvocationKind;
 use Mago\Sdk\Analyzer\Metadata\MemberIdentifier;
 use Mago\Sdk\Analyzer\Metadata\MetadataFlags;
@@ -83,7 +85,11 @@ final class CodeIndex implements AfterAnalysisHook, Plugin
     public function register(PluginRegistry $registry): void
     {
         $registry->registerAfterAnalysisHook($this);
-        $models = code_index_models(rtrim((string) getenv('REACH_ROOT'), '/').'/app');
+        $root = rtrim((string) getenv('REACH_ROOT'), '/');
+        $models = code_index_models("{$root}/app");
+        $registry->registerMethodReturnTypeProvider(new SignedInUser(code_index_auth_models($root)));
+        $registry->registerFunctionReturnTypeProvider(new DefaultGuard);
+        $registry->registerMethodReturnTypeProvider(new NamedGuard);
         $registry->registerMethodReturnTypeProvider(new EloquentStatics($models['scopes'], $models['marked']));
 
         if ($models['relations'] !== []) {
@@ -453,6 +459,128 @@ final class EloquentRelations implements MethodReturnTypeProvider, PropertyTypeP
             };
 
             return $codebase->classExists($relation['related']) ? [$atomic->name, $relation] : null;
+        }
+
+        return null;
+    }
+}
+
+/**
+ * The user someone is signed in as: auth()->user(), Auth::user(),
+ * $request->user() and a guard's user(), as one of the models config/auth.php's
+ * providers name. Which guard a call has, a guard's name or middleware such as
+ * auth:member decides, and the index follows neither: with more than one user
+ * model it is any of them, a path too many rather than one missing.
+ */
+final class SignedInUser implements MethodReturnTypeProvider
+{
+    /** The auth manager, which forwards user() to the current guard, and what DefaultGuard makes auth() without a guard. */
+    private const MANAGERS = ['illuminate\contracts\auth\factory', 'illuminate\auth\authmanager', DefaultGuard::CLASS_NAME];
+
+    private const GUARD = 'illuminate\contracts\auth\guard';
+
+    private const REQUEST = 'illuminate\http\request';
+
+    /** The Auth facade, imported or by its global alias. */
+    private const FACADES = ['illuminate\support\facades\auth', 'auth'];
+
+    /**
+     * @param  list<string>  $models
+     */
+    public function __construct(private readonly array $models) {}
+
+    public function getTargets(): array
+    {
+        return [MethodTarget::anyClass('user')];
+    }
+
+    public function getReturnType(ReturnTypeProviderContext $context): ?Type
+    {
+        $invocation = $context->invocation;
+
+        foreach ($invocation->receiverType?->atomicTypes ?? [] as $atomic) {
+            $class = match (true) {
+                $atomic instanceof NamedObjectType => $atomic->name,
+                $atomic instanceof ClassLikeStringType && $atomic->literal !== null => $atomic->literal,
+                default => null,
+            };
+
+            if ($class === null) {
+                continue;
+            }
+
+            $name = strtolower(ltrim($class, '\\'));
+            $ancestors = array_map(fn (string $ancestor): string => strtolower(ltrim($ancestor, '\\')), $context->codebase->getClassAncestors($class));
+
+            $signedIn = match (true) {
+                $invocation->kind === InvocationKind::StaticMethod => in_array($name, self::FACADES, true),
+                default => in_array($name, self::MANAGERS, true) || in_array($name, [self::REQUEST, self::GUARD], true)
+                    || in_array(self::REQUEST, $ancestors, true) || in_array(self::GUARD, $ancestors, true),
+            };
+
+            if ($signedIn) {
+                return $this->user($context->codebase, $this->models);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * One of these models, or no one.
+     *
+     * @param  list<string>  $models
+     */
+    private function user(Codebase $codebase, array $models): ?Type
+    {
+        $types = array_map(fn (string $model): Type => Type::namedObject($model), array_values(array_filter($models, $codebase->classExists(...))));
+
+        return $types === [] ? null : Type::union(Type::null(), ...$types);
+    }
+}
+
+/**
+ * auth() without a guard: the manager, whose user() is the default guard's. The
+ * manager declares no user(), so a call to it would reach no provider; given as
+ * the manager or the session guard, which does, it reaches SignedInUser.
+ * With a guard named, auth('member') keeps the guard Laravel's stub gives it.
+ */
+final class DefaultGuard implements FunctionReturnTypeProvider
+{
+    public const CLASS_NAME = 'illuminate\auth\sessionguard';
+
+    public function getTargets(): array
+    {
+        return [FunctionTarget::exact('auth')];
+    }
+
+    public function getReturnType(ReturnTypeProviderContext $context): ?Type
+    {
+        // The manager too: auth()->guard('member') is still the manager's guard().
+        return $context->invocation->arguments === []
+            ? Type::union(Type::namedObject('Illuminate\Contracts\Auth\Factory'), Type::namedObject('Illuminate\Auth\SessionGuard'))
+            : null;
+    }
+}
+
+/**
+ * auth()->guard('member') on what DefaultGuard gives auth(): the session guard
+ * has no guard(), so without this the call would not be typed at all. It is the
+ * guard Laravel's contract returns.
+ */
+final class NamedGuard implements MethodReturnTypeProvider
+{
+    public function getTargets(): array
+    {
+        return [MethodTarget::anyClass('guard')];
+    }
+
+    public function getReturnType(ReturnTypeProviderContext $context): ?Type
+    {
+        foreach ($context->invocation->receiverType?->atomicTypes ?? [] as $atomic) {
+            if ($atomic instanceof NamedObjectType && strtolower($atomic->name) === DefaultGuard::CLASS_NAME) {
+                return Type::namedObject('Illuminate\Contracts\Auth\StatefulGuard');
+            }
         }
 
         return null;
