@@ -65,13 +65,19 @@ if command -v jq > /dev/null 2>&1; then
   # Where the team allows it, a search of the web, as public documentation answers
   # what the repository cannot, such as what a package release changed. A search
   # only: fetching a page could carry what the session read to any address.
-  if jq --argjson search "$([ "${REVIEW_QUESTION_WEB_SEARCH:-false}" = "true" ] && echo true || echo false)" '
+  # Each search goes past search-guard.php first, which refuses one with a name that is
+  # the repository's own: the prompt asks for public names, the guard sees to it. One
+  # that cannot run refuses too.
+  if jq --argjson search "$([ "${REVIEW_QUESTION_WEB_SEARCH:-false}" = "true" ] && echo true || echo false)" \
+       --arg guard "php -n '$HERE/search-guard.php' || exit 2" '
        del(.enabledPlugins)
        | .permissions.allow |= map(select(. != "Task" and . != "Agent"))
        | .permissions.deny = (["Task", "Agent", "Workflow", "Skill"] + .permissions.deny | unique)
        | if $search then
            .permissions.deny |= map(select(. != "WebSearch"))
            | .permissions.allow = (.permissions.allow + ["WebSearch"] | unique)
+           | .disableAllHooks = false
+           | .hooks = {PreToolUse: [{matcher: "WebSearch", hooks: [{type: "command", command: $guard}]}]}
          else . end
      ' "$SETTINGS" > "$QUESTION_SETTINGS"; then
     SETTINGS="$QUESTION_SETTINGS"

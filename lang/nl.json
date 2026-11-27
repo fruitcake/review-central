@@ -1188,5 +1188,5 @@
     "without :modules": "zonder :modules",
     "your-organisation": "je-organisatie",
     "Questions may search the web": "Vragen mogen op het web zoeken",
-    "When someone asks the reviewer a question, it may search the web for public documentation such as release notes and changelogs, without anything from the repository in its searches. It never opens a page itself, and the review itself never searches.": "Als iemand de reviewer een vraag stelt, mag die op het web zoeken naar openbare documentatie zoals release notes en changelogs, zonder iets uit de repository in de zoekopdracht. Hij opent zelf nooit een pagina, en de review zelf zoekt nooit."
+    "When someone asks the reviewer a question, it may search the web for public documentation such as release notes and changelogs. Each search is checked before it goes out, and one with a name that is in the repository and in no installed package is refused. It never opens a page itself, and the review itself never searches.": "Als iemand de reviewer een vraag stelt, mag die op het web zoeken naar openbare documentatie zoals release notes en changelogs. Elke zoekopdracht wordt gecontroleerd voordat die de deur uitgaat, en een zoekopdracht met een naam die in de repository staat en in geen enkel geïnstalleerd pakket wordt geweigerd. Hij opent zelf nooit een pagina, en de review zelf zoekt nooit."
 }

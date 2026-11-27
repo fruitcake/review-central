@@ -657,7 +657,12 @@ it('lets an answer search the web, and never fetch a page, only where the team a
         ->run(['sh', resource_path('review/skill/answer-question.sh')])->throw();
     $permissions = json_decode(File::get("{$dir}/settings.json"), true)['permissions'];
 
+    $settings = json_decode(File::get("{$dir}/settings.json"), true);
+
     expect($permissions['deny'])->toContain('WebFetch')
+        // Every search past the guard first, which refuses where it cannot run.
+        ->and($settings['disableAllHooks'])->toBe(! $allowed)
+        ->and($settings['hooks']['PreToolUse'][0] ?? null)->toBe($allowed ? ['matcher' => 'WebSearch', 'hooks' => [['type' => 'command', 'command' => "php -n '".realpath(resource_path('review/skill'))."/search-guard.php' || exit 2"]]] : null)
         ->and(in_array('WebSearch', $permissions['allow'], true))->toBe($allowed)
         ->and(in_array('WebSearch', $permissions['deny'], true))->toBe(! $allowed)
         ->and(str_contains(File::get("{$dir}/prompt.txt"), 'never with code, names, paths or anything else from this repository'))->toBe($allowed);
@@ -679,3 +684,28 @@ it('hands the answer the team\'s choice on searching the web, and the review nev
     expect($step['environment'])->toMatchArray(['REVIEW_QUESTION_WEB_SEARCH' => 'true'])
         ->and(file_get_contents(resource_path('review/skill/review-settings.sh')))->not->toContain('REVIEW_QUESTION_WEB_SEARCH');
 });
+
+it('lets a search go with public names only, and refuses one with a name of the repository\'s own', function (string $query, ?string $refused) {
+    $dir = storage_path('framework/testing/search-guard');
+    File::deleteDirectory($dir);
+    File::ensureDirectoryExists("{$dir}/app/Http/Controllers");
+    File::ensureDirectoryExists("{$dir}/vendor/laravel/framework/src");
+    File::put("{$dir}/app/Http/Controllers/UpsellController.php", "<?php\n\nclass UpsellController\n{\n    public function store()\n    {\n        return route('upsell').'?'.\$query;\n    }\n}\n");
+    File::put("{$dir}/vendor/laravel/framework/src/RouteUrlGenerator.php", "<?php\n\nclass RouteUrlGenerator\n{\n    // encodes the query string of a route\n}\n");
+    File::put("{$dir}/composer.lock", '{"packages":[{"name":"laravel/framework","version":"v12.74.0"}]}');
+    File::put("{$dir}/.gitignore", "/vendor\n");
+    Process::path($dir)->run(['sh', '-c', 'git init -q && git add -A && git -c user.name=t -c user.email=t@example.com commit -qm app'])->throw();
+
+    $result = Process::path($dir)->input(json_encode(['tool_name' => 'WebSearch', 'tool_input' => ['query' => $query]]))
+        ->run(['php', '-n', resource_path('review/skill/search-guard.php')]);
+
+    expect($result->exitCode())->toBe($refused === null ? 0 : 2)
+        ->and($result->errorOutput())->toContain($refused ?? '');
+
+    File::deleteDirectory($dir);
+})->with([
+    'a framework class and a release' => ['laravel 12.74 RouteUrlGenerator query string encoding', null],
+    'the repository\'s own class' => ['UpsellController store route query', '`UpsellController` is in this repository and in no installed package'],
+    'code' => ['laravel route() $query encoding', 'it holds code'],
+    'a passage' => [str_repeat('laravel route encoding ', 12), 'a search is a few public words'],
+]);
