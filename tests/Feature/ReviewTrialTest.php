@@ -278,6 +278,51 @@ it('re-runs a review as a trial set up as it was, and posts it only when asked',
         && $job->trial->model === 'claude-sonnet-5-5' && $job->trial->effort === 'high' && $job->trial->provider === 'claude-code');
 });
 
+it('re-runs a review at its own commit, and tries a pull request at a commit named in the form, both as though nobody had reviewed it', function () {
+    $user = User::factory()->create();
+    $user->tenants()->attach($this->tenant);
+    $this->actingAs($user);
+    Filament::setCurrentPanel(Filament::getPanel('app'));
+    Filament::setTenant($this->tenant);
+    Filament::bootCurrentPanel();
+    $earlier = str_repeat('b', 40);
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/shop/pullrequests/12' => Http::response([
+            'id' => 12, 'state' => 'OPEN',
+            'source' => ['branch' => ['name' => 'feature/export'], 'commit' => ['hash' => str_repeat('a', 12)]],
+            'destination' => ['branch' => ['name' => 'main']],
+        ]),
+        'api.bitbucket.org/2.0/repositories/acme/shop/commit/bbbbbbbbbbbb*' => Http::response(['hash' => $earlier]),
+        '*' => Http::response([], 404),
+    ]);
+    $repository = Repository::factory()->create(['tenant_id' => $this->tenant->id, 'connection_id' => $this->connection->id, 'slug' => 'shop']);
+    // The review of an earlier commit, which the pull request has moved past.
+    $run = ReviewRun::query()->create([
+        'tenant_id' => $this->tenant->id, 'repository_id' => $repository->id, 'workspace' => 'acme', 'slug' => 'shop', 'branch' => 'feature/export',
+        'commit' => $earlier, 'pull_request_id' => 12, 'status' => ReviewRun::STATUS_FINISHED, 'started_at' => now(),
+        'runner' => 'docker', 'agent' => 'claude-code',
+    ]);
+
+    // Its own commit, even with "as though nobody had" turned off, which an earlier commit cannot be reviewed without.
+    livewire(ViewReviewRun::class, ['record' => $run->uuid])
+        ->callAction('rerun', ['at_run_commit' => true, 'ignore_existing' => false])
+        ->assertNotified('The re-run is started');
+
+    Queue::assertPushed(fn (RunContainerReview $job): bool => $job->commit === $earlier && $job->trial?->commit === $earlier && $job->trial->ignoreExisting === true);
+
+    livewire(ListReviewRuns::class)
+        ->callAction('try', ['url' => 'https://bitbucket.org/acme/shop/pull-requests/12', 'commit' => 'bbbbbbbbbbbb'])
+        ->assertHasNoFormErrors()
+        ->assertNotified('The trial is started');
+
+    Queue::assertPushed(RunContainerReview::class, 2);
+
+    // Not a hash: refused in the form.
+    livewire(ListReviewRuns::class)
+        ->callAction('try', ['url' => 'https://bitbucket.org/acme/shop/pull-requests/12', 'commit' => 'main'])
+        ->assertHasFormErrors(['commit']);
+});
+
 it('shows how long a run that is still going has taken, counting up', function () {
     // Still: a second that passes while the page renders would make it 02:06.
     $this->freezeTime();

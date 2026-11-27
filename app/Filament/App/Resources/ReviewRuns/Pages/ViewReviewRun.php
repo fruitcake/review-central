@@ -136,7 +136,7 @@ class ViewReviewRun extends ViewRecord
                 ->modalHeading(__('Re-run this review'))
                 ->modalDescription(fn (): string => $this->record->pull_request_id === null
                     ? __('Starts a new review of this branch as it is now, and costs what a review costs.')
-                    : __('Reviews this pull request again, as it is now, with the setup below: this run\'s, to change what you want to compare. Kept here and off the pull request, unless you post it.'))
+                    : __('Reviews this pull request again, as it is now or at this review\'s commit, with the setup below: this run\'s, to change what you want to compare. Kept here and off the pull request, unless you post it.'))
                 ->fillForm(fn (Runners $runners, ReviewCredentials $credentials): array => $this->rerunState($runners, $credentials))
                 ->schema(fn (): array => $this->record->pull_request_id === null ? [] : [
                     Toggle::make('post')
@@ -144,7 +144,13 @@ class ViewReviewRun extends ViewRecord
                         ->default(false)
                         ->live()
                         ->helperText(__('Off, it is a trial: recorded here, under Trials, and nothing is said on the pull request. On, it is the pull request\'s own next review, with the repository\'s settings: comments, findings and the build status.')),
-                    Group::make(ReviewRunResource::trialFields())
+                    Group::make([
+                        Toggle::make('at_run_commit')
+                            ->label(fn (): string => __('At this review\'s commit, :commit', ['commit' => substr((string) $this->record->commit, 0, 12)]))
+                            ->default(false)
+                            ->helperText(__('On, it reviews the code this review read, even when the pull request has moved on since. Off, the pull request as it is now. An earlier commit is always reviewed as though nobody had, and not from the diff alone.')),
+                        ...ReviewRunResource::trialFields(),
+                    ])
                         ->visible(fn (Get $get): bool => ! $get('post')),
                 ])
                 ->modalSubmitActionLabel(__('Run'))
@@ -158,7 +164,9 @@ class ViewReviewRun extends ViewRecord
                             return;
                         }
 
-                        $trials->start(CurrentTenant::get(), $run->repository->sourceControl()->pullRequestUrl($run->pull_request_id), ReviewRunResource::trialOptions($data));
+                        $trials->start(CurrentTenant::get(), $run->repository->sourceControl()->pullRequestUrl($run->pull_request_id), ReviewRunResource::trialOptions(
+                            ['commit' => ($data['at_run_commit'] ?? false) ? $run->commit : null] + $data,
+                        ));
 
                         Notification::make()->title(__('The re-run is started'))->body(__('It shows under Trials, and here as one of this pull request\'s runs.'))->success()->send();
                     } catch (ReviewTrialRefused $exception) {
