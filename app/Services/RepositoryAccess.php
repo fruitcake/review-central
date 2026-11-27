@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\ConnectionKind;
 use App\Exceptions\ActionRefused;
 use App\Exceptions\RepositoryNotFound;
 use App\Filament\TenantRole;
+use App\Models\Connection;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Models\Tenant;
@@ -57,18 +59,7 @@ class RepositoryAccess
         }
 
         [$workspace, $slug] = $fullName;
-        $drivers = self::drivers(self::host($name));
-
-        $found = $this->repositories($user)
-            ->with(['tenant', 'integration'])
-            ->whereRaw('lower(workspace) = ?', [mb_strtolower($workspace)])
-            ->whereRaw('lower(slug) = ?', [mb_strtolower($slug)])
-            ->when(filled($tenant), fn (Builder $query) => $query->whereHas('tenant', fn (Builder $scope) => $scope->where('slug', $tenant)))
-            // A remote or an address names its host, which tells a GitHub repository
-            // from a Bitbucket one of the same name.
-            ->when($drivers !== null, fn (Builder $query) => $query->whereHas('integration', fn (Builder $scope) => $scope->whereIn('driver', $drivers)))
-            ->when($connection !== null, fn (Builder $query) => $query->where('connection_id', $connection))
-            ->get();
+        $found = $this->matching($user, $workspace, $slug, self::drivers(self::host($name)), $tenant, $connection);
 
         if ($found->isEmpty()) {
             throw new RepositoryNotFound("{$workspace}/{$slug} is not among the repositories you can reach".(filled($tenant) ? " in the tenant {$tenant}" : '').'. It may not be added to Review Central yet.');
@@ -81,6 +72,90 @@ class RepositoryAccess
         }
 
         return $found->first();
+    }
+
+    /**
+     * The repository a name points at, as find() does, or else one not added yet
+     * in a workspace that a connection of one of the user's tenants is for. That
+     * one is not saved: it is for opening and editing a pull request as the user,
+     * whose own account does the writing, and the connection only tells which
+     * tenant and host it belongs to.
+     *
+     * @throws RepositoryNotFound
+     */
+    public function findToAuthor(User $user, string $name, ?string $tenant = null, ?int $connection = null): Repository
+    {
+        $fullName = self::fullName($name);
+        $drivers = self::drivers(self::host($name));
+
+        if ($fullName === null || $this->matching($user, $fullName[0], $fullName[1], $drivers, $tenant, $connection)->isNotEmpty()) {
+            return $this->find($user, $name, $tenant, $connection);
+        }
+
+        [$workspace, $slug] = $fullName;
+        $host = self::host($name);
+
+        // A remote on another host, such as GitLab, is not the same repository as
+        // one of that name on Bitbucket or GitHub.
+        if ($host !== null && $drivers === null) {
+            throw new RepositoryNotFound("{$workspace}/{$slug} is on {$host}: pull requests are opened as you only on Bitbucket and on GitHub.");
+        }
+
+        // The hosts a pull request is opened on as the user.
+        $authoring = array_values(array_intersect($drivers ?? ['bitbucket', 'github-app'], ['bitbucket', 'github-app']));
+
+        $connections = Connection::query()
+            ->with('tenant')
+            ->where('kind', ConnectionKind::SourceControl)
+            ->whereIn('driver', $authoring)
+            ->when(! $user->is_admin, fn (Builder $query) => $query->whereIn('tenant_id', $user->tenants()->select('tenants.id')))
+            ->when(filled($tenant), fn (Builder $query) => $query->whereHas('tenant', fn (Builder $scope) => $scope->where('slug', $tenant)))
+            ->when($connection !== null, fn (Builder $query) => $query->whereKey($connection))
+            ->oldest('id')
+            ->get()
+            // Only one for this very workspace: one for any owner is not one the workspace was connected with.
+            ->filter(fn (Connection $candidate): bool => strcasecmp((string) $candidate->setting('workspace'), $workspace) === 0)
+            ->values();
+
+        if ($connections->isEmpty()) {
+            throw new RepositoryNotFound("{$workspace}/{$slug} is not among the repositories you can reach".(filled($tenant) ? " in the tenant {$tenant}" : '').", and none of your tenants has a Bitbucket or GitHub App connection for the workspace {$workspace}.");
+        }
+
+        if ($connections->count() > 1) {
+            throw new RepositoryNotFound($connections->pluck('tenant_id')->unique()->count() > 1
+                ? "The workspace {$workspace} is connected in more than one of your tenants (".$connections->map(fn (Connection $candidate): string => $candidate->tenant->slug)->unique()->implode(', ').'): name the tenant too.'
+                : "The workspace {$workspace} has more than one connection (".$connections->map(fn (Connection $candidate): string => "#{$candidate->getKey()} {$candidate->name}")->implode(', ').'): give the connection by its number.');
+        }
+
+        $integration = $connections->first();
+
+        return (new Repository([
+            'tenant_id' => $integration->tenant_id,
+            'connection_id' => $integration->getKey(),
+            // As the connection writes it, which the host may spell otherwise than the remote.
+            'workspace' => (string) $integration->setting('workspace'),
+            'slug' => $slug,
+        ]))->setRelation('integration', $integration)->setRelation('tenant', $integration->tenant);
+    }
+
+    /**
+     * The user's repositories with this workspace and slug, on a connection of
+     * one of the drivers when a remote or an address named the host: that tells
+     * a GitHub repository from a Bitbucket one of the same name.
+     *
+     * @param  array<int, string>|null  $drivers
+     * @return Collection<int, Repository>
+     */
+    protected function matching(User $user, string $workspace, string $slug, ?array $drivers, ?string $tenant, ?int $connection): Collection
+    {
+        return $this->repositories($user)
+            ->with(['tenant', 'integration'])
+            ->whereRaw('lower(workspace) = ?', [mb_strtolower($workspace)])
+            ->whereRaw('lower(slug) = ?', [mb_strtolower($slug)])
+            ->when(filled($tenant), fn (Builder $query) => $query->whereHas('tenant', fn (Builder $scope) => $scope->where('slug', $tenant)))
+            ->when($drivers !== null, fn (Builder $query) => $query->whereHas('integration', fn (Builder $scope) => $scope->whereIn('driver', $drivers)))
+            ->when($connection !== null, fn (Builder $query) => $query->where('connection_id', $connection))
+            ->get();
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Mcp\Tools;
 
+use App\Models\Repository;
 use App\Services\PullRequestAuthoring;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
@@ -13,7 +14,7 @@ use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Attributes\Description;
 
 #[Description(<<<'TXT'
-    Opens a pull request for a pushed branch under the user's own name, with their own Bitbucket account (and the repository's default reviewers), or their GitHub account through the GitHub App. It needs that account connected on their Review Central profile; the error says how when it is not.
+    Opens a pull request for a pushed branch under the user's own name, with their own Bitbucket account (and the repository's default reviewers), or their GitHub account through the GitHub App. It needs that account connected on their Review Central profile; the error says how when it is not. The repository need not be added to Review Central yet: one in a workspace that one of the user's tenants has a connection for works too, though it is only reviewed once it is added; the answer says whether it will be.
 
     Push the branch first. The review grades the pull request against its title and description, so write them for that reader: what changes and why, what to look at first, the risk, the decisions that look like mistakes, and what you noticed but did not change. Scale it to the change: a small fix gets one to three sentences. Put the ticket reference in the title, such as "CRM-123 Guard the scheduler", because that is how the review finds the ticket.
 
@@ -39,7 +40,7 @@ class CreatePullRequestTool extends ReviewTool
         ]);
 
         return $this->answer(function () use ($request, $authoring): array {
-            $repository = $this->repository($request);
+            $repository = $this->repositoryToAuthor($request);
             $opened = $authoring->create(
                 $this->user($request),
                 $repository,
@@ -55,9 +56,25 @@ class CreatePullRequestTool extends ReviewTool
                 'repository' => $repository->fullName(),
                 'pull_request_id' => $opened['id'],
                 'url' => $opened['url'],
-                'next' => 'The AI review starts by itself and takes a few minutes; read it with `pull-request-feedback`.',
+                'next' => $this->next($repository),
             ];
         });
+    }
+
+    /**
+     * What happens after: a repository not added yet is only reviewed when its
+     * connection adds it from the webhook, and reviews what it adds.
+     */
+    protected function next(Repository $repository): string
+    {
+        $integration = $repository->integration;
+
+        return match (true) {
+            $repository->exists => 'The AI review starts by itself and takes a few minutes; read it with `pull-request-feedback`.',
+            $integration->addsRepositories() && $integration->reviewsAddedRepositories() => "{$repository->fullName()} is not in Review Central yet. Its connection adds it when the pull request's webhook arrives, and reviews it then; after a few minutes, read the review with `pull-request-feedback`.",
+            $integration->addsRepositories() => "{$repository->fullName()} is not in Review Central yet. Its connection adds it when the pull request's webhook arrives, but does not review it by itself: an admin of the tenant turns its reviews on in Review Central.",
+            default => "{$repository->fullName()} is not in Review Central, so nothing reviews this pull request and `pull-request-feedback` cannot find it. An admin of the tenant adds it under Repositories in Review Central to have it reviewed.",
+        };
     }
 
     /**
