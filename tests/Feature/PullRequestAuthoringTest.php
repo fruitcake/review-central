@@ -150,3 +150,26 @@ it('opens one on GitHub through the GitHub App, into the default branch', functi
         && $request['base'] === 'trunk'
         && $request['body'] === 'Adds it.');
 });
+
+it('opens one in a repository not added yet, in a workspace the user\'s tenant connects, without adding it', function () {
+    Http::fake([
+        'api.bitbucket.org/2.0/repositories/acme/blog/effective-default-reviewers*' => Http::response(['values' => []]),
+        'api.bitbucket.org/2.0/repositories/acme/blog/pullrequests*' => fn (Request $request) => $request->method() === 'POST'
+            ? Http::response(['id' => 3, 'links' => ['html' => ['href' => 'https://bitbucket.org/acme/blog/pull-requests/3']]], 201)
+            : Http::response(['values' => []]),
+    ]);
+
+    ($this->create)(['repository' => 'git@bitbucket.org:ACME/blog.git'])
+        ->assertOk()
+        ->assertStructuredContentPaths(['repository' => 'acme/blog', 'pull_request_id' => 3]);
+
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+        && $request->url() === 'https://api.bitbucket.org/2.0/repositories/acme/blog/pullrequests'
+        && $request->hasHeader('Authorization', 'Bearer sam-token'));
+    expect(Repository::query()->where('slug', 'blog')->exists())->toBeFalse();
+
+    // A workspace only another tenant connects is not the user's to write in through here.
+    Connection::factory()->create(['settings' => ['workspace' => 'globex']]);
+
+    ($this->create)(['repository' => 'globex/blog'])->assertHasErrors(['none of your tenants has a Bitbucket or GitHub App connection for the workspace globex']);
+});

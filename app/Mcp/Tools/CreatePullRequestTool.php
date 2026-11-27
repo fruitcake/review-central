@@ -13,7 +13,7 @@ use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Attributes\Description;
 
 #[Description(<<<'TXT'
-    Opens a pull request for a pushed branch under the user's own name, with their own Bitbucket account (and the repository's default reviewers), or their GitHub account through the GitHub App. It needs that account connected on their Review Central profile; the error says how when it is not.
+    Opens a pull request for a pushed branch under the user's own name, with their own Bitbucket account (and the repository's default reviewers), or their GitHub account through the GitHub App. It needs that account connected on their Review Central profile; the error says how when it is not. The repository need not be added to Review Central yet: one in a workspace that one of the user's tenants has a connection for works too.
 
     Push the branch first. The review grades the pull request against its title and description, so write them for that reader: what changes and why, what to look at first, the risk, the decisions that look like mistakes, and what you noticed but did not change. Scale it to the change: a small fix gets one to three sentences. Put the ticket reference in the title, such as "CRM-123 Guard the scheduler", because that is how the review finds the ticket.
 
@@ -39,7 +39,7 @@ class CreatePullRequestTool extends ReviewTool
         ]);
 
         return $this->answer(function () use ($request, $authoring): array {
-            $repository = $this->repository($request);
+            $repository = $this->repositoryToAuthor($request);
             $opened = $authoring->create(
                 $this->user($request),
                 $repository,

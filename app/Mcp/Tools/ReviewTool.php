@@ -41,6 +41,15 @@ abstract class ReviewTool extends Tool
     }
 
     /**
+     * The repository the request names, or one not added yet in a workspace one
+     * of the user's tenants connects: for writing a pull request as the user.
+     */
+    protected function repositoryToAuthor(Request $request): Repository
+    {
+        return app(RepositoryAccess::class)->findToAuthor($this->user($request), (string) $request->get('repository'), $request->get('tenant'), $this->connection($request));
+    }
+
+    /**
      * The connection the request names, by its number, for a repository two
      * connections on one host both have.
      */

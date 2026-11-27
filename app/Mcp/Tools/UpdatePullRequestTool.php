@@ -32,7 +32,7 @@ class UpdatePullRequestTool extends ReviewTool
         ]);
 
         return $this->answer(function () use ($request, $authoring): array {
-            $repository = $this->repository($request);
+            $repository = $this->repositoryToAuthor($request);
             $updated = $authoring->update(
                 $this->user($request),
                 $repository,
