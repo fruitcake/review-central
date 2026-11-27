@@ -462,6 +462,7 @@ it('sends a key for some paths only to a Worker that keeps it to them, asking on
 })->with([
     'this version' => [CloudflareSandbox::KEYS_BY_PATH_SINCE, true],
     'the one before' => ['2026-11-26.4', false],
+    'the one that matched exact paths only' => ['2026-11-27.1', false],
     'none said' => [null, false],
 ]);
 

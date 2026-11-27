@@ -693,7 +693,11 @@ it('lets a search go with public words only, and refuses anything the session co
     File::put("{$dir}/app/Http/Controllers/UpsellController.php", "<?php\n\nclass UpsellController\n{\n    public function store()\n    {\n        return route('upsell').'?'.\$query;\n    }\n}\n");
     File::put("{$dir}/vendor/laravel/framework/src/RouteUrlGenerator.php", "<?php\n\nclass RouteUrlGenerator\n{\n    // the encoding of the query string of a route\n}\n");
     File::put("{$dir}/composer.json", json_encode(['name' => 'acme/shop', 'require' => ['laravel/framework' => '^12.70']]));
-    File::put("{$dir}/composer.lock", json_encode(['packages' => [['name' => 'laravel/framework', 'version' => 'v12.74.0']]]));
+    File::put("{$dir}/composer.lock", json_encode(['packages' => [
+        ['name' => 'laravel/framework', 'version' => 'v12.74.0', 'notification-url' => 'https://packagist.org/downloads/'],
+        // Installed from a path of the project's own: private, whatever it is called.
+        ['name' => 'acme/ledger-bridge', 'version' => 'dev-main', 'dist' => ['type' => 'path', 'url' => '../ledger-bridge']],
+    ]]));
 
     $result = Process::path($dir)->input(json_encode(['tool_name' => 'WebSearch', 'tool_input' => ['query' => $query]]))
         ->run(['php', '-n', resource_path('review/skill/search-guard.php')]);
@@ -710,7 +714,28 @@ it('lets a search go with public words only, and refuses anything the session co
     'the project\'s own name' => ['shop laravel upgrade', '`shop` is no name of an installed package or a dependency'],
     'code' => ['laravel route() $query encoding', 'characters a search for documentation does not need'],
     'a passage' => [str_repeat('laravel route encoding ', 12), 'a search is a few public words'],
+    'a package of the project\'s own' => ['acme/ledger-bridge changelog', '`acme/ledger-bridge` names a dependency of the project\'s own'],
+    'the vendor of a package of its own' => ['acme release notes', '`acme` names a dependency of the project\'s own'],
 ]);
+
+it('lets the name of a public dependency through where the project is named after it, and never a workspace package', function () {
+    $dir = storage_path('framework/testing/search-guard-names');
+    File::deleteDirectory($dir);
+    File::ensureDirectoryExists($dir);
+    File::put("{$dir}/composer.json", json_encode(['name' => 'laravel/laravel', 'require' => ['laravel/framework' => '^12.70']]));
+    File::put("{$dir}/composer.lock", json_encode(['packages' => [['name' => 'laravel/framework', 'version' => 'v12.74.0', 'notification-url' => 'https://packagist.org/downloads/']]]));
+    File::put("{$dir}/package.json", json_encode(['name' => 'web', 'dependencies' => ['nuxt' => '^4.1.0', '@acme/risk-engine' => 'workspace:*']]));
+    $guard = fn (string $query) => Process::path($dir)->input(json_encode(['tool_input' => ['query' => $query]]))
+        ->run(['php', '-n', resource_path('review/skill/search-guard.php')]);
+
+    expect($guard('laravel release notes')->exitCode())->toBe(0)
+        ->and($guard('nuxt 4 changelog')->exitCode())->toBe(0)
+        ->and($guard('@acme/risk-engine release notes')->exitCode())->toBe(2)
+        ->and($guard('acme release notes')->exitCode())->toBe(2)
+        ->and($guard('web nuxt upgrade')->exitCode())->toBe(2);
+
+    File::deleteDirectory($dir);
+});
 
 it('lets a search for a JavaScript framework\'s release notes go without Composer or node_modules', function () {
     $dir = storage_path('framework/testing/search-guard-nuxt');
@@ -775,6 +800,74 @@ it('answers nothing when Claude Code changed while vendor/ was installed', funct
     expect($result->successful())->toBeFalse()
         ->and($result->output())->toContain('Claude Code changed while vendor/ was installed')
         ->and($result->output())->not->toContain('stolen');
+
+    File::deleteDirectory($dir);
+});
+
+it('takes a scope the lock file or the registry settings put on a registry of the project\'s own as private, and reads a public package beside a private one of the same name', function () {
+    $dir = storage_path('framework/testing/search-guard-registry');
+    File::deleteDirectory($dir);
+    File::ensureDirectoryExists("{$dir}/yarn");
+    File::ensureDirectoryExists("{$dir}/npm");
+    $guard = fn (string $in, string $query) => Process::path("{$dir}/{$in}")->input(json_encode(['tool_input' => ['query' => $query]]))
+        ->run(['php', '-n', resource_path('review/skill/search-guard.php')]);
+
+    // A semver range from a private registry, which yarn.lock shows.
+    File::put("{$dir}/yarn/package.json", json_encode(['name' => '@acme/web', 'dependencies' => ['@acme/risk-engine' => '^1.0.0', 'nuxt' => '^4.1.0']]));
+    File::put("{$dir}/yarn/yarn.lock", "\"@acme/risk-engine@^1.0.0\":\n  version \"1.2.0\"\n  resolved \"https://npm.acme.internal/@acme/risk-engine/-/risk-engine-1.2.0.tgz\"\n\nnuxt@^4.1.0:\n  version \"4.1.2\"\n  resolved \"https://registry.yarnpkg.com/nuxt/-/nuxt-4.1.2.tgz\"\n");
+    // A scope the registry settings send elsewhere.
+    File::put("{$dir}/npm/package.json", json_encode(['name' => 'shop', 'dependencies' => ['@acme/ui' => '^2.0.0']]));
+    File::put("{$dir}/npm/.npmrc", "@acme:registry=https://npm.acme.internal/\n");
+
+    expect($guard('yarn', 'acme release notes')->exitCode())->toBe(2)
+        ->and($guard('yarn', '@acme/risk-engine changelog')->exitCode())->toBe(2)
+        ->and($guard('yarn', 'nuxt 4 changelog')->exitCode())->toBe(0)
+        ->and($guard('npm', '@acme/ui changelog')->exitCode())->toBe(2)
+        ->and($guard('npm', 'acme upgrade')->exitCode())->toBe(2);
+
+    // A private package and a public one with the same last name: the public one is read.
+    File::ensureDirectoryExists("{$dir}/php/vendor/acme/framework");
+    File::ensureDirectoryExists("{$dir}/php/vendor/laravel/framework/src");
+    File::put("{$dir}/php/vendor/acme/framework/Ledger.php", "<?php\n\nclass AcmeLedger\n{\n}\n");
+    File::put("{$dir}/php/vendor/laravel/framework/src/RouteUrlGenerator.php", "<?php\n\nclass RouteUrlGenerator\n{\n}\n");
+    File::put("{$dir}/php/composer.json", json_encode(['name' => 'acme/shop', 'require' => ['laravel/framework' => '^12.70', 'acme/framework' => '*@dev']]));
+    File::put("{$dir}/php/composer.lock", json_encode(['packages' => [
+        ['name' => 'laravel/framework', 'version' => 'v12.74.0', 'notification-url' => 'https://packagist.org/downloads/'],
+        ['name' => 'acme/framework', 'version' => 'dev-main', 'dist' => ['type' => 'path', 'url' => '../framework']],
+    ]]));
+
+    expect($guard('php', 'laravel RouteUrlGenerator')->exitCode())->toBe(0)
+        ->and($guard('php', 'AcmeLedger changelog')->exitCode())->toBe(2);
+
+    File::deleteDirectory($dir);
+});
+
+it('reads no private package through a file name with a newline, takes a bundled package from its bundler, and a quoted public registry as public', function () {
+    $dir = storage_path('framework/testing/search-guard-edges');
+    File::deleteDirectory($dir);
+    $guard = fn (string $in, string $query) => Process::path("{$dir}/{$in}")->input(json_encode(['tool_input' => ['query' => $query]]))
+        ->run(['php', '-n', resource_path('review/skill/search-guard.php')]);
+
+    // A private package with a file whose name holds a newline.
+    File::ensureDirectoryExists("{$dir}/php/vendor/acme/framework");
+    File::put("{$dir}/php/vendor/acme/framework/generated\nLedger.php", "<?php\n\nclass LedgerOnlyMarker\n{\n}\n");
+    File::put("{$dir}/php/composer.json", json_encode(['name' => 'acme/shop', 'require' => ['acme/framework' => '*@dev']]));
+    File::put("{$dir}/php/composer.lock", json_encode(['packages' => [['name' => 'acme/framework', 'version' => 'dev-main', 'dist' => ['type' => 'path', 'url' => '../framework']]]]));
+
+    // A public package that bundles another, and a scope pointed, in quotes, at the public registry.
+    File::ensureDirectoryExists("{$dir}/js");
+    File::put("{$dir}/js/package.json", json_encode(['name' => 'web', 'dependencies' => ['npm' => '^11.0.0', '@babel/core' => '^7.26.0']]));
+    File::put("{$dir}/js/package-lock.json", json_encode(['packages' => [
+        '' => ['name' => 'web'],
+        'node_modules/npm' => ['version' => '11.2.0', 'resolved' => 'https://registry.npmjs.org/npm/-/npm-11.2.0.tgz'],
+        'node_modules/npm/node_modules/semver' => ['version' => '7.7.1', 'inBundle' => true],
+        'node_modules/@babel/core' => ['version' => '7.26.0', 'resolved' => 'https://registry.npmjs.org/@babel/core/-/core-7.26.0.tgz'],
+    ]]));
+    File::put("{$dir}/js/.npmrc", "@babel:registry=\"https://registry.npmjs.org/\"\n");
+
+    expect($guard('php', 'LedgerOnlyMarker changelog')->exitCode())->toBe(2)
+        ->and($guard('js', 'semver changelog')->exitCode())->toBe(0)
+        ->and($guard('js', '@babel/core 7 changelog')->exitCode())->toBe(0);
 
     File::deleteDirectory($dir);
 });
