@@ -191,3 +191,11 @@ it('says what a review came to in the words a reader of the pull request uses', 
     ['PASSED', [], 'Approved'],
     ['PASSED', ['Whether the migration ran in production.'], 'Manual review required'],
 ]);
+
+it('records no cost below zero, which only a forged usage file can say', function () {
+    ($this->leave)(['result' => 'PASSED', 'summary' => 'No findings.', 'manual_review' => [], 'findings' => []]);
+    File::put("{$this->work}/ai-usage.json", json_encode(['usage' => ['claude-opus-5-5' => ['input' => 1000, 'output' => 200]], 'cost' => -1000]));
+
+    expect(($this->report)())->toBeTrue()
+        ->and(ReviewRun::query()->sole()->cost)->toBeNull();
+});

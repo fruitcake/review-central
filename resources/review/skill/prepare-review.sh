@@ -165,7 +165,7 @@ done
 # "todo" or a transcript's "suppression" came back as a loosened check.
 EXCLUDE=$(git rev-parse --git-path info/exclude 2> /dev/null) && mkdir -p "$(dirname "$EXCLUDE")" \
   && for file in /.review/ /.review-variables /.review-skills/ /.review-instructions/ /review-context.json /review-ticket.md /ai-review.json /ai-usage.json \
-                 /claude-review.jsonl /codex-review.jsonl /codex-review-candidates.md /ocr-review.json /pi-review.jsonl \
+                 /claude-review.jsonl /claude-review-candidates.md /claude-review-candidates.jsonl /.claude-candidates-cost /codex-review.jsonl /codex-review-candidates.md /ocr-review.json /pi-review.jsonl \
                  /ocr-background.md /ocr-rules.json /review-scan.md /.review-started /.review-verdict /.claude-exit /.codex-exit /.pi-exit; do
        grep -qxF "$file" "$EXCLUDE" 2> /dev/null || echo "$file" >> "$EXCLUDE"
      done
