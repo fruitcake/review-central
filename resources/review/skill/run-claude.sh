@@ -223,7 +223,8 @@ SHOW='
 # last text is taken. When it fails or finds nothing, the review goes ahead without it.
 CANDIDATES=claude-review-candidates.md
 rm -f "$CANDIDATES"
-if [ "${REVIEW_EXTRA_PASSES:-false}" = "true" ] && [ -z "$RESUME_SESSION" ]; then
+# A follow-up runs them too, over the follow-up's range.
+if [ "${REVIEW_EXTRA_PASSES:-false}" = "true" ]; then
   _dest="${BITBUCKET_PR_DESTINATION_BRANCH:-}"
   _since=$(jq -r '.handover.reviewed_up_to // .last_reviewed_commit // empty' "${REVIEW_CONTEXT_FILE:-review-context.json}" 2> /dev/null) || _since=""
   _reviewed="${BITBUCKET_COMMIT:-HEAD}"
@@ -261,6 +262,8 @@ if [ "${REVIEW_EXTRA_PASSES:-false}" = "true" ] && [ -z "$RESUME_SESSION" ]; the
     if [ ! -s "$CANDIDATES" ]; then
       jq -rs '[.[] | select(.type == "assistant" and .parent_tool_use_id == null) | .message.content[]? | select(.type == "text") | .text] | last // empty' claude-review-candidates.jsonl 2> /dev/null > "$CANDIDATES"
     fi
+    # Its cost, for collect-usage.sh where the transcripts record none: the stream goes.
+    jq -s '[.[] | select(.type == "result") | .total_cost_usd // 0] | last // 0' claude-review-candidates.jsonl 2> /dev/null > .claude-candidates-cost || rm -f .claude-candidates-cost
     rm -f claude-review-candidates.jsonl
     if [ ! -s "$CANDIDATES" ] || grep -qx 'No candidates.' "$CANDIDATES"; then
       echo "The review passes returned nothing; the review goes ahead without them."

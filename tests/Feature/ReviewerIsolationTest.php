@@ -252,5 +252,22 @@ it('runs Claude\'s extra passes as a session of their own first, and hands what 
         ->and(File::get("{$dir}/passes-args.txt"))->toContain('--model sonnet')
         ->and(File::get("{$dir}/review-prompt.txt"))->toContain('REVIEW PASSES:', '`claude-review-candidates.md`', 'none is dropped without a reason');
 
+    // A follow-up resumes the review's session, and the passes still run, over the follow-up's range.
+    File::delete("{$dir}/claude-review-candidates.md");
+    File::ensureDirectoryExists("{$dir}/home");
+    File::put("{$dir}/home/.review-session", "session-one\n");
+    $git('commit', '-q', '--allow-empty', '-m', 'more');
+    File::put("{$dir}/review-context.json", json_encode(['settings' => ['stack' => []], 'pull_request' => ['destination_branch' => 'main'], 'last_reviewed_commit' => trim($git('rev-parse', 'HEAD~1')->output())]));
+
+    $followUp = Process::path($dir)->env([
+        'PATH' => "{$dir}/bin:".getenv('PATH'), 'HOME' => "{$dir}/home", 'REVIEW_LOCAL' => 'true', 'REVIEW_CONTINUE' => 'true',
+        'REVIEW_EXTRA_PASSES' => 'true', 'BITBUCKET_PR_DESTINATION_BRANCH' => 'main', 'BITBUCKET_COMMIT' => 'HEAD',
+    ])->run(['sh', resource_path('review/skill/run-claude.sh')]);
+
+    expect($followUp->output())->toContain('Carrying on from the session of the review before this one')
+        ->toContain('..HEAD first, for candidates')
+        ->and(File::exists("{$dir}/claude-review-candidates.md"))->toBeTrue()
+        ->and(File::exists("{$dir}/.claude-candidates-cost"))->toBeTrue();
+
     File::deleteDirectory($dir);
 });

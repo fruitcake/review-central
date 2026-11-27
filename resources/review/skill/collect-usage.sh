@@ -166,7 +166,9 @@ RESULT_FILE="${REVIEW_TRANSCRIPT_FILE:-claude-review.jsonl}"
 if [ "$COMPLETE" = "true" ] && [ "$COST" = "0.000000" ] && [ -s "$RESULT_FILE" ]; then
   RESULT_COST=$(jq -R 'fromjson? // empty' "$RESULT_FILE" 2>/dev/null \
     | jq -s -r '[.[] | select(.type == "result") | .total_cost_usd // 0] | last // 0' 2>/dev/null) || RESULT_COST=0
-  COST=$(awk -v a="${RESULT_COST:-0}" 'BEGIN { printf "%.6f", a }')
+  # The extra passes ran as a session of their own before it, with a result of its own.
+  PASSES_COST=$(cat .claude-candidates-cost 2> /dev/null || echo 0)
+  COST=$(awk -v a="${RESULT_COST:-0}" -v b="${PASSES_COST:-0}" 'BEGIN { printf "%.6f", a + b }')
 fi
 
 if [ "$COMPLETE" != "true" ] || [ "$COST" = "0.000000" ]; then
