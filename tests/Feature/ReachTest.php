@@ -111,6 +111,31 @@ it('says of an entry point its route, and whether any of its middleware signs an
         ->toContain('- `app/Http/Controllers/PaymentController.php::pay` (POST /pay/{lesson}; no middleware that signs anyone in: web, throttle:10), through `createParticipant`');
 });
 
+it('puts a route no one signs in for before an authenticated one, and calls a stack it cannot read unknown', function (string $routes, string $said) {
+    ($this->put)('routes/web.php', "<?php\n\n{$routes}\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Routes');
+    ($this->put)('app/Models/Lesson.php', str_replace('return null;', "return \$this->invited(\$member) ? null : 'Not invited';", File::get("{$this->dir}/app/Models/Lesson.php")));
+    ($this->git)('commit', '-qam', 'Only invited members');
+
+    expect(($this->reach)())->toContain("- `app/Http/Controllers/PaymentController.php::pay` ({$said}), through `createParticipant`");
+})->with([
+    'public after authenticated' => ["Route::post('a/pay', [PaymentController::class, 'pay'])->middleware('auth');\nRoute::post('pay', [PaymentController::class, 'pay']);", 'POST /pay, and 1 more route(s); no middleware that signs anyone in: web'],
+    'session check only' => ["Route::post('pay', [PaymentController::class, 'pay'])->middleware('auth.session');", 'POST /pay; no middleware that signs anyone in: web, auth.session'],
+    'read from configuration' => ["Route::post('pay', [PaymentController::class, 'pay'])->middleware(config('pay.middleware'));", 'POST /pay; middleware the route files do not let be read, besides web'],
+]);
+
+it('says of a Livewire action the page it runs on, and that its own request runs less', function () {
+    ($this->put)('app/Livewire/Booking.php', "<?php\n\nclass Booking\n{\n    public function pay(Lesson \$lesson)\n    {\n        \$lesson->createParticipant(auth()->user());\n    }\n}\n");
+    ($this->put)('routes/web.php', "<?php\n\nRoute::get('booking', Booking::class)->middleware('auth');\n");
+    ($this->git)('add', '-A');
+    ($this->git)('commit', '-qm', 'Booking');
+    ($this->put)('app/Models/Lesson.php', str_replace('return null;', "return \$this->invited(\$member) ? null : 'Not invited';", File::get("{$this->dir}/app/Models/Lesson.php")));
+    ($this->git)('commit', '-qam', 'Only invited members');
+
+    expect(($this->reach)())->toContain("- `app/Livewire/Booking.php::pay` (on the page GET|HEAD /booking; behind auth: an action's own request runs only the middleware Livewire persists), through `createParticipant`");
+});
+
 it('says nothing when the change makes no check', function () {
     ($this->put)('app/Services/PaymentService.php', str_replace('$lesson->createParticipant($member);', "\$lesson->createParticipant(\$member);\n        logger('paid');", File::get("{$this->dir}/app/Services/PaymentService.php")));
     ($this->git)('commit', '-qam', 'Log payments');

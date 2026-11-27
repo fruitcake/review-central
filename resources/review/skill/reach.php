@@ -55,7 +55,7 @@ const CREATES = 'create|forceCreate|insert|firstOrCreate|updateOrCreate';
 const ENTRY = '#^(app/Http/Controllers/|app/Livewire/|app/Console/Commands/|app/Jobs/|app/Listeners/|app/Mcp/|app/Filament/|routes/|resources/views/)#';
 
 /** A middleware that signs someone in or checks what they may do, by its name or its class's. */
-const AUTHENTICATES = '/(?<!RedirectIf)Authenticat|\\bauth\\b|auth[.:]|sanctum|passport|signed|ValidateSignature|can:|Authorize|permission|role|admin|verified/i';
+const AUTHENTICATES = '/(?<!RedirectIf)Authenticat(?!eSession)|\\bauth(?!\\.session)\\b|auth:|sanctum|passport|signed|ValidateSignature|can:|Authorize|permission|role|admin|verified/i';
 
 /** A method named as a check. */
 const CHECK = '/^(can[A-Z]\w*|allows?|allows[A-Z]\w*|authori[sz]e\w*|check[A-Z]\w*|has\w*(Error|Errors|Access|Permission)|is\w*(Allowed|Accessible|Permitted|Authori[sz]ed)|\w*Access(Error|Errors)?|\w*Permission)$/';
@@ -672,7 +672,12 @@ foreach (is_dir('routes') ? reach_routes((string) getcwd()) : [] as $route) {
     $routesTo[$route['action']][] = $route;
 }
 
-/** For an entry point in a controller or a component: its route and whether its middleware signs anyone in. */
+/**
+ * For an entry point in a controller or a component: its route and whether its
+ * middleware signs anyone in. A route no one has to sign in for comes first, so an
+ * authenticated one cannot hide it; a stack with middleware the route files did not
+ * let be read is said to be so, never public.
+ */
 $routed = function (string $entry) use (&$routesTo, $fullClassOf): string {
     if (! str_contains($entry, '::') || $routesTo === []) {
         return '';
@@ -680,20 +685,36 @@ $routed = function (string $entry) use (&$routesTo, $fullClassOf): string {
 
     [$file, $name] = explode('::', $entry, 2);
     $class = $fullClassOf($file);
+    $routes = $routesTo["{$class}::".strtolower($name)] ?? [];
     // A full-page component is routed as the class; its actions run on that page.
-    $routes = $routesTo["{$class}::".strtolower($name)] ?? (str_starts_with($file, 'app/Livewire/') ? $routesTo["{$class}::__invoke"] ?? [] : []);
+    $page = $routes === [] && str_starts_with($file, 'app/Livewire/');
+    $routes = $page ? $routesTo["{$class}::__invoke"] ?? [] : $routes;
 
     if ($routes === []) {
         return '';
     }
 
-    $route = $routes[0];
-    $middleware = array_map(fn (string $name): string => substr((string) strrchr('\\'.$name, '\\'), 1), $route['middleware']);
-    $guarding = array_values(array_filter($middleware, fn (string $name): bool => preg_match(AUTHENTICATES, $name) === 1));
-    $more = count($routes) > 1 ? ', and '.(count($routes) - 1).' more route(s)' : '';
+    $short = fn (string $name): string => substr((string) strrchr('\\'.$name, '\\'), 1);
+    $state = function (array $route) use ($short): array {
+        $guarding = array_values(array_filter($route['middleware'], fn (string $name): bool => preg_match(AUTHENTICATES, $name) === 1));
 
-    return " ({$route['methods']} {$route['uri']}{$more}; "
-        .($guarding === [] ? 'no middleware that signs anyone in'.($middleware === [] ? '' : ': '.implode(', ', $middleware)) : 'behind '.implode(', ', $guarding)).')';
+        return [$guarding === [] ? (in_array('?', $route['middleware'], true) ? 1 : 0) : 2, array_map($short, $guarding)];
+    };
+    usort($routes, fn (array $a, array $b): int => $state($a)[0] <=> $state($b)[0]);
+    $route = $routes[0];
+    [$level, $guarding] = $state($route);
+    $more = count($routes) > 1 ? ', and '.(count($routes) - 1).' more route(s)' : '';
+    $middleware = implode(', ', array_map($short, array_diff($route['declared'] ?? $route['middleware'], ['?'])));
+    $said = match ($level) {
+        0 => 'no middleware that signs anyone in'.($middleware === '' ? '' : ": {$middleware}"),
+        1 => 'middleware the route files do not let be read'.($middleware === '' ? '' : ", besides {$middleware}"),
+        default => 'behind '.implode(', ', $guarding),
+    };
+
+    // Livewire runs only the middleware it persists again on an action's own request.
+    return $page
+        ? " (on the page {$route['methods']} {$route['uri']}{$more}; {$said}: an action's own request runs only the middleware Livewire persists)"
+        : " ({$route['methods']} {$route['uri']}{$more}; {$said})";
 };
 
 $out = [];

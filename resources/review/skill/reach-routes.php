@@ -24,11 +24,12 @@
 declare(strict_types=1);
 
 /**
- * The routes, each with its methods, URI, middleware as written (an alias resolved
- * to its class where the application names one), and the action in lower case as
- * "class::method".
+ * The routes, each with its methods, URI, middleware (an alias resolved to its
+ * class where the application names one, a group to its members, "?" for what
+ * could not be read), the middleware as declared, with groups by their names,
+ * and the action in lower case as "class::method".
  *
- * @return list<array{methods: string, uri: string, middleware: list<string>, action: string}>
+ * @return list<array{methods: string, uri: string, middleware: list<string>, declared: list<string>, action: string}>
  */
 function reach_routes(string $root): array
 {
@@ -64,8 +65,11 @@ final class ReachRouteReader
     /** @var array<string, mixed> what a route file assigns to a variable, such as a list of middleware */
     private array $variables = [];
 
-    /** @var list<string> actions an application's own ResourceRegistrar adds to every resource, such as export */
+    /** @var array<string, array{0: string, 1: string, 2: bool}> actions the application's bound ResourceRegistrar adds, such as export: methods, URI after the resource's, and false for apiResource */
     private array $extraResourceActions = [];
+
+    /** @var array<string, list<string>> middleware groups, by name: the kernel's and bootstrap/app.php's */
+    private array $groups = [];
 
     public function __construct(private readonly string $root) {}
 
@@ -101,28 +105,58 @@ final class ReachRouteReader
             $this->load("{$this->root}/routes/api.php", ['middleware' => ['api'], 'prefix' => 'api'] + $this->context());
         }
 
-        // The controller's own: $this->middleware() in it or a parent, or HasMiddleware.
+        // The whole stack, as Laravel gathers it: the route's and its groups', the
+        // controller's own, the groups' members; then what the route and its groups exclude.
         foreach ($this->routes as $index => $route) {
             [$class, $method] = explode('::', $route['action'], 2);
+            $middleware = $route['middleware'];
 
             foreach ($this->controllerMiddleware($class) as [$name, $only, $except]) {
                 if (($only === null || in_array($method, $only, true)) && ! in_array($method, $except, true)) {
-                    $this->routes[$index]['middleware'][] = $this->named($name);
+                    $middleware[] = $this->named($name);
                 }
             }
 
-            $this->routes[$index]['middleware'] = array_values(array_unique($this->routes[$index]['middleware']));
+            $without = $this->expand($route['without']);
+            $this->routes[$index]['middleware'] = array_values(array_diff(array_unique($this->expand($middleware)), $without));
+            // As declared, for the reader: the groups by their names.
+            $this->routes[$index]['declared'] = array_values(array_diff(array_unique($middleware), $without));
+            unset($this->routes[$index]['without']);
         }
 
         return $this->routes;
     }
 
     /**
-     * The middleware a controller sets itself, and its parents: each with the
-     * methods it is limited to (null for all) and those it leaves out. A name built
-     * from a variable is kept up to it, as can:….
+     * Middleware with each group it names replaced by the group's members.
      *
-     * @return list<array{0: string, 1: list<string>|null, 2: list<string>}>
+     * @param  list<string>  $middleware
+     * @return list<string>
+     */
+    private function expand(array $middleware, int $depth = 0): array
+    {
+        $expanded = [];
+
+        foreach ($middleware as $name) {
+            if (isset($this->groups[$name]) && $depth < 5) {
+                array_push($expanded, $name, ...$this->expand(array_map($this->named(...), $this->groups[$name]), $depth + 1));
+            } else {
+                $expanded[] = $name;
+            }
+        }
+
+        return $expanded;
+    }
+
+    /**
+     * The middleware a controller sets itself, and what it inherits: each with the
+     * methods it is limited to (null for all), those it leaves out, and whether a
+     * constructor or HasMiddleware sets it. A parent's counts as PHP runs it: its
+     * constructor's where the class has none or calls parent::__construct(), its
+     * middleware() where the class does not override it. A name built from a
+     * variable is kept up to it, as can:….
+     *
+     * @return list<array{0: string, 1: list<string>|null, 2: list<string>, 3: string}>
      */
     private function controllerMiddleware(string $class, int $depth = 0): array
     {
@@ -139,7 +173,10 @@ final class ReachRouteReader
             return [];
         }
 
+        // Without comments: a registration commented out registers nothing. Only a file
+        // that mentions middleware at all needs it, and tokenizing every one is slow.
         $source = (string) file_get_contents($file);
+        $source = stripos($source, 'middleware') !== false ? reach_routes_code($source) : $source;
         $found = [];
         $methods = fn (?string $list): array => $list === null ? [] : array_map(strtolower(...), preg_match_all('/[\'"](\w+)[\'"]/', $list, $names) > 0 ? $names[1] : []);
 
@@ -156,21 +193,26 @@ final class ReachRouteReader
                     $except = preg_match('/[\'"]except[\'"]\s*=>\s*(\[[^\]]*\]|[\'"]\w+[\'"])/', $options[1], $limit) === 1 ? $methods($limit[1]) : $except;
                 }
 
-                foreach (reach_routes_literals($names) as $name) {
-                    $found[] = [$name, $only, $except];
+                foreach (reach_routes_literals($names) ?: ['?'] as $name) {
+                    $found[] = [$name, $only, $except, 'constructor'];
                 }
             }
         }
 
-        // HasMiddleware: static function middleware() returns names and new Middleware(name, only:, except:).
-        if (preg_match('/static\s+function\s+middleware\s*\(\s*\)[^{]*\{(.*?)\n\s{4}\}/s', $source, $body) === 1) {
+        // HasMiddleware: static function middleware() returns names and new Middleware(name or [names], only:, except:).
+        $ownMiddleware = preg_match('/static\s+function\s+middleware\s*\(\s*\)[^{]*\{(.*?)\n\s{4}\}/s', $source, $body) === 1;
+
+        if ($ownMiddleware) {
             if (preg_match_all('/new\s+\\\\?(?:[\w\\\\]*\\\\)?Middleware\s*\((.*?)\)\s*(?:->\s*(only|except)\s*\((.*?)\))?\s*[,\]]/s', $body[1], $objects, PREG_SET_ORDER) > 0) {
                 foreach ($objects as $object) {
                     $only = preg_match('/only\s*:\s*(\[[^\]]*\]|[\'"]\w+[\'"])/', $object[1], $limit) === 1 ? $methods($limit[1]) : (($object[2] ?? '') === 'only' ? $methods($object[3]) : null);
                     $except = preg_match('/except\s*:\s*(\[[^\]]*\]|[\'"]\w+[\'"])/', $object[1], $limit) === 1 ? $methods($limit[1]) : (($object[2] ?? '') === 'except' ? $methods($object[3]) : []);
+                    $first = trim((string) preg_replace('/,?\s*\b(only|except)\s*:.*$/s', '', $object[1]));
+                    // The first argument: one name, or a list of them.
+                    $names = str_starts_with($first, '[') ? reach_routes_literals($first) : array_slice(reach_routes_literals($first), 0, 1);
 
-                    foreach (array_slice(reach_routes_literals(preg_replace('/\b(only|except)\s*:.*$/s', '', $object[1]) ?? ''), 0, 1) as $name) {
-                        $found[] = [$name, $only, $except];
+                    foreach ($names ?: ['?'] as $name) {
+                        $found[] = [$name, $only, $except, 'middleware'];
                     }
                 }
 
@@ -179,7 +221,7 @@ final class ReachRouteReader
 
             if (preg_match('/return\s*\[(.*)\]/s', $body[1], $returned) === 1) {
                 foreach (reach_routes_literals($returned[1]) as $name) {
-                    $found[] = [$name, null, []];
+                    $found[] = [$name, null, [], 'middleware'];
                 }
             }
         }
@@ -187,7 +229,14 @@ final class ReachRouteReader
         [$namespace, $uses] = reach_routes_imports($source);
 
         if (preg_match('/\bclass\s+\w+\s+extends\s+([\w\\\\]+)/', $source, $parent) === 1) {
-            $found = array_merge($this->controllerMiddleware(strtolower(reach_routes_resolve($parent[1], $namespace, $uses)), $depth + 1), $found);
+            $ownConstructor = preg_match('/function\s+__construct\s*\(/', $source) === 1;
+            $callsParent = preg_match('/parent\s*::\s*__construct\s*\(/', $source) === 1;
+
+            foreach ($this->controllerMiddleware(strtolower(reach_routes_resolve($parent[1], $namespace, $uses)), $depth + 1) as $inherited) {
+                if (($inherited[3] === 'constructor' && (! $ownConstructor || $callsParent)) || ($inherited[3] === 'middleware' && ! $ownMiddleware)) {
+                    $found[] = $inherited;
+                }
+            }
         }
 
         return $known[$class] = $found;
@@ -248,6 +297,8 @@ final class ReachRouteReader
     /** The class a middleware alias names, from the HTTP kernel or bootstrap/app.php. */
     private function readAliases(): void
     {
+        $this->readGroups();
+
         foreach (["{$this->root}/app/Http/Kernel.php", "{$this->root}/bootstrap/app.php"] as $file) {
             if (! is_file($file)) {
                 continue;
@@ -264,10 +315,94 @@ final class ReachRouteReader
         }
     }
 
-    /** An application's own ResourceRegistrar, whose resource defaults can name more actions. */
+    /**
+     * The middleware groups the kernel declares, and those bootstrap/app.php declares
+     * or adds to: group('members', [...]), appendToGroup('web', ...), web(append: [...]).
+     */
+    private function readGroups(): void
+    {
+        $kernel = "{$this->root}/app/Http/Kernel.php";
+
+        if (is_file($kernel)) {
+            $source = reach_routes_code((string) file_get_contents($kernel));
+            [$namespace, $uses] = reach_routes_imports($source);
+
+            if (preg_match('/\$middlewareGroups\s*=\s*\[/', $source, $start, PREG_OFFSET_CAPTURE) === 1) {
+                $block = reach_routes_bracket($source, $start[0][1] + strlen($start[0][0]) - 1);
+
+                if (preg_match_all('/([\'"])([\w.\-]+)\1\s*=>\s*\[/', $block, $names, PREG_OFFSET_CAPTURE | PREG_SET_ORDER) > 0) {
+                    foreach ($names as $name) {
+                        $this->groups[$name[2][0]] = $this->classes(reach_routes_bracket($block, $name[0][1] + strlen($name[0][0]) - 1), $namespace, $uses);
+                    }
+                }
+            }
+        }
+
+        $bootstrap = "{$this->root}/bootstrap/app.php";
+
+        if (! is_file($bootstrap)) {
+            return;
+        }
+
+        $source = reach_routes_code((string) file_get_contents($bootstrap));
+        [$namespace, $uses] = reach_routes_imports($source);
+
+        if (preg_match_all('/->\s*(group|appendToGroup|prependToGroup)\s*\(\s*([\'"])([\w.\-]+)\2\s*,/', $source, $calls, PREG_OFFSET_CAPTURE | PREG_SET_ORDER) > 0) {
+            foreach ($calls as $call) {
+                $open = $call[0][1] + strlen($call[0][0]) - 1;
+                $arguments = reach_routes_bracket($source, (int) strrpos(substr($source, 0, $open + 1), '('));
+                $members = $this->classes(substr($arguments, strpos($arguments, ',') + 1), $namespace, $uses);
+                $this->groups[$call[3][0]] = $call[1][0] === 'group' ? $members : array_merge($this->groups[$call[3][0]] ?? [], $members);
+            }
+        }
+
+        if (preg_match_all('/->\s*(web|api)\s*\(/', $source, $calls, PREG_OFFSET_CAPTURE | PREG_SET_ORDER) > 0) {
+            foreach ($calls as $call) {
+                $arguments = reach_routes_bracket($source, $call[0][1] + strlen($call[0][0]) - 1);
+
+                foreach (['append', 'prepend'] as $where) {
+                    if (preg_match('/\b'.$where.'\s*:\s*/', $arguments, $at, PREG_OFFSET_CAPTURE) === 1) {
+                        $value = substr($arguments, $at[0][1] + strlen($at[0][0]));
+                        $value = str_starts_with($value, '[') ? reach_routes_bracket($value, 0) : (string) preg_replace('/,.*$/s', '', $value);
+                        $this->groups[$call[1][0]] = array_merge($this->groups[$call[1][0]] ?? [], $this->classes($value, $namespace, $uses));
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * The middleware a piece of code lists: names as written, classes in full.
+     *
+     * @param  array<string, string>  $uses
+     * @return list<string>
+     */
+    private function classes(string $code, string $namespace, array $uses): array
+    {
+        preg_match_all('/([\'"])([^\'"]*)\1|(\\\\?[\w\\\\]+)::class/', $code, $found, PREG_SET_ORDER);
+
+        return array_map(fn (array $match): string => ($match[3] ?? '') !== '' ? reach_routes_resolve($match[3], $namespace, $uses) : $match[2], $found);
+    }
+
+    /**
+     * The application's own ResourceRegistrar, where a provider binds one: the actions
+     * its resource defaults add, each with the method and URI its addResource method
+     * gives it. One it does not bind, or an action whose route its method does not
+     * say plainly, adds nothing.
+     */
     private function readResourceRegistrar(): void
     {
-        if (! is_dir("{$this->root}/app")) {
+        $bound = '';
+
+        foreach (glob("{$this->root}/app/Providers/*.php") ?: [] as $provider) {
+            $source = (string) file_get_contents($provider);
+
+            if (preg_match('/->\s*(?:bind|singleton)\s*\(\s*(?:[\'"]\\\\?Illuminate\\\\+Routing\\\\+ResourceRegistrar[\'"]|\\\\?(?:Illuminate\\\\Routing\\\\)?ResourceRegistrar::class)/', $source) === 1) {
+                $bound .= $source;
+            }
+        }
+
+        if ($bound === '' || ! is_dir("{$this->root}/app")) {
             return;
         }
 
@@ -278,10 +413,42 @@ final class ReachRouteReader
 
             $source = (string) file_get_contents($file->getPathname());
 
-            if (str_contains($source, 'ResourceRegistrar') && preg_match('/\$resourceDefaults\s*=\s*\[([^\]]*)\]/', $source, $defaults) === 1) {
-                $this->extraResourceActions = array_values(array_diff(array_map(strtolower(...), reach_routes_literals($defaults[1])), array_keys(self::RESOURCE)));
+            if (! str_contains($source, 'ResourceRegistrar')) {
+                continue;
+            }
+
+            $source = reach_routes_code($source);
+
+            if (preg_match('/\bclass\s+(\w+)/', $source, $class) !== 1 || preg_match('/\b'.$class[1].'\b/', $bound) !== 1
+                || preg_match('/\$resourceDefaults\s*=\s*\[([^\]]*)\]/', $source, $defaults) !== 1) {
+                continue;
+            }
+
+            foreach (array_diff(array_map(strtolower(...), reach_routes_literals($defaults[1])), array_keys(self::RESOURCE)) as $action) {
+                if (preg_match('/function\s+addResource'.preg_quote($action, '/').'\s*\((.*?)\n\s{4}\}/si', $source, $method) !== 1
+                    || preg_match('/->\s*router\s*->\s*(get|post|put|patch|delete|options|any)\s*\(/i', $method[1], $verb) !== 1) {
+                    continue;
+                }
+
+                // The URI as getResourceUri() and the strings after it build it; a member route's {base} as {id}.
+                $suffix = preg_match('/getResourceUri\s*\([^)]*\)((?:\s*\.\s*(?:[\'"][^\'"]*[\'"]|\$base))*)\s*;/', $method[1], $uri) === 1
+                    ? (string) preg_replace(['/\$base/', '/[\'"\s.]/'], ['{id}', ''], $uri[1])
+                    : null;
+
+                if ($suffix !== null) {
+                    $this->extraResourceActions[$action] = [self::VERBS[strtolower($verb[1])], $suffix, false];
+                }
             }
         }
+    }
+
+    /** A resource's URI: photos, or projects/{project}/tasks for projects.tasks. */
+    private function resourceUri(string $name): string
+    {
+        $segments = explode('.', $name);
+        $last = array_pop($segments);
+
+        return implode('', array_map(fn (string $segment): string => "{$segment}/{".preg_replace('/s$/', '', str_replace('-', '_', $segment)).'}/', $segments)).$last;
     }
 
     /** bootstrap/app.php: ->withRouting(web: ..., api: ..., then: function () { ... }). */
@@ -333,7 +500,7 @@ final class ReachRouteReader
      */
     private function context(): array
     {
-        return ['middleware' => [], 'prefix' => '', 'namespace' => '', 'controller' => null];
+        return ['middleware' => [], 'without' => [], 'prefix' => '', 'namespace' => '', 'controller' => null];
     }
 
     /**
@@ -402,8 +569,7 @@ final class ReachRouteReader
      */
     private function chain(array $tokens, int $at, array $context, string $file): int
     {
-        $attributes = ['middleware' => [], 'prefix' => '', 'namespace' => null, 'controller' => null];
-        $without = [];
+        $attributes = ['middleware' => [], 'without' => [], 'prefix' => '', 'namespace' => null, 'controller' => null];
         $pending = [];
         $at += 2;
 
@@ -418,17 +584,25 @@ final class ReachRouteReader
                     $offset = $method === 'match' ? 1 : 0;
                     $methods = $method === 'match' ? implode('|', array_map(strtoupper(...), array_filter((array) $value(0), is_string(...)))) : self::VERBS[$method];
                     $uri = $value($offset);
-                    $action = $this->action($value($offset + 1), $context, $attributes);
+                    $actionValue = $value($offset + 1);
+                    $action = $this->action($actionValue, $context, $attributes);
+
+                    // ['uses' => ..., 'middleware' => 'auth', 'excluded_middleware' => ...] carries its own.
+                    $own = is_array($actionValue) ? $this->names($actionValue['middleware'] ?? []) : [];
+                    $ownWithout = is_array($actionValue) ? $this->names($actionValue['excluded_middleware'] ?? $actionValue['withoutMiddleware'] ?? []) : [];
 
                     if (is_string($uri) && $action !== null) {
-                        $pending[] = ['methods' => $methods, 'uri' => $uri, 'action' => $action];
+                        $pending[] = ['methods' => $methods, 'uri' => $uri, 'action' => $action, 'middleware' => $own, 'without' => $ownWithout];
                     }
 
                     break;
 
                 case in_array($method, ['resource', 'apiresource', 'resources', 'apiresources'], true):
-                    // resources(['photos' => PhotoController::class, ...]) is resource() for each.
-                    $resources = str_ends_with($method, 'resources') ? (is_array($value(0)) ? $value(0) : []) : [$value(0) => $value(1)];
+                    // resources(['photos' => PhotoController::class, ...], $options) is resource() for each.
+                    $plural = str_ends_with($method, 'resources');
+                    $resources = $plural ? (is_array($value(0)) ? $value(0) : []) : [$value(0) => $value(1)];
+                    $options = $value($plural ? 1 : 2);
+                    $options = is_array($options) ? $options : [];
                     $api = str_starts_with($method, 'api');
 
                     foreach ($resources as $name => $class) {
@@ -436,17 +610,25 @@ final class ReachRouteReader
                             continue;
                         }
 
-                        $actions = self::RESOURCE;
-
-                        // An application's own registrar's extra actions, such as export, by their name.
-                        foreach ($api ? [] : $this->extraResourceActions as $extra) {
-                            $actions[$extra] = ['GET|HEAD', "/{$extra}", false];
-                        }
+                        // The application's own registrar's actions, as its addResource methods say.
+                        $actions = self::RESOURCE + ($api ? [] : $this->extraResourceActions);
 
                         foreach ($actions as $action => [$methods, $suffix, $inApi]) {
-                            if (! $api || $inApi) {
-                                $pending[] = ['methods' => $methods, 'uri' => str_replace('.', '/', $name).$suffix, 'action' => strtolower($this->className($class, $context, $attributes)).'::'.$action, 'resource' => $action];
+                            $only = isset($options['only']) ? array_map(strtolower(...), array_filter((array) $options['only'], is_string(...))) : null;
+                            $except = array_map(strtolower(...), array_filter((array) ($options['except'] ?? []), is_string(...)));
+
+                            if (($api && ! $inApi) || ($only !== null && ! in_array($action, $only, true)) || in_array($action, $except, true)) {
+                                continue;
                             }
+
+                            $pending[] = [
+                                'methods' => $methods,
+                                'uri' => $this->resourceUri($name).$suffix,
+                                'action' => strtolower($this->className($class, $context, $attributes)).'::'.$action,
+                                'resource' => $action,
+                                'middleware' => $this->names($options['middleware'] ?? []),
+                                'without' => $this->names($options['excluded_middleware'] ?? $options['withoutMiddleware'] ?? []),
+                            ];
                         }
                     }
 
@@ -464,7 +646,7 @@ final class ReachRouteReader
                     break;
 
                 case $method === 'withoutmiddleware':
-                    $without = array_merge($without, $this->middleware($arguments, $tokens, $file));
+                    $attributes['without'] = array_merge($attributes['without'], $this->middleware($arguments, $tokens, $file));
 
                     break;
 
@@ -491,8 +673,9 @@ final class ReachRouteReader
                         $array = $value(0);
 
                         if (is_array($array)) {
-                            $attributes['middleware'] = array_merge($attributes['middleware'], array_map($this->named(...), array_filter((array) ($array['middleware'] ?? []), is_string(...))));
-                            $attributes['prefix'] = trim($attributes['prefix'].'/'.(is_string($array['prefix'] ?? null) ? $array['prefix'] : ''), '/');
+                            $attributes['middleware'] = array_merge($attributes['middleware'], $this->names(array_key_exists('middleware', $array) ? $array['middleware'] : []));
+                            $attributes['without'] = array_merge($attributes['without'], $this->names($array['excluded_middleware'] ?? $array['withoutMiddleware'] ?? []));
+                            $attributes['prefix'] = trim($attributes['prefix'].'/'.(is_string($array['prefix'] ?? null) ? $array['prefix'] : (isset($array['prefix']) ? '{?}' : '')), '/');
                             $attributes['namespace'] = is_string($array['namespace'] ?? null) ? $array['namespace'] : $attributes['namespace'];
                         }
                     }
@@ -529,7 +712,8 @@ final class ReachRouteReader
             $this->routes[] = [
                 'methods' => $route['methods'],
                 'uri' => '/'.trim($inner['prefix'].'/'.ltrim($route['uri'], '/'), '/'),
-                'middleware' => array_values(array_diff(array_unique($inner['middleware']), $without)),
+                'middleware' => array_merge($inner['middleware'], $route['middleware'] ?? []),
+                'without' => array_merge($inner['without'], $route['without'] ?? []),
                 'action' => $route['action'],
             ];
         }
@@ -550,6 +734,7 @@ final class ReachRouteReader
 
         return [
             'middleware' => array_merge($context['middleware'], $attributes['middleware']),
+            'without' => array_merge($context['without'] ?? [], $attributes['without'] ?? []),
             'prefix' => trim($context['prefix'].'/'.$attributes['prefix'], '/'),
             // A group's namespace adds to the outer one, unless it starts at the root.
             'namespace' => $namespace === null ? $context['namespace'] : (str_starts_with($namespace, '\\') ? ltrim($namespace, '\\') : trim($context['namespace'].'\\'.$namespace, '\\')),
@@ -620,7 +805,12 @@ final class ReachRouteReader
 
         $namespace = $this->inner($context, $attributes)['namespace'];
 
-        return ltrim(($namespace !== '' ? "{$namespace}\\" : '').$class, '\\');
+        // As Laravel does: a name that starts with the group's namespace already has it.
+        if ($namespace === '' || str_starts_with($class, "{$namespace}\\")) {
+            return $class;
+        }
+
+        return "{$namespace}\\{$class}";
     }
 
     /**
@@ -635,12 +825,25 @@ final class ReachRouteReader
         $names = [];
 
         foreach ($arguments as [$from, $to]) {
-            foreach ((array) $this->value($tokens, $from, $to, file: $file) as $name) {
-                $names[] = is_string($name) ? $this->named($name) : '?';
-            }
+            $names = array_merge($names, $this->names($this->value($tokens, $from, $to, file: $file)));
         }
 
         return $names;
+    }
+
+    /**
+     * Middleware as a value gives it: a name, a list of them, or something this cannot
+     * read, which is kept as "?" so that no one concludes the route is public.
+     *
+     * @return list<string>
+     */
+    private function names(mixed $value): array
+    {
+        if ($value === null) {
+            return ['?'];
+        }
+
+        return array_map(fn (mixed $name): string => is_string($name) ? $this->named($name) : '?', is_array($value) ? array_values($value) : [$value]);
     }
 
     /** A middleware by its class where an alias names one, with its parameters. */
@@ -975,4 +1178,40 @@ function reach_routes_literals(string $code): array
     }
 
     return $literals;
+}
+
+/** PHP source without its comments, so that a line commented out says nothing. */
+function reach_routes_code(string $source): string
+{
+    $code = '';
+
+    foreach (@token_get_all($source) ?: [] as $token) {
+        $code .= is_array($token) ? (in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true) ? str_repeat("\n", substr_count($token[1], "\n")) : $token[1]) : $token;
+    }
+
+    return $code;
+}
+
+/** The text from a bracket to the one that closes it, both included. */
+function reach_routes_bracket(string $source, int $open): string
+{
+    $pairs = ['[' => ']', '(' => ')', '{' => '}'];
+    $close = $pairs[$source[$open] ?? ''] ?? null;
+
+    if ($close === null) {
+        return '';
+    }
+
+    $depth = 0;
+    $length = strlen($source);
+
+    for ($at = $open; $at < $length; $at++) {
+        if ($source[$at] === $source[$open]) {
+            $depth++;
+        } elseif ($source[$at] === $close && --$depth === 0) {
+            return substr($source, $open, $at - $open + 1);
+        }
+    }
+
+    return substr($source, $open);
 }
