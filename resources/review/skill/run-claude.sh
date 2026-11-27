@@ -216,8 +216,10 @@ SHOW='
 # runs the code-review skill and the pr-review-toolkit agents over the same range,
 # and what they report goes to the review as candidates, as Codex's own review does
 # for Codex. A step of the script rather than a request in the prompt, which the
-# review was free to pass over. Its own budget, CLAUDE_REVIEW_CANDIDATES_BUDGET
-# (8 dollars). A session that ran out still answered with what it had: then its
+# review was free to pass over. On a model of its own, CLAUDE_REVIEW_CANDIDATES_MODEL
+# (Sonnet: finding is broad work, and the review checks every candidate on its own
+# model; an agent that names its model keeps it), and a budget of its own,
+# CLAUDE_REVIEW_CANDIDATES_BUDGET (8 dollars). A session that ran out still answered with what it had: then its
 # last text is taken. When it fails or finds nothing, the review goes ahead without it.
 CANDIDATES=claude-review-candidates.md
 rm -f "$CANDIDATES"
@@ -235,13 +237,15 @@ if [ "${REVIEW_EXTRA_PASSES:-false}" = "true" ] && [ -z "$RESUME_SESSION" ]; the
   if [ -n "$_range" ]; then
     echo "##[phase] reviewer candidates"
     printf '\n-------------------- Claude review passes --------------------\n'
-    echo "The code-review skill and the pr-review-toolkit agents over $_range first, for candidates."
+    _cmodel=${CLAUDE_REVIEW_CANDIDATES_MODEL:-sonnet}
+    echo "The code-review skill and the pr-review-toolkit agents over $_range first, for candidates, on $_cmodel."
     _cprompt=$(mktemp)
     sed "s|{{RANGE}}|$_range|g" "$HERE/candidates-prompt.md" > "$_cprompt"
     _cbudget=${CLAUDE_REVIEW_CANDIDATES_BUDGET:-8}
     # shellcheck disable=SC2046
     env $(reviewer_env 'ANTHROPIC_API_KEY|ANTHROPIC_BASE_URL|CLAUDE_CODE_[A-Z0-9_]+|CLAUDE_CONFIG_DIR') "$FOREGROUND" "$CLAUDE" -p \
       --settings "$CONFIG" \
+      --model "$_cmodel" \
       --permission-mode auto \
       --mcp-config "$MCP_CONFIG" \
       --strict-mcp-config \
@@ -263,7 +267,7 @@ if [ "${REVIEW_EXTRA_PASSES:-false}" = "true" ] && [ -z "$RESUME_SESSION" ]; the
       rm -f "$CANDIDATES"
     else
       echo "Review passes: $(grep -c '^- ' "$CANDIDATES") candidate(s) for the review."
-      printf '\nREVIEW PASSES:\n\nThe code-review skill and the pr-review-toolkit agents reviewed this pull request before you; what they found is in `%s`. Read it in START ANALYSIS step 2: every item is a candidate that goes through the same filtering and verification, never a finding of its own.\n' "$CANDIDATES" >> "$PROMPT"
+      printf '\nREVIEW PASSES:\n\nThe code-review skill and the pr-review-toolkit agents reviewed this pull request before you; what they found is in `%s`. Read it in START ANALYSIS step 2, and treat it as CANDIDATES FROM OTHER PASSES says: every item is a candidate, never a finding of its own, and none is dropped without a reason.\n' "$CANDIDATES" >> "$PROMPT"
     fi
     echo "##[phase] reviewer"
   fi

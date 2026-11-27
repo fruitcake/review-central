@@ -228,6 +228,7 @@ it('runs Claude\'s extra passes as a session of their own first, and hands what 
         prompt=\$(cat)
         case "\$prompt" in
           *"first, independent pass"*)
+            printf '%s ' "\$@" > "{$dir}/passes-args.txt"
             echo '{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"code-review"}}]}}'
             echo '{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"- `app.php:1` · high · The export leaks every row · code-reviewer"}]}}'
             echo '{"type":"result","subtype":"error_max_budget_usd","is_error":true}' ;;
@@ -243,11 +244,13 @@ it('runs Claude\'s extra passes as a session of their own first, and hands what 
         'REVIEW_EXTRA_PASSES' => 'true', 'BITBUCKET_PR_DESTINATION_BRANCH' => 'main', 'BITBUCKET_COMMIT' => 'HEAD',
     ])->run(['sh', resource_path('review/skill/run-claude.sh')]);
 
-    expect($result->output())->toContain('The code-review skill and the pr-review-toolkit agents over origin/main...HEAD first, for candidates.')
+    expect($result->output())->toContain('The code-review skill and the pr-review-toolkit agents over origin/main...HEAD first, for candidates, on sonnet.')
         ->toContain('-> Skill code-review')
         ->toContain('Review passes: 1 candidate(s) for the review.')
         ->and(File::get("{$dir}/claude-review-candidates.md"))->toContain('The export leaks every row')
-        ->and(File::get("{$dir}/review-prompt.txt"))->toContain('REVIEW PASSES:', '`claude-review-candidates.md`');
+        // On Sonnet unless set otherwise: the review checks every candidate on its own model.
+        ->and(File::get("{$dir}/passes-args.txt"))->toContain('--model sonnet')
+        ->and(File::get("{$dir}/review-prompt.txt"))->toContain('REVIEW PASSES:', '`claude-review-candidates.md`', 'none is dropped without a reason');
 
     File::deleteDirectory($dir);
 });
