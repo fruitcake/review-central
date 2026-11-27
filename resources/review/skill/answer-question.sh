@@ -48,6 +48,9 @@ SESSION=""
 PROMPT=$(mktemp)
 {
   cat "$HERE/question-prompt.md"
+  if [ "${REVIEW_QUESTION_WEB_SEARCH:-false}" = "true" ]; then
+    printf '\n%s\n' "- You may search the web for public documentation, such as a package's release notes or changelog, where the repository cannot answer. Search with public names and versions only, never with code, names, paths or anything else from this repository or the pull request, and say which source an answer rests on."
+  fi
   printf '\nThe question:\n\n'
   printf '%s\n' "$REVIEW_QUESTION"
 } > "$PROMPT"
@@ -59,10 +62,17 @@ PROMPT=$(mktemp)
 SETTINGS="$HERE/claude-config.json"
 if command -v jq > /dev/null 2>&1; then
   QUESTION_SETTINGS=$(mktemp)
-  if jq '
+  # Where the team allows it, a search of the web, as public documentation answers
+  # what the repository cannot, such as what a package release changed. A search
+  # only: fetching a page could carry what the session read to any address.
+  if jq --argjson search "$([ "${REVIEW_QUESTION_WEB_SEARCH:-false}" = "true" ] && echo true || echo false)" '
        del(.enabledPlugins)
        | .permissions.allow |= map(select(. != "Task" and . != "Agent"))
        | .permissions.deny = (["Task", "Agent", "Workflow", "Skill"] + .permissions.deny | unique)
+       | if $search then
+           .permissions.deny |= map(select(. != "WebSearch"))
+           | .permissions.allow = (.permissions.allow + ["WebSearch"] | unique)
+         else . end
      ' "$SETTINGS" > "$QUESTION_SETTINGS"; then
     SETTINGS="$QUESTION_SETTINGS"
   fi

@@ -148,6 +148,11 @@ class ReviewSettingsForm
                 ->options(self::onOff())
                 ->placeholder(self::onOffPlaceholder($defaults?->code_index, __('Off')))
                 ->helperText(__('For Laravel: before the review, Mago analyses the checkout and the reach of a changed check follows the calls it resolves by type, rather than every method of the same name. More precise, at about 20 seconds and 3 GB of memory, only for a change that touches a check; it runs composer install when the checkout has no vendor/. Without the memory, or when it fails, the reach goes by name as before. To try in a trial first.')),
+            Select::make('question_web_search')
+                ->label(__('Questions may search the web'))
+                ->options(self::onOff())
+                ->placeholder(self::onOffPlaceholder($defaults?->question_web_search, __('Off')))
+                ->helperText(__('When someone asks the reviewer a question, it may search the web for public documentation such as release notes and changelogs, without anything from the repository in its searches. It never opens a page itself, and the review itself never searches.')),
             Select::make('verify')
                 ->label(__('Second check'))
                 ->options(self::onOff())
@@ -698,7 +703,7 @@ class ReviewSettingsForm
     public static function state(?ReviewSetting $setting): array
     {
         return $setting === null ? [] : collect($setting->attributesToArray())
-            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'ocr', 'scan', 'floor_guard', 'reach', 'code_index', 'max_rounds', 'fail_on', 'pull_request_budget', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model', 'findings_check'])
+            ->only(['providers', 'claude_model', 'claude_effort', 'claude_advisor', 'claude_max_budget', 'codex_model', 'codex_effort', 'ocr_model', 'ocr_effort', 'verify', 'follow_ups', 'language', 'ticket_grading', 'extra_passes', 'ocr', 'scan', 'floor_guard', 'reach', 'code_index', 'question_web_search', 'max_rounds', 'fail_on', 'pull_request_budget', 'turn_notes', 'turn_model', 'strategy', 'strategy_effort', 'strategy_model', 'findings_check'])
             ->all();
     }
 }

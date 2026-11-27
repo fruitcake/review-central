@@ -35,6 +35,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $floor_guard "true" or "false": whether the reviewer runs the floor guard on loosened checks; on when null
  * @property string|null $reach "true" or "false": whether a Laravel review gets REACH, the paths that reach a changed check; on when null
  * @property string|null $code_index "true" or "false": whether REACH follows a code index Mago builds; off when null
+ * @property string|null $question_web_search "true" or "false": whether an answer to a question may search the web; off when null
  * @property string|null $turn_notes "true" or "false": whether a small model writes what the one at turn has to do; the team's alone
  * @property string|null $turn_model The model it writes with: a tier or a name; the provider's cheapest when none
  * @property string|null $strategy off, record or apply: whether pull requests are classified, and whether that decides their effort and model

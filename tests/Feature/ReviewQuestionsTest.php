@@ -590,3 +590,45 @@ it('gives the question vendor/ from what the review keeps, installing without th
 
     File::deleteDirectory($dir);
 });
+
+it('lets an answer search the web, and never fetch a page, only where the team allows it', function (bool $allowed) {
+    $dir = storage_path('framework/testing/review-work/answer-search');
+    File::deleteDirectory($dir);
+    File::ensureDirectoryExists("{$dir}/home/.local/bin");
+    // A Claude Code that keeps the settings and the prompt it was given.
+    File::put("{$dir}/home/.local/bin/claude", <<<SH
+        #!/bin/sh
+        [ "\$1" = "--version" ] && { echo "2.0.0 (Claude Code)"; exit 0; }
+        while [ \$# -gt 0 ]; do [ "\$1" = "--settings" ] && cp "\$2" "{$dir}/settings.json"; shift; done
+        cat > "{$dir}/prompt.txt"
+        echo '{"type":"result","subtype":"success","is_error":false,"result":"Laravel 12.73 changed it.","total_cost_usd":0.1}'
+        SH);
+    chmod("{$dir}/home/.local/bin/claude", 0755);
+
+    Process::path($dir)
+        ->env(['HOME' => "{$dir}/home", 'REVIEW_QUESTION' => 'Which release changed route()?'] + ($allowed ? ['REVIEW_QUESTION_WEB_SEARCH' => 'true'] : []))
+        ->run(['sh', resource_path('review/skill/answer-question.sh')])->throw();
+    $permissions = json_decode(File::get("{$dir}/settings.json"), true)['permissions'];
+
+    expect($permissions['deny'])->toContain('WebFetch')
+        ->and(in_array('WebSearch', $permissions['allow'], true))->toBe($allowed)
+        ->and(in_array('WebSearch', $permissions['deny'], true))->toBe(! $allowed)
+        ->and(str_contains(File::get("{$dir}/prompt.txt"), 'never with code, names, paths or anything else from this repository'))->toBe($allowed);
+
+    File::deleteDirectory($dir);
+})->with(['allowed' => true, 'not allowed' => false]);
+
+it('hands the answer the team\'s choice on searching the web, and the review never', function () {
+    $this->repository->reviewSetting()->create(['tenant_id' => $this->repository->tenant_id, 'question_web_search' => 'true']);
+    $question = ReviewQuestion::query()->create([
+        'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'pull_request_id' => 570,
+        'branch' => 'feature/export', 'comment_id' => 77, 'question' => 'Which release changed this?',
+    ]);
+    $steps = fakeReviewer(['type' => 'result', 'result' => 'Release 12.73.', 'total_cost_usd' => 0.1, 'modelUsage' => ['claude-opus-5-5' => []]]);
+
+    app(QuestionAnswer::class)->give($question);
+
+    $step = collect($steps)->first(fn (array $step): bool => $step['command'][1] === 'run');
+    expect($step['environment'])->toMatchArray(['REVIEW_QUESTION_WEB_SEARCH' => 'true'])
+        ->and(file_get_contents(resource_path('review/skill/review-settings.sh')))->not->toContain('REVIEW_QUESTION_WEB_SEARCH');
+});

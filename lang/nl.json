@@ -1186,5 +1186,7 @@
     "what Codex and the review from the diff review through, where the console lists it apart.": "waar Codex en de review van de diff mee reviewen, als de console het apart noemt.",
     "what the review printed": "wat de review printte",
     "without :modules": "zonder :modules",
-    "your-organisation": "je-organisatie"
+    "your-organisation": "je-organisatie",
+    "Questions may search the web": "Vragen mogen op het web zoeken",
+    "When someone asks the reviewer a question, it may search the web for public documentation such as release notes and changelogs, without anything from the repository in its searches. It never opens a page itself, and the review itself never searches.": "Als iemand de reviewer een vraag stelt, mag die op het web zoeken naar openbare documentatie zoals release notes en changelogs, zonder iets uit de repository in de zoekopdracht. Hij opent zelf nooit een pagina, en de review zelf zoekt nooit."
 }
