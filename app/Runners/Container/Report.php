@@ -84,7 +84,8 @@ class Report
             // person, an empty list clears it.
             'manual_review' => is_array($report['manual_review'] ?? null) ? $lines('manual_review') : null,
             'usage' => is_array($usage['usage'] ?? null) ? $usage['usage'] : [],
-            'cost' => is_numeric($usage['cost'] ?? null) ? (float) $usage['cost'] : null,
+            // Written in the sandbox, where the pull request's code ran: a cost below zero is no cost.
+            'cost' => is_numeric($usage['cost'] ?? null) && (float) $usage['cost'] >= 0 ? (float) $usage['cost'] : null,
             'duration' => $this->duration("{$directory}/.review-started"),
             'mode' => 'both',
             'create_tasks' => true,

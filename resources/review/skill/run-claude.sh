@@ -185,25 +185,10 @@ touch "${REVIEW_USAGE_SINCE:-.review-started}"
 # On a developer's machine the project's settings are the point; here they are the pull request's.
 [ "${REVIEW_LOCAL:-false}" = "true" ] || { reviewer_drop_project_settings; reviewer_hide_claude_skills || exit 1; }
 reviewer_env_report 'ANTHROPIC_API_KEY|ANTHROPIC_BASE_URL|CLAUDE_CODE_[A-Z0-9_]+|CLAUDE_CONFIG_DIR'
-{
-  # CLAUDE_REVIEW_MAX_BUDGET caps the review in dollars, 10 by default, so a review
-  # that runs away stops there. One that runs out returns no report and fails the
-  # step, like any review that did not finish. `none` lifts the cap.
-  # shellcheck disable=SC2046
-  env $(reviewer_env 'ANTHROPIC_API_KEY|ANTHROPIC_BASE_URL|CLAUDE_CODE_[A-Z0-9_]+|CLAUDE_CONFIG_DIR') "$FOREGROUND" "$CLAUDE" -p \
-    ${RESUME_SESSION:+--resume "$RESUME_SESSION"} \
-    --settings "$CONFIG" \
-    --permission-mode auto \
-    --mcp-config "$MCP_CONFIG" \
-    --strict-mcp-config \
-    --output-format stream-json \
-    --verbose \
-    $([ "$MAX_BUDGET" = none ] || echo --max-budget-usd "$MAX_BUDGET") \
-    --json-schema "$(cat "$SCHEMA")" \
-    ${SETTING_SOURCES:+--setting-sources "$SETTING_SOURCES"} \
-    < "$PROMPT"
-  echo $? > .claude-exit
-} | tee "$TRANSCRIPT" | jq -r --unbuffered '
+
+# What the build log shows of a session: its tools and skills, the reviewer's text,
+# and one line per tool call, a subagent's marked as such.
+SHOW='
     # What the session was given, so a summary saying a skill or a server was
     # not available can be checked against what the reviewer actually had.
     if .type == "system" and .subtype == "init" then
@@ -225,7 +210,92 @@ reviewer_env_report 'ANTHROPIC_API_KEY|ANTHROPIC_BASE_URL|CLAUDE_CODE_[A-Z0-9_]+
           + (.input.command // .input.file_path // .input.pattern // .input.description // .input.query // .input.skill // "" | tostring | gsub("\\s+"; " ") | .[0:160])
         else empty end
     else empty end
-  ' 2>/dev/null
+'
+
+# The extra passes (REVIEW_EXTRA_PASSES): before the review, a session of its own
+# runs the code-review skill and the pr-review-toolkit agents over the same range,
+# and what they report goes to the review as candidates, as Codex's own review does
+# for Codex. A step of the script rather than a request in the prompt, which the
+# review was free to pass over. On a model of its own, CLAUDE_REVIEW_CANDIDATES_MODEL
+# (Sonnet: finding is broad work, and the review checks every candidate on its own
+# model; an agent that names its model keeps it), and a budget of its own,
+# CLAUDE_REVIEW_CANDIDATES_BUDGET (8 dollars). A session that ran out still answered with what it had: then its
+# last text is taken. When it fails or finds nothing, the review goes ahead without it.
+CANDIDATES=claude-review-candidates.md
+# Never one the checkout brought: these are this run's own, and its cost is counted.
+rm -f "$CANDIDATES" .claude-candidates-cost
+# A follow-up runs them too, over the follow-up's range.
+if [ "${REVIEW_EXTRA_PASSES:-false}" = "true" ]; then
+  _dest="${BITBUCKET_PR_DESTINATION_BRANCH:-}"
+  _since=$(jq -r '.handover.reviewed_up_to // .last_reviewed_commit // empty' "${REVIEW_CONTEXT_FILE:-review-context.json}" 2> /dev/null) || _since=""
+  _reviewed="${BITBUCKET_COMMIT:-HEAD}"
+  if [ -n "$_since" ] && git merge-base --is-ancestor "$_since" "$_reviewed" 2> /dev/null; then
+    _range="$_since..$_reviewed"
+  elif [ -n "$_dest" ]; then
+    _range="origin/$_dest...$_reviewed"
+  else
+    _range=""
+  fi
+  if [ -n "$_range" ]; then
+    echo "##[phase] reviewer candidates"
+    printf '\n-------------------- Claude review passes --------------------\n'
+    _cmodel=${CLAUDE_REVIEW_CANDIDATES_MODEL:-sonnet}
+    echo "The code-review skill and the pr-review-toolkit agents over $_range first, for candidates, on $_cmodel."
+    _cprompt=$(mktemp)
+    sed "s|{{RANGE}}|$_range|g" "$HERE/candidates-prompt.md" > "$_cprompt"
+    _cbudget=${CLAUDE_REVIEW_CANDIDATES_BUDGET:-8}
+    # shellcheck disable=SC2046
+    env $(reviewer_env 'ANTHROPIC_API_KEY|ANTHROPIC_BASE_URL|CLAUDE_CODE_[A-Z0-9_]+|CLAUDE_CONFIG_DIR') "$FOREGROUND" "$CLAUDE" -p \
+      --settings "$CONFIG" \
+      --model "$_cmodel" \
+      --permission-mode auto \
+      --mcp-config "$MCP_CONFIG" \
+      --strict-mcp-config \
+      --output-format stream-json \
+      --verbose \
+      $([ "$_cbudget" = none ] || echo --max-budget-usd "$_cbudget") \
+      ${SETTING_SOURCES:+--setting-sources "$SETTING_SOURCES"} \
+      < "$_cprompt" > claude-review-candidates.jsonl 2> /dev/null
+    rm -f "$_cprompt"
+    jq -r --unbuffered "$SHOW" claude-review-candidates.jsonl 2> /dev/null
+    jq -rs '[.[] | select(.type == "result" and .is_error != true) | .result // empty] | last // empty' claude-review-candidates.jsonl 2> /dev/null > "$CANDIDATES"
+    # Out of budget or cut short: the last text the session itself wrote, not a subagent's.
+    if [ ! -s "$CANDIDATES" ]; then
+      jq -rs '[.[] | select(.type == "assistant" and .parent_tool_use_id == null) | .message.content[]? | select(.type == "text") | .text] | last // empty' claude-review-candidates.jsonl 2> /dev/null > "$CANDIDATES"
+    fi
+    # Its cost, for collect-usage.sh where the transcripts record none: the stream goes.
+    jq -s '[.[] | select(.type == "result") | .total_cost_usd // 0] | last // 0' claude-review-candidates.jsonl 2> /dev/null > .claude-candidates-cost || rm -f .claude-candidates-cost
+    rm -f claude-review-candidates.jsonl
+    if [ ! -s "$CANDIDATES" ] || grep -qx 'No candidates.' "$CANDIDATES"; then
+      echo "The review passes returned nothing; the review goes ahead without them."
+      rm -f "$CANDIDATES"
+    else
+      echo "Review passes: $(grep -c '^- ' "$CANDIDATES") candidate(s) for the review."
+      printf '\nREVIEW PASSES:\n\nThe code-review skill and the pr-review-toolkit agents reviewed this pull request before you; what they found is in `%s`. Read it in START ANALYSIS step 2, and treat it as CANDIDATES FROM OTHER PASSES says: every item is a candidate, never a finding of its own, and none is dropped without a reason.\n' "$CANDIDATES" >> "$PROMPT"
+    fi
+    echo "##[phase] reviewer"
+  fi
+fi
+
+{
+  # CLAUDE_REVIEW_MAX_BUDGET caps the review in dollars, 10 by default, so a review
+  # that runs away stops there. One that runs out returns no report and fails the
+  # step, like any review that did not finish. `none` lifts the cap.
+  # shellcheck disable=SC2046
+  env $(reviewer_env 'ANTHROPIC_API_KEY|ANTHROPIC_BASE_URL|CLAUDE_CODE_[A-Z0-9_]+|CLAUDE_CONFIG_DIR') "$FOREGROUND" "$CLAUDE" -p \
+    ${RESUME_SESSION:+--resume "$RESUME_SESSION"} \
+    --settings "$CONFIG" \
+    --permission-mode auto \
+    --mcp-config "$MCP_CONFIG" \
+    --strict-mcp-config \
+    --output-format stream-json \
+    --verbose \
+    $([ "$MAX_BUDGET" = none ] || echo --max-budget-usd "$MAX_BUDGET") \
+    --json-schema "$(cat "$SCHEMA")" \
+    ${SETTING_SOURCES:+--setting-sources "$SETTING_SOURCES"} \
+    < "$PROMPT"
+  echo $? > .claude-exit
+} | tee "$TRANSCRIPT" | jq -r --unbuffered "$SHOW" 2>/dev/null
 
 rc=$(cat .claude-exit 2>/dev/null || echo 1)
 rm -f .claude-exit "$PROMPT"

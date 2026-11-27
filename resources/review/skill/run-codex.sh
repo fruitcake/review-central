@@ -203,7 +203,7 @@ jq -L "$HERE" 'include "strict-schema"; strict_schema' "$HERE/ai-review.schema.j
   cat "$HERE/structured-output.md"
   printf '\nThe schema is strict: every field is there. Give null for a field this skill says to leave out.\n'
   if [ -s "$CANDIDATES" ]; then
-    printf '\nCODEX REVIEW:\n\nCodex'"'"'s own review of this pull request ran before you; what it found is in `%s`. Read it in START ANALYSIS step 2: every item is a candidate that goes through the same filtering and verification, never a finding of its own.\n' "$CANDIDATES"
+    printf '\nCODEX REVIEW:\n\nCodex'"'"'s own review of this pull request ran before you; what it found is in `%s`. Read it in START ANALYSIS step 2, and treat it as CANDIDATES FROM OTHER PASSES says: every item is a candidate, never a finding of its own, and none is dropped without a reason.\n' "$CANDIDATES"
   fi
 } > "$PROMPT"
 

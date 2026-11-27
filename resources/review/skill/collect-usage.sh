@@ -166,7 +166,15 @@ RESULT_FILE="${REVIEW_TRANSCRIPT_FILE:-claude-review.jsonl}"
 if [ "$COMPLETE" = "true" ] && [ "$COST" = "0.000000" ] && [ -s "$RESULT_FILE" ]; then
   RESULT_COST=$(jq -R 'fromjson? // empty' "$RESULT_FILE" 2>/dev/null \
     | jq -s -r '[.[] | select(.type == "result") | .total_cost_usd // 0] | last // 0' 2>/dev/null) || RESULT_COST=0
-  COST=$(awk -v a="${RESULT_COST:-0}" 'BEGIN { printf "%.6f", a }')
+  # The extra passes ran as a session of their own before it, with a result of its own.
+  # Written by run-claude.sh in this run, which removes any the checkout brought; a
+  # number of zero or more, or nothing.
+  PASSES_COST=0
+  if [ -f .claude-candidates-cost ] && [ ! -L .claude-candidates-cost ]; then
+    PASSES_COST=$(head -c 32 .claude-candidates-cost | tr -d ' \n')
+    printf '%s' "$PASSES_COST" | grep -Eq '^[0-9]+(\.[0-9]+)?$' || PASSES_COST=0
+  fi
+  COST=$(awk -v a="${RESULT_COST:-0}" -v b="${PASSES_COST:-0}" 'BEGIN { printf "%.6f", a + b }')
 fi
 
 if [ "$COMPLETE" != "true" ] || [ "$COST" = "0.000000" ]; then

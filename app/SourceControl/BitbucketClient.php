@@ -227,14 +227,14 @@ class BitbucketClient implements FiltersSecrets, OpensPullRequests, SourceContro
         return $this->request(20)->put($this->url("pullrequests/{$id}"), ['title' => $title, 'description' => $description])->status();
     }
 
-    public function approve(string $id, bool $approved): int
+    public function approve(string $id, bool $approved, ?string $commit = null): int
     {
         $url = $this->url("pullrequests/{$id}/approve");
 
         return ($approved ? $this->request(15)->post($url) : $this->request(15)->delete($url))->status();
     }
 
-    public function requestChanges(string $id, bool $requested): int
+    public function requestChanges(string $id, bool $requested, ?string $commit = null): int
     {
         $url = $this->url("pullrequests/{$id}/request-changes");
 

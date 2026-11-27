@@ -635,6 +635,30 @@ it('counts only its own tokens for a review that resumed the session of the one 
     File::deleteDirectory($home);
 });
 
+it('records what the extra passes cost beside the review, where the transcripts record no cost', function () {
+    $home = storage_path('framework/testing/usage-passes');
+    File::deleteDirectory($home);
+    File::ensureDirectoryExists("{$home}/.claude/projects/work");
+    $message = fn (string $id): string => json_encode(['type' => 'assistant', 'message' => ['id' => $id, 'model' => 'claude-opus-5-5', 'usage' => ['input_tokens' => 100, 'output_tokens' => 10]]]);
+    // Two sessions with tokens and no cost-state: the passes', then the review's.
+    File::put("{$home}/.claude/projects/work/passes.jsonl", $message('msg_passes')."\n");
+    File::put("{$home}/.claude/projects/work/review.jsonl", $message('msg_review')."\n");
+    File::put("{$home}/claude-review.jsonl", json_encode(['type' => 'result', 'total_cost_usd' => 3.25])."\n");
+    File::put("{$home}/.claude-candidates-cost", "7.5\n");
+
+    Process::path($home)->env(['HOME' => $home, 'CLAUDE_CONFIG_DIR' => ''])->run(['sh', resource_path('review/skill/collect-usage.sh')])->throw();
+
+    expect(File::json("{$home}/ai-usage.json")['cost'])->toBe(10.75);
+
+    // A cost the checkout forged is no cost of the passes.
+    File::put("{$home}/.claude-candidates-cost", "-1000\n");
+    Process::path($home)->env(['HOME' => $home, 'CLAUDE_CONFIG_DIR' => ''])->run(['sh', resource_path('review/skill/collect-usage.sh')])->throw();
+
+    expect(File::json("{$home}/ai-usage.json")['cost'])->toBe(3.25);
+
+    File::deleteDirectory($home);
+});
+
 it('keeps a trial off the pull request: a custom run of that pull request, with no status and no lock', function () {
     Http::fake(['api.bitbucket.org/*' => Http::response([])]);
     Queue::fake();

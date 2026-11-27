@@ -88,7 +88,7 @@ class QuestionAnswer
                 'sh .review/skill/answer-question.sh',
                 $directory,
                 $environment
-                    + array_intersect_key($settings, ['CLAUDE_REVIEW_MODEL' => true])
+                    + array_intersect_key($settings, ['CLAUDE_REVIEW_MODEL' => true, 'REVIEW_QUESTION_WEB_SEARCH' => true])
                     + ['REVIEW_QUESTION' => $this->asked($question), 'CI' => 'true'],
                 trusted: false,
                 timeout: (int) config('review.container.question_timeout'),

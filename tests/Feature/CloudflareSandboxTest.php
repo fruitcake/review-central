@@ -452,6 +452,19 @@ it('knows from the Worker\'s version whether it clones in the sandbox, and asks 
     'none said' => [null, false],
 ]);
 
+it('sends a key for some paths only to a Worker that keeps it to them, asking once for both questions', function (?string $version, bool $byPath) {
+    Http::fake(['sandbox.example.com/health' => Http::response(['ok' => true, 'version' => $version])]);
+
+    expect(app(CloudflareSandbox::class)->keysByPath())->toBe($byPath)
+        ->and(app(CloudflareSandbox::class)->clonesItself())->toBe($version !== null);
+
+    Http::assertSentCount(1);
+})->with([
+    'this version' => [CloudflareSandbox::KEYS_BY_PATH_SINCE, true],
+    'the one before' => ['2026-11-26.4', false],
+    'none said' => [null, false],
+]);
+
 it('keeps one vendor/ per repository, of its destination branch, under the repository\'s name', function () {
     File::put("{$this->work}/composer.json", '{"require": {"laravel/framework": "^13.0"}}');
 

@@ -119,18 +119,20 @@ interface SourceControl
     public function updatePullRequestDescription(string $id, string $title, string $description): int;
 
     /**
-     * Approves the pull request, or withdraws the approval.
+     * Approves the pull request, or withdraws the approval. Where the host ties a
+     * review to a commit, it is the one given: the commit that was reviewed.
      *
      * @return int the HTTP status
      */
-    public function approve(string $id, bool $approved): int;
+    public function approve(string $id, bool $approved, ?string $commit = null): int;
 
     /**
-     * Requests changes, or withdraws the request.
+     * Requests changes, or withdraws the request, at the commit given where the
+     * host ties a review to one.
      *
      * @return int the HTTP status
      */
-    public function requestChanges(string $id, bool $requested): int;
+    public function requestChanges(string $id, bool $requested, ?string $commit = null): int;
 
     /**
      * A commit's subject and author, and the commits it was made on, first parent first.
