@@ -217,6 +217,7 @@ $isHidden = function (string $file, string $name) use ($functions, $linesOf): bo
 // for the calls that land on more than one implementation.
 $checks = [];
 $changed = [];
+$changedLines = [];
 
 foreach (array_filter(explode("\n", $sh(['diff', '--name-only', "{$mergeBase}...{$commit}", '--', 'app']))) as $file) {
     if (! str_ends_with($file, '.php') || ! is_file($file)) {
@@ -236,6 +237,7 @@ foreach (array_filter(explode("\n", $sh(['diff', '--name-only', "{$mergeBase}...
             }
 
             $changed["{$file}::{$name}"] = ['file' => $file, 'name' => $name];
+            $changedLines[$file][$line] = true;
 
             // Named as a check; any public method of a policy; or a method a changed line guards.
             if (preg_match(CHECK, $name) === 1
@@ -1082,13 +1084,188 @@ if ($indexed !== null) {
     }
 }
 
-if ($text === '' && $several === []) {
+// With the index: what the change's guards rely on that lies outside them. A check that
+// reads rows by a column relies on every writer of that column; a lock with a lifetime
+// on the calls it holds returning in time; a counter a success clears on the client not
+// choosing which. Each is a place where a guard that reads right is still not enough.
+$guards = [];
+
+if ($indexed !== null) {
+    $writersShown = 0;
+
+    foreach ($changed as $key => $method) {
+        $body = $bodyOf($method['file'], $method['name']);
+
+        if ($body === null) {
+            continue;
+        }
+
+        $bodyText = $body['text'];
+        $lineAt = fn (int $offset): int => $body['start'] + substr_count(substr($bodyText, 0, $offset), "\n");
+        $touched = function (int $from, int $to) use ($changedLines, $method): bool {
+            for ($line = $from; $line <= $to; $line++) {
+                if (isset($changedLines[$method['file']][$line])) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+        $source = (string) @file_get_contents($method['file']);
+        [$namespace, $uses] = code_index_imports($source);
+        $ownClass = (string) $fullClassOf($method['file']);
+        $symbol = $ownClass.'::'.strtolower($method['name']);
+
+        // 1. A check that reads rows by a column: Model::where('column', $value)...->exists().
+        preg_match_all('/\b([A-Z]\w*)::(?:query\(\)\s*->\s*)?where\s*\(\s*[\'"](\w+)[\'"][^;]*?->\s*(?:exists|doesntExist|first|count|sole|value)\s*\(/s', $bodyText, $queries, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
+
+        foreach ($queries as $query) {
+            [$whole, $offset] = $query[0];
+
+            if (! $touched($lineAt($offset), $lineAt($offset + strlen($whole)))) {
+                continue;
+            }
+
+            $model = strtolower(code_index_resolve($query[1][0], $namespace, $uses, $ownClass));
+
+            if (! str_starts_with($indexed['files'][$model] ?? '', 'app/')) {
+                continue;
+            }
+
+            preg_match_all('/where\s*\(\s*[\'"](\w+)[\'"]\s*,\s*(.+?)\s*\)\s*(?=->|$)/s', $whole, $conditions, PREG_SET_ORDER);
+            $by = [];
+            $only = [];
+
+            foreach ($conditions as $condition) {
+                // A constant or a literal narrows what counts; anything else is what is looked up.
+                if (preg_match('/^(?:[A-Z]\w*::[A-Z_0-9]+|[\'"][^\'"]*[\'"]|\d+|true|false|null)$/', trim($condition[2])) === 1) {
+                    $only[] = "`{$condition[1]}` = `".trim($condition[2]).'`';
+                } else {
+                    $by[] = $condition[1];
+                }
+            }
+
+            foreach (array_unique($by) as $column) {
+                $writers = [];
+
+                foreach (array_keys($indexed['callers']["{$model}::\${$column}"] ?? []) as $writer) {
+                    if ($writer === $symbol || str_starts_with($writer, 'file:')) {
+                        continue;
+                    }
+
+                    [$writerClass, $writerMethod] = explode('::', $writer, 2);
+                    $writerFile = $indexed['files'][$writerClass] ?? null;
+                    $writerBody = $writerFile === null ? null : $bodyOf($writerFile, $writerMethod);
+
+                    // Read or written: the index says it is touched, the source says it is written.
+                    if ($writerBody === null || preg_match('/->\s*'.preg_quote($column, '/').'\s*=(?![=>])|[\'"]'.preg_quote($column, '/').'[\'"]\s*=>/', $writerBody['text'], $write, PREG_OFFSET_CAPTURE) !== 1) {
+                        continue;
+                    }
+
+                    $at = $writerBody['start'] + substr_count(substr($writerBody['text'], 0, $write[0][1]), "\n");
+                    $callers = array_slice(array_map(function (string $caller) use (&$indexed, $bodyOf): string {
+                        if (str_starts_with($caller, 'file:')) {
+                            return '`'.substr($caller, 5).'`';
+                        }
+
+                        [$class, $name] = explode('::', $caller, 2);
+                        $file = $indexed['files'][$class] ?? $class;
+
+                        return "`{$file}::".($bodyOf($file, $name)['name'] ?? $name).'`';
+                    }, array_keys($indexed['callers'][$writer] ?? [])), 0, 6);
+                    $more = count($indexed['callers'][$writer] ?? []) - count($callers);
+                    $writers[] = "`{$writerFile}::{$writerBody['name']}` (line {$at})".($callers === [] ? '' : ', called from '.implode(', ', $callers).($more > 0 ? " and {$more} more" : ''));
+                }
+
+                if ($writers === [] || $writersShown >= 6) {
+                    continue;
+                }
+
+                $writersShown++;
+                $guards[] = "- `{$key}` checks `{$writtenClass($model)}` rows by `{$column}` (line {$lineAt($offset)})"
+                    .($only === [] ? '' : ', counting only those with '.implode(' and ', $only))
+                    .". These write `{$column}` on `{$writtenClass($model)}`: ".implode('; ', array_slice($writers, 0, 5)).'.'
+                    .($only === [] ? '' : ' A row they write with another value there is one the check does not see: follow what each caller passes.');
+            }
+        }
+
+        // 2. A lock with a lifetime, around calls that leave the application.
+        preg_match_all('/Cache::lock\s*\(\s*([\'"][^\'"]*[\'"])[^;]*?,\s*(\d+)\s*\)/', $bodyText, $locks, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
+
+        foreach ($locks as $lock) {
+            if (! $touched($lineAt($lock[0][1]), $lineAt($lock[0][1]))) {
+                continue;
+            }
+
+            $outside = [];
+            $queue = [[$symbol, 0]];
+            $seen = [];
+
+            while ($queue !== [] && count($seen) < 400) {
+                [$from, $depth] = array_shift($queue);
+
+                if (isset($seen[$from])) {
+                    continue;
+                }
+
+                $seen[$from] = true;
+
+                foreach (array_keys($indexed['calls'][$from] ?? []) as $target) {
+                    [$class] = explode('::', $target, 2);
+
+                    if (str_starts_with($indexed['files'][$class] ?? '', 'app/')) {
+                        if ($depth < 3) {
+                            $queue[] = [$target, $depth + 1];
+                        }
+
+                        continue;
+                    }
+
+                    // A package that talks to the outside: an SDK, or an HTTP client.
+                    // Only a package by its namespace: a name without one is not a class Mago resolved.
+                    if (! str_contains($class, '\\') || str_starts_with($class, 'app\\') || preg_match('/^(illuminate\\\\(?!http\\\\client)|carbon|symfony|doctrine|psr|monolog|league|ramsey|brick|nesbot|spatie\\\\laravel)/', $class) === 1 || str_contains($target, '::$')) {
+                        continue;
+                    }
+
+                    $vendor = implode('\\', array_slice(explode('\\', $class), 0, 2));
+                    [$fromClass, $fromMethod] = explode('::', $from, 2);
+                    $outside[$vendor] ??= "`{$writtenClass($fromClass)}::".($bodyOf($indexed['files'][$fromClass] ?? '', $fromMethod)['name'] ?? $fromMethod)."` calls `{$vendor}`";
+                }
+            }
+
+            if ($outside !== []) {
+                $guards[] = "- `{$key}` holds lock {$lock[1][0]} for {$lock[2][0]} s (line {$lineAt($lock[0][1])}) around calls that leave the application: ".implode('; ', array_slice($outside, 0, 4)).'. A lock that expires before they return lets a second request in: does each have a timeout well under the lock, and does what the lock protects hold without it?';
+            }
+        }
+
+        // 3. A counter a success clears, beside the ones failures are counted in.
+        if (preg_match_all('/(RateLimiter::clear|Cache::forget)\s*\((.*?)\)\s*;/', $bodyText, $clears, PREG_OFFSET_CAPTURE | PREG_SET_ORDER) > 0) {
+            // The key: the first argument, nested calls in it included.
+            preg_match_all('/RateLimiter::(?:hit|attempt|tooManyAttempts)\s*\(((?:[^(),]|\((?:[^()]|\([^()]*\))*\))*)/', $source, $hits, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
+
+            foreach ($clears as $clear) {
+                if (! $touched($lineAt($clear[0][1]), $lineAt($clear[0][1])) || $hits === []) {
+                    continue;
+                }
+
+                $counted = array_unique(array_map(fn (array $hit): string => '`'.trim($hit[1][0]).'` (line '.(1 + substr_count(substr($source, 0, $hit[0][1]), "\n")).')', $hits));
+                $guards[] = "- `{$key}` clears `".trim($clear[2][0])."` (line {$lineAt($clear[0][1])}), and failures are counted in ".implode(', ', array_slice($counted, 0, 4)).'. Which counter does a success clear, and can a client that holds one valid credential make it the one its failures were counted in?';
+            }
+        }
+    }
+}
+
+if ($text === '' && $several === [] && $guards === []) {
     exit(0);
 }
 
 if ($several !== []) {
     $text .= ($text === '' ? '' : "\n\n")."Calls that can land on more than one implementation, as the type they are made on is a union (such as a factory that returns one of two classes), a parent or an interface:\n".implode("\n", $several)
         ."\nRead each implementation such a call can run, with what it does for an argument that is null or missing, not the first one you find: the one that behaves differently is where the change breaks.";
+}
+
+if ($guards !== []) {
+    $text .= ($text === '' ? '' : "\n\n")."What the change's guards rely on outside them:\n".implode("\n", array_slice($guards, 0, 12));
 }
 
 echo "\nREACH:\n\n";
