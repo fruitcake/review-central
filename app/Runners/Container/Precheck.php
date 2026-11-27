@@ -336,8 +336,8 @@ class Precheck
     }
 
     /**
-     * The pull request's title and description as they were when its own review
-     * first read this commit. The ones it has now can describe later rounds, such
+     * The pull request's title, description and ticket as they were when its own
+     * review first read this commit. The ones it has now can describe later rounds, such
      * as the fixes for what was found at this commit, and a trial that replays it
      * would then be told the answers. Without such a review, the ones it has now.
      *
@@ -366,6 +366,12 @@ class Precheck
 
         if (is_string($pullRequest['title'] ?? null)) {
             $context['pull_request']['title'] = $pullRequest['title'];
+        }
+
+        // The ticket that title named then, as it read then: a title renamed since can
+        // name another ticket, or none.
+        if (array_key_exists('ticket', $then->context ?? [])) {
+            $context['ticket'] = $then->context['ticket'];
         }
 
         $say("The pull request's description as it was when its review of {$commit} began ({$then->started_at->toDateTimeString()}), not as it is now.");

@@ -183,6 +183,7 @@ it('reviews the earlier commit a trial asks for, though the pull request has mov
 
 it('gives a trial of an earlier commit the description its own review read then, not the one written since', function () {
     ($this->pullRequest)([
+        'title' => 'SHOP-13 Add the export',
         'description' => 'Adds the export. A booking reference is now refused when any payment already has it.',
         'source' => ['branch' => ['name' => 'feature/export'], 'commit' => ['hash' => str_repeat('b', 12)]],
     ]);
@@ -190,7 +191,7 @@ it('gives a trial of an earlier commit the description its own review read then,
     $run = fn (bool $custom, string $description, int $minutesAgo): ReviewRun => ReviewRun::query()->create([
         'tenant_id' => $this->repository->tenant_id, 'repository_id' => $this->repository->id, 'workspace' => 'acme', 'slug' => 'shop',
         'branch' => 'feature/export', 'commit' => $this->sha, 'pull_request_id' => 570, 'custom' => $custom, 'status' => ReviewRun::STATUS_FINISHED,
-        'started_at' => now()->subMinutes($minutesAgo), 'context' => ['pull_request' => ['id' => 570, 'title' => 'SHOP-12 Add the export', 'description' => $description]],
+        'started_at' => now()->subMinutes($minutesAgo), 'context' => ['pull_request' => ['id' => 570, 'title' => 'SHOP-12 Add the export', 'description' => $description], 'ticket' => ['key' => 'SHOP-12', 'markdown' => "# SHOP-12\n\nExport the orders."]],
     ]);
     // The pull request's own review of the commit, then a later trial that read the newer text.
     $run(false, 'Adds the export.', 60);
@@ -198,7 +199,12 @@ it('gives a trial of an earlier commit the description its own review read then,
 
     ($this->precheck)(new Trial(pullRequestId: 570, destination: 'main', commit: $this->sha));
 
-    expect(File::json("{$this->work}/review-context.json")['pull_request']['description'])->toBe('Adds the export.')
+    $context = File::json("{$this->work}/review-context.json");
+
+    expect($context['pull_request']['description'])->toBe('Adds the export.')
+        ->and($context['pull_request']['title'])->toBe('SHOP-12 Add the export')
+        // The ticket that title named then, though the pull request is renamed to another since.
+        ->and(File::get("{$this->work}/review-ticket.md"))->toContain('Export the orders.')
         ->and(($this->log)())->toContain("The pull request's description as it was when its review of {$this->sha} began");
 });
 
