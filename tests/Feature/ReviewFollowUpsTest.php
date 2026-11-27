@@ -51,6 +51,20 @@ it('keeps only new HIGHs once the review says it is not converging, and sets the
         ->and($applied['summary'])->toContain("### Open questions\n\n- Busy file (`app/Export.php:12`): medium, set aside because the review is not converging.\n- Is the cache shared?");
 });
 
+it('keeps a defect in the fix of an earlier finding, and one a person raised, when the review is not converging', function () {
+    ($this->rounds)(1, [['id' => 'F2', 'status' => 'new', 'severity' => 'MEDIUM', 'title' => 'Transfer skipped']]);
+    $regression = ['id' => 'F7', 'status' => 'new', 'severity' => 'MEDIUM', 'title' => 'Transfer signs a change to the same table', 'follows_up' => 'F2'];
+    $raised = ['id' => 'F8', 'status' => 'new', 'severity' => 'MEDIUM', 'title' => 'Order booked twice', 'raised_by' => 'A reviewer'];
+    // Only a finding the review reported before counts as followed up.
+    $unknown = ['id' => 'F9', 'status' => 'new', 'severity' => 'MEDIUM', 'title' => 'Follows nothing reported', 'follows_up' => 'F1'];
+
+    $applied = app(ReviewFollowUps::class)->apply(($this->current)(), [$this->medium, $regression, $raised, $unknown], "The review is not converging: look at the approach.\n\n4 medium.");
+
+    expect(array_column($applied['findings'], 'id'))->toBe(['F7', 'F8'])
+        ->and($applied['summary'])->toContain('Busy file (`app/Export.php:12`): medium, set aside because the review is not converging.')
+        ->and($applied['summary'])->toContain('Follows nothing reported: medium, set aside');
+});
+
 it('lets a new finding below HIGH hold no merge from the third follow-up on, in the rounds after too', function () {
     ($this->rounds)(3, [['id' => 'F4', 'severity' => 'MEDIUM', 'status' => 'new', 'advisory' => true]]);
     $carried = ['id' => 'F4', 'status' => 'open', 'severity' => 'MEDIUM', 'title' => 'From the round before'];
