@@ -436,7 +436,8 @@ export COMPOSER_HOME="$HOME/.composer"
 # Composer installs where the step says, never where the pull request's composer.json
 # says: its config.bin-dir or config.vendor-dir could point at the reviewer's CLI,
 # and Composer writes a package's binaries even without scripts or plugins. The
-# environment wins over the config; a vendor/ that is a symlink goes first.
+# environment wins over the config. A symlink at or under vendor/ is the pull
+# request's and could lead anywhere, so every one goes before Composer writes there.
 if [ -f composer.json ]; then
   # Not for a repository that commits anything under vendor/: those files are the
   # pull request's, and kept with the install they would be unpacked into the
@@ -486,7 +487,7 @@ if [ -f composer.json ]; then
     # Its last use, which is what keeps it among the newest.
     touch "$VENDOR_TAR"
     echo "vendor/ unpacked from the cache for this composer.lock."
-  elif ! { [ ! -L vendor ] || rm -f vendor; } || ! COMPOSER_VENDOR_DIR=vendor COMPOSER_BIN_DIR=vendor/bin composer install --no-interaction --no-progress --prefer-dist --no-dev --no-scripts --no-plugins --ignore-platform-reqs; then
+  elif ! { [ ! -L vendor ] || rm -f vendor; } || ! { [ ! -d vendor ] || find vendor -type l -delete; } || ! COMPOSER_VENDOR_DIR=vendor COMPOSER_BIN_DIR=vendor/bin composer install --no-interaction --no-progress --prefer-dist --no-dev --no-scripts --no-plugins --ignore-platform-reqs; then
     echo "composer install failed, so vendor/ is incomplete and the review cannot read the framework's code."
     if [ -z "${COMPOSER_AUTH:-}" ] && grep -Eq 'repo\.magento\.com|hyva-themes|repo\.packagist\.com' composer.json; then
       echo "This project installs from a private repository (repo.magento.com, Hyvä's Packagist), which needs the contents of its auth.json as COMPOSER_AUTH."
