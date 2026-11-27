@@ -591,7 +591,8 @@ final class ReachRouteReader
             return strtolower($controller.'::'.$action);
         }
 
-        return str_contains($action, '\\') ? strtolower(ltrim($action, '\\').'::__invoke') : null;
+        // An invokable controller by its name, under the group's namespace.
+        return preg_match('/^\\\\?[A-Z][\\w\\\\]*$/', $action) === 1 ? strtolower($this->className($action, $context, $attributes).'::__invoke') : null;
     }
 
     /**
@@ -607,9 +608,14 @@ final class ReachRouteReader
             return substr($class, 1);
         }
 
+        // A name from the root is not under the group's namespace.
+        if (str_starts_with($class, '\\')) {
+            return ltrim($class, '\\');
+        }
+
         $namespace = $this->inner($context, $attributes)['namespace'];
 
-        return ltrim(($namespace !== '' ? "{$namespace}\\" : '').ltrim($class, '\\'), '\\');
+        return ltrim(($namespace !== '' ? "{$namespace}\\" : '').$class, '\\');
     }
 
     /**
