@@ -1103,24 +1103,42 @@ $writesColumn = function (string $body, string $source, string $ownClass, string
     }
 
     [$namespace, $uses] = code_index_imports($source);
+
+    // The key written in the arguments, or a local array passed whole that holds it: a bare
+    // variable, never an element read from one ($attributes['amount']).
     $holds = fn (string $arguments): bool => preg_match('/[\'"]'.$quoted.'[\'"]\s*=>/', $arguments) === 1
-        || (preg_match_all('/\$(\w+)/', $arguments, $variables) > 0 && array_filter($variables[1], fn (string $variable): bool => preg_match('/\$'.$variable.'\s*=\s*\[[^;]*?[\'"]'.$quoted.'[\'"]\s*=>|\$'.$variable.'\s*\[\s*[\'"]'.$quoted.'[\'"]\s*\]\s*=(?!=)/s', $body) === 1) !== []);
+        || (preg_match_all('/\$(\w+)(?!\s*(?:\[|->|::|\w))/', $arguments, $variables) > 0 && array_filter($variables[1], fn (string $variable): bool => preg_match('/\$'.$variable.'\s*=\s*\[[^;]*?[\'"]'.$quoted.'[\'"]\s*=>|\$'.$variable.'\s*\[\s*[\'"]'.$quoted.'[\'"]\s*\]\s*=(?!=)/s', $body) === 1) !== []);
+    $pattern = '/(?:->|(?<![\w\\\\])(?<class>\\\\?[A-Za-z_][\w\\\\]*)::)(?<method>create|forceCreate|createQuietly|make|update|updateQuietly|insert|insertOrIgnore|upsert|fill|forceFill|firstOrCreate|firstOrNew|updateOrCreate|updateOrInsert)\s*(?<arguments>\((?:[^()]++|(?&arguments))*\))'
+        .'|\bnew\s+(?<new>\\\\?[A-Za-z_][\w\\\\]*)\s*(?<given>\((?:[^()]++|(?&given))*\))/s';
 
-    preg_match_all('/(?:->|\b([A-Z]\w*)::)(?:create|forceCreate|createQuietly|update|updateQuietly|insert|insertOrIgnore|upsert|fill|forceFill|firstOrCreate|firstOrNew|updateOrCreate|updateOrInsert)\s*(\((?:[^()]++|(?2))*\))|\bnew\s+([A-Z]\w*)\s*(\((?:[^()]++|(?4))*\))/s', $body, $calls, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
+    // Each call, and the calls nested in its arguments: new Receipt(Payment::create([...])).
+    $scan = function (string $text, int $base) use (&$scan, $pattern, $holds, $namespace, $uses, $ownClass, $model): ?int {
+        preg_match_all($pattern, $text, $calls, PREG_OFFSET_CAPTURE | PREG_SET_ORDER | PREG_UNMATCHED_AS_NULL);
 
-    foreach ($calls as $call) {
-        $class = ($call[1][0] ?? '') !== '' ? $call[1][0] : (($call[3][0] ?? '') !== '' ? $call[3][0] : null);
+        foreach ($calls as $call) {
+            $class = $call['class'][0] ?? $call['new'][0] ?? null;
+            [$arguments, $at] = ($call['arguments'][0] ?? null) !== null ? $call['arguments'] : $call['given'];
+            // On the model, by its own name, self or static; on an instance or a relation it
+            // is the index that ties the method to the model, though make there is a container's.
+            $onModel = $class === null
+                ? ($call['method'][0] ?? '') !== 'make'
+                : strtolower(code_index_resolve($class, $namespace, $uses, $ownClass)) === $model;
 
-        if ($class !== null && strtolower(code_index_resolve($class, $namespace, $uses, $ownClass)) !== $model) {
-            continue;
+            if ($onModel && $holds((string) $arguments)) {
+                return $base + $call[0][1];
+            }
+
+            $inner = $scan(substr((string) $arguments, 1, -1), $base + (int) $at + 1);
+
+            if ($inner !== null) {
+                return $inner;
+            }
         }
 
-        if ($holds(($call[2][0] ?? '') !== '' ? $call[2][0] : ($call[4][0] ?? ''))) {
-            return $call[0][1];
-        }
-    }
+        return null;
+    };
 
-    return null;
+    return $scan($body, 0);
 };
 
 $guards = [];
@@ -1221,7 +1239,7 @@ if ($indexed !== null) {
                 $writersShown++;
                 $guards[] = "- `{$key}` checks `{$writtenClass($model)}` rows by `{$column}` (line {$lineAt($offset)})"
                     .($only === [] ? '' : ', counting only those with '.implode(' and ', $only))
-                    .". These write `{$column}` on `{$writtenClass($model)}`: ".implode('; ', array_slice($writers, 0, 5)).'.'
+                    .". These write `{$column}` on `{$writtenClass($model)}`: ".implode('; ', array_slice($writers, 0, 8)).(count($writers) > 8 ? '; and '.(count($writers) - 8).' more' : '').'.'
                     .($only === [] ? '' : ' A row they write with another value there is one the check does not see: follow what each caller passes.');
             }
         }
